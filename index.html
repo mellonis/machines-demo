@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>machines demo</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <header>
+    <h1><span class="title-prefix">machines </span>demo</h1>
+    <nav class="tabs" id="tabs">
+      <button data-tab="turing" class="active" type="button">Turing</button>
+      <button data-tab="post" type="button">Post</button>
+    </nav>
+    <a class="repo-link" data-role="repo-link" href="https://github.com/mellonis/machines-demo" target="_blank" rel="noopener" title="View source on GitHub" aria-label="View source on GitHub"></a>
+  </header>
+
+  <main>
+    <section class="tab" id="tab-turing" data-mode="turing">
+      <div class="panel-tape">
+        <div class="tape" data-role="tape"></div>
+        <div data-role="control-panel"></div>
+        <button class="take-control hidden" data-role="take-control" type="button"><span class="btn-icon-slot"></span>Take control</button>
+        <div class="log-panel">
+          <button class="log-clear" data-role="log-clear" type="button" title="Clear log" aria-label="Clear log"></button>
+          <div class="log-content" data-role="log"></div>
+        </div>
+        <div class="status" data-role="status">starting…</div>
+      </div>
+      <div class="panel-editor">
+        <div class="controls">
+          <button data-role="load" type="button"><span class="btn-icon-slot"></span>Load</button>
+          <button data-role="step" type="button" disabled><span class="btn-icon-slot"></span>Step</button>
+          <button data-role="run" type="button" disabled><span class="btn-icon-slot"></span>Run</button>
+          <label class="checkbox">
+            <input type="checkbox" data-role="with-pause" />
+            <span>with pause</span>
+          </label>
+          <input type="text" class="interval-input hidden" data-role="interval" placeholder="1s" value="1s" />
+        </div>
+        <div class="editor" data-role="code"></div>
+        <div class="version" data-role="version"></div>
+      </div>
+    </section>
+
+    <section class="tab hidden" id="tab-post" data-mode="post">
+      <div class="panel-tape">
+        <div class="tape" data-role="tape"></div>
+        <div data-role="control-panel"></div>
+        <button class="take-control hidden" data-role="take-control" type="button"><span class="btn-icon-slot"></span>Take control</button>
+        <div class="log-panel">
+          <button class="log-clear" data-role="log-clear" type="button" title="Clear log" aria-label="Clear log"></button>
+          <div class="log-content" data-role="log"></div>
+        </div>
+        <div class="status" data-role="status">starting…</div>
+      </div>
+      <div class="panel-editor">
+        <div class="controls">
+          <button data-role="load" type="button"><span class="btn-icon-slot"></span>Load</button>
+          <button data-role="step" type="button" disabled><span class="btn-icon-slot"></span>Step</button>
+          <button data-role="run" type="button" disabled><span class="btn-icon-slot"></span>Run</button>
+          <label class="checkbox">
+            <input type="checkbox" data-role="with-pause" />
+            <span>with pause</span>
+          </label>
+          <input type="text" class="interval-input hidden" data-role="interval" placeholder="1s" value="1s" />
+        </div>
+        <div class="editor" data-role="code"></div>
+        <div class="version" data-role="version"></div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
