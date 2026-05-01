@@ -11,6 +11,7 @@ import takeControl from '@tabler/icons/outline/device-gamepad-2.svg?raw';
 import eraser from '@tabler/icons/outline/eraser.svg?raw';
 import resetCode from '@tabler/icons/outline/arrow-back-up.svg?raw';
 import github from '@tabler/icons/outline/brand-github.svg?raw';
+import examples from '@tabler/icons/outline/file-code.svg?raw';
 
 export const icons = {
   left: arrowLeft,
@@ -26,6 +27,7 @@ export const icons = {
   eraser,
   resetCode,
   github,
+  examples,
 } as const;
 
 export type IconName = keyof typeof icons;

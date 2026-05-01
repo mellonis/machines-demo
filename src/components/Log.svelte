@@ -1,8 +1,6 @@
 <script lang="ts">
   import { icons } from '../lib/icons.ts';
-
-  export type LogKind = 'error' | 'warn' | 'ok';
-  export type LogEntry = { text: string; kind?: LogKind };
+  import type { LogEntry } from '../lib/log.ts';
 
   type Props = {
     entries: LogEntry[];
@@ -33,7 +31,17 @@
   <div class="content" bind:this={scrollEl}>
     {#each entries as entry, i (i)}
       <div class="line" class:error={entry.kind === 'error'} class:warn={entry.kind === 'warn'} class:ok={entry.kind === 'ok'}>
-        {entry.text}
+        <div
+          class="head"
+          style={entry.color && !entry.kind ? `color: ${entry.color};` : undefined}
+        >{entry.text}</div>
+        {#if entry.rows && entry.rows.length > 0}
+          {#each entry.rows as row, j (j)}
+            <div class="row" style={row.color ? `color: ${row.color};` : undefined}>
+              {row.text}
+            </div>
+          {/each}
+        {/if}
       </div>
     {/each}
   </div>
@@ -92,14 +100,38 @@
   }
 
   .line {
-    white-space: pre-wrap;
-    word-break: break-word;
     padding: 1px 0;
   }
 
-  .line.error { color: var(--error); }
-  .line.warn  { color: var(--warn); }
-  .line.ok    { color: var(--ok); }
+  .head {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .row {
+    white-space: pre-wrap;
+    word-break: break-word;
+    padding-left: 2px;
+  }
+
+  /* Kind-marked entries get a left stripe in addition to header tinting so
+     they remain distinguishable even when the tape palette (red/green/…)
+     overlaps the kind colors (error/ok/…). The stripe is a structural cue
+     that doesn't rely on color uniqueness. */
+  .line.error,
+  .line.warn,
+  .line.ok {
+    padding-left: 8px;
+    border-left: 3px solid transparent;
+  }
+
+  .line.error { border-left-color: var(--error); }
+  .line.warn  { border-left-color: var(--warn); }
+  .line.ok    { border-left-color: var(--ok); }
+
+  .line.error .head { color: var(--error); }
+  .line.warn  .head { color: var(--warn); }
+  .line.ok    .head { color: var(--ok); }
 
   @media (max-width: 768px) {
     .log-panel {

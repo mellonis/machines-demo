@@ -2,6 +2,14 @@
   import { tick } from 'svelte';
   import type { Command, TapeSnapshot } from '../lib/types.ts';
 
+  // showCaret: render the head ▲ marker and reserve room below the belt.
+  // For multi-tape stacks, only the bottom belt sets this true so the heads
+  // visually align as one column without a stranded marker between rows.
+  // caretColor: per-instance override for the --head CSS var (caret box
+  // border + ▲ marker). Undefined falls back to the global --head.
+  type Props = { showCaret?: boolean; caretColor?: string };
+  let { showCaret = true, caretColor }: Props = $props();
+
   // Belt geometry. CSS owns dimensions (cell-w, cell-gap, visible-cells); JS
   // only owns counts that matter for indexing the cell array — keeping a
   // single source of truth for cell width avoided a stale-inline-style bug
@@ -89,7 +97,11 @@
   }
 </script>
 
-<div class="ui-belt">
+<div
+  class="ui-belt"
+  class:no-caret={!showCaret}
+  style={caretColor ? `--head: ${caretColor};` : undefined}
+>
   <div class="viewport">
     <div class="center">
       <div class="strip transitions-on" bind:this={stripEl}>
@@ -120,20 +132,33 @@
     justify-content: center;
     font-family: ui-monospace, 'SF Mono', Consolas, monospace;
     padding-bottom: 14px;
-    animation: enter var(--anim-belt-enter-ms) ease-out backwards;
   }
 
-  /* ▲ glyph below the head cell. Lives on the outer wrapper because the
-     viewport has overflow:hidden (would clip a child-scoped pseudo). */
+  /* ▲ marker below the head cell. CSS-border triangle (not a Unicode glyph)
+     so its visible edges exactly match its box — `left:50%; translateX(-50%)`
+     then aligns it pixel-perfect with the head-thread line. Lives on the
+     outer wrapper because the viewport has overflow:hidden. */
   .ui-belt::after {
-    content: '▲';
+    content: '';
     position: absolute;
     bottom: 0;
     left: 50%;
     transform: translateX(-50%);
-    color: var(--head);
-    font-size: 10px;
-    line-height: 1;
+    width: 0;
+    height: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-bottom: 8px solid var(--head);
+  }
+
+  /* Multi-tape stack: non-bottom belts drop the marker and the room reserved
+     for it, so the stack reads as one continuous column of heads. */
+  .ui-belt.no-caret {
+    padding-bottom: 0;
+  }
+
+  .ui-belt.no-caret::after {
+    content: none;
   }
 
   .viewport {
@@ -142,6 +167,11 @@
     max-width: 100%;
     height: var(--cell-h);
     overflow: hidden;
+    /* Solid bg masks the head-thread behind the stack across the entire
+       tape row, including the inter-cell gaps that pass through the head
+       column during slide animations. Page bg keeps the inter-cell gaps
+       visually identical to the surrounding panel. */
+    background: var(--bg);
     -webkit-mask-image: linear-gradient(
       to right,
       transparent 0,
@@ -195,8 +225,13 @@
     pointer-events: none;
   }
 
-  /* Cells beyond the actual tape range — visually dim to hint "infinite blank". */
+  /* Cells beyond the actual tape range — visually dim to hint "infinite blank".
+     Dim only border + symbol; the cell bg must stay opaque so the head-thread
+     line behind the stack is masked rather than bleeding through. */
   .cell.out-of-range {
+    border-color: color-mix(in srgb, var(--cell-border) 40%, var(--cell-bg));
+  }
+  .cell.out-of-range .sym {
     opacity: 0.4;
   }
 
@@ -211,11 +246,6 @@
     border-radius: 4px;
     box-shadow: 0 0 0 1px var(--head) inset;
     pointer-events: none;
-  }
-
-  @keyframes enter {
-    from { opacity: 0; transform: translateY(20px); }
-    to   { opacity: 1; transform: translateY(0); }
   }
 
   /* Tablet / large mobile (single-column layout, but lots of horizontal room).

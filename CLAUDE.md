@@ -84,6 +84,19 @@ Worker assumes **single-tape** machines. Multi-tape machines throw a clear error
 
 `Tape.svelte` renders 23 cells (`VISIBLE_CELLS = 19` desktop + 2 buffer each side); CSS `--visible-cells` shrinks the viewport to show fewer at smaller breakpoints (17 tablet, 11 phone) — extra cells fade behind the mask. The `apply()` method does the prep-shift trick: re-render with new head via `$state` mutation, `await tick()`, then snap-translate by ±1 cell without transition, force reflow, transition back to 0. `await tick()` is critical — `queueMicrotask` would race Svelte's scheduler.
 
+The head ▲ marker below each bottom belt is a **CSS-border triangle** (not a Unicode glyph) so its visible edges exactly match its box and `left:50%; translateX(-50%)` aligns pixel-perfect with the head-thread line. `.viewport` carries `background: var(--bg)` to mask the head-thread behind the stack across the whole tape row — without that, the 4px inter-cell gap passes through the head column during slide animations and exposes the line. `.cell.out-of-range` dims only border + symbol (not the whole cell via `opacity`) for the same masking reason.
+
+## Multi-tape stack and head-thread connector
+
+`MachineTab.svelte` renders `tapeCount` tapes inside `.tapes-stack` (flex column, 4px gap). Only the bottom belt shows the ▲ marker (`showCaret={i === tapeCount - 1}`); each belt gets a per-instance `caretColor` from the 5-entry `CARET_COLORS` palette (length must match `MAX_TAPES` in `lib/types.ts`).
+
+A `.head-thread` div sits behind the stack as the first child of `.tapes-stack` and acts as a vertical connector from the top tape's caret box down to the bottom-belt ▲ marker. Implementation:
+- `position: absolute; top: 0; bottom: 4px; left: 50%; width: 2px; transform: translateX(-50%);` — the `bottom: 4px` lands the line at the marker's vertical center (CSS triangle is 8px tall).
+- `background` is a hard-stop `linear-gradient` built in `headThreadBackground` ($derived): paired stops `color[i] top, color[i] bot` per tape, so each tape row is solid in its color and transitions happen only in the inter-tape gap. Stops are pixel offsets driven by `--cell-h` and `--tape-gap` set on `.tapes-stack`.
+- The line is masked invisibly through every tape row by `.viewport`'s opaque `--bg`; only the inter-tape gaps and the bottom-belt's 14px padding (where the marker lives) remain visible.
+
+**Coupling — keep in sync:** `MachineTab.svelte` duplicates Tape.svelte's responsive `--cell-h` (40 / 36 / 34 px at the same breakpoints) on `.tapes-stack` so the gradient stops align with actual tape positions. Touching either file's cell-height values means touching both.
+
 ## Conventions
 
 - **localStorage** keys `machines-demo:code:turing` / `machines-demo:code:post` persist editor contents (via `lib/persist.ts`, errors swallowed).

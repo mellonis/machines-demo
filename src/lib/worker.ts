@@ -13,6 +13,7 @@ import * as post from '@post-machine-js/machine';
 
 import {
   MAX_STEPS,
+  MAX_TAPES,
   type Command,
   type Engine,
   type Movement,
@@ -53,7 +54,7 @@ type MachineYield = {
 
 let machine: AnyMachine | null = null;
 let initialState: unknown = null;
-let tape: AnyTape | null = null;
+let tapes: AnyTape[] = [];
 let generator: Generator<MachineYield, void, void> | null = null;
 let halted = false;
 let stepsApplied = 0;
@@ -62,7 +63,7 @@ let pendingCommand: MachineYield | null = null;
 function reset(): void {
   machine = null;
   initialState = null;
-  tape = null;
+  tapes = [];
   generator = null;
   halted = false;
   stepsApplied = 0;
@@ -75,31 +76,25 @@ function movementCode(m: symbol): Movement {
   return 'S';
 }
 
-function commandFromYield(y: MachineYield): Command {
-  // B3: single-tape only. Multi-tape display is tracked as a feature request.
-  if (y.movements.length !== 1) {
-    throw new Error(
-      `multi-tape machines (got ${y.movements.length} tapes) are not yet supported by this demo`,
-    );
-  }
-  const movement = movementCode(y.movements[0]);
-  const written = y.nextSymbols[0];
-  const before = y.currentSymbols[0];
-  return { movement, symbol: written === before ? null : written };
+function commandsFromYield(y: MachineYield): Command[] {
+  return y.movements.map((mv, i) => {
+    const movement = movementCode(mv);
+    const written = y.nextSymbols[i];
+    const before = y.currentSymbols[i];
+    return { movement, symbol: written === before ? null : written };
+  });
 }
 
-function snapshotTape(): TapeSnapshot {
-  if (!tape) throw new Error('no tape loaded');
-  return {
-    symbols: [...tape.symbols],
-    position: tape.position,
-    blank: tape.alphabet.blankSymbol,
-  };
+function snapshotTapes(): TapeSnapshot[] {
+  return tapes.map((t) => ({
+    symbols: [...t.symbols],
+    position: t.position,
+    blank: t.alphabet.blankSymbol,
+  }));
 }
 
-function snapshotAlphabet(): string[] {
-  if (!tape) throw new Error('no tape loaded');
-  return [...tape.alphabet.symbols];
+function snapshotAlphabets(): string[][] {
+  return tapes.map((t) => [...t.alphabet.symbols]);
 }
 
 function load(engine: Engine, code: string): void {
@@ -128,9 +123,27 @@ function load(engine: Engine, code: string): void {
     throw new Error('return value missing `initialState` and machine has no `initialState` getter');
   }
 
-  tape = r.tape ?? machine.tape ?? machine.tapeBlock?.tapes?.[0] ?? null;
-  if (!tape) {
+  // Tape derivation: a multi-tape `tapeBlock.tapes` wins over `r.tape`/`machine.tape`,
+  // otherwise users adapting the single-tape default snippet to multi-tape would
+  // see only tape 0 silently (the very regression the old single-tape assert
+  // existed to prevent).
+  const blockTapes = machine.tapeBlock?.tapes;
+  if (blockTapes && blockTapes.length > 1) {
+    tapes = [...blockTapes];
+  } else if (r.tape) {
+    tapes = [r.tape];
+  } else if (machine.tape) {
+    tapes = [machine.tape];
+  } else if (blockTapes && blockTapes.length === 1) {
+    tapes = [...blockTapes];
+  } else {
     throw new Error('return value missing `tape` and could not derive one from the machine');
+  }
+
+  if (tapes.length > MAX_TAPES) {
+    throw new Error(
+      `this demo supports up to ${MAX_TAPES} tapes (got ${tapes.length})`,
+    );
   }
 
   generator = machine.runStepByStep({ initialState });
@@ -143,11 +156,11 @@ function load(engine: Engine, code: string): void {
   }
 }
 
-function step(): { command: Command | null; nextCommand: Command | null } {
+function step(): { commands: Command[] | null; nextCommands: Command[] | null } {
   if (halted || !pendingCommand || !generator) {
-    return { command: null, nextCommand: null };
+    return { commands: null, nextCommands: null };
   }
-  const command = commandFromYield(pendingCommand);
+  const commands = commandsFromYield(pendingCommand);
   const r = generator.next();
   stepsApplied += 1;
   if (r.done) {
@@ -156,17 +169,17 @@ function step(): { command: Command | null; nextCommand: Command | null } {
   } else {
     pendingCommand = r.value;
   }
-  const nextCommand = pendingCommand ? commandFromYield(pendingCommand) : null;
-  return { command, nextCommand };
+  const nextCommands = pendingCommand ? commandsFromYield(pendingCommand) : null;
+  return { commands, nextCommands };
 }
 
-function runToEnd(maxSteps: number): { commands: Command[]; truncated: boolean; startStep: number } {
+function runToEnd(maxSteps: number): { commands: Command[][]; truncated: boolean; startStep: number } {
   if (!generator) throw new Error('not loaded');
   const startStep = stepsApplied;
-  const commands: Command[] = [];
+  const commands: Command[][] = [];
   let extra = 0;
   while (!halted && pendingCommand && extra < maxSteps) {
-    commands.push(commandFromYield(pendingCommand));
+    commands.push(commandsFromYield(pendingCommand));
     const r = generator.next();
     stepsApplied += 1;
     extra += 1;
@@ -197,24 +210,24 @@ self.onmessage = (e: MessageEvent<unknown>) => {
       load(req.engine, req.code);
       send({
         type: 'loaded',
-        tape: snapshotTape(),
-        alphabet: snapshotAlphabet(),
+        tapes: snapshotTapes(),
+        alphabets: snapshotAlphabets(),
         halted,
         stepsApplied,
-        nextCommand: pendingCommand ? commandFromYield(pendingCommand) : null,
+        nextCommands: pendingCommand ? commandsFromYield(pendingCommand) : null,
       });
       return;
     }
 
     if (req.type === 'step') {
       if (!machine) throw new Error('not loaded');
-      const { command, nextCommand } = step();
+      const { commands, nextCommands } = step();
       send({
         type: 'stepped',
-        tape: snapshotTape(),
+        tapes: snapshotTapes(),
         halted,
-        command,
-        nextCommand,
+        commands,
+        nextCommands,
         stepsApplied,
       });
       return;
@@ -225,7 +238,7 @@ self.onmessage = (e: MessageEvent<unknown>) => {
       const { commands, truncated, startStep } = runToEnd(req.maxSteps ?? MAX_STEPS);
       send({
         type: 'ran',
-        tape: snapshotTape(),
+        tapes: snapshotTapes(),
         halted,
         truncated,
         commands,

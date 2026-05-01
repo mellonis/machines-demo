@@ -31,8 +31,8 @@
     type="button"
     class="reset"
     onclick={onreset}
-    title="Reset code to default example"
-    aria-label="Reset code to default example"
+    title="Reset code to selected example"
+    aria-label="Reset code to selected example"
   >
     {@html icons.resetCode}
   </button>

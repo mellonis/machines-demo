@@ -16,29 +16,27 @@ function randomCommand(alphabet: readonly string[]): Command {
 }
 
 export type DemoCallbacks = {
-  /** Show the upcoming command on the panel without applying. */
-  reflect: (cmd: Command) => void;
-  /** Apply the command to the belt and flash the apply button. */
-  apply: (cmd: Command) => void;
-  /** Read the current alphabet at tick time (lets the loop track changes). */
-  getAlphabet: () => readonly string[];
+  reflect: (cmds: Command[]) => void;
+  apply: (cmds: Command[]) => void;
+  getAlphabets: () => readonly (readonly string[])[];
 };
 
 /**
- * Start the demo loop. Returns a cleanup function (suits `$effect`).
+ * Demo loop. Returns a cleanup function (suits `$effect`). Per tick: build
+ * one random command per tape from its alphabet, reflect on the panel, then
+ * apply after DEMO_REFLECT_DELAY_MS. Cycle repeats every DEMO_INTERVAL_MS.
  *
- * Each tick: reflect the upcoming command, then after DEMO_REFLECT_DELAY_MS
- * apply it. The whole cycle repeats every DEMO_INTERVAL_MS.
+ * Always array-shape — single-tape engines (Post) just see length-1 arrays.
  */
 export function startDemoLoop(cb: DemoCallbacks): () => void {
   let applyTimer: ReturnType<typeof setTimeout> | null = null;
 
   const tick = (): void => {
-    const cmd = randomCommand(cb.getAlphabet());
-    cb.reflect(cmd);
+    const cmds = cb.getAlphabets().map((a) => randomCommand(a));
+    cb.reflect(cmds);
     applyTimer = setTimeout(() => {
       applyTimer = null;
-      cb.apply(cmd);
+      cb.apply(cmds);
     }, DEMO_REFLECT_DELAY_MS);
   };
 

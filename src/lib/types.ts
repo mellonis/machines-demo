@@ -27,6 +27,9 @@ export const MAX_STEPS = 100_000;
 /** Hard cap on a single worker request's wall-clock time. */
 export const WORKER_TIMEOUT_MS = 5_000;
 
+/** UI-side cap on tape count (palette has 5 caret colors). */
+export const MAX_TAPES = 5;
+
 /* ───── worker request / response ───── */
 
 export type WorkerRequest =
@@ -34,30 +37,33 @@ export type WorkerRequest =
   | { type: 'step' }
   | { type: 'run'; maxSteps?: number };
 
+/* Multi-tape: every shape is per-tape arrays. N=1 for single-tape machines,
+ * N=K for K-tape machines (TapeBlock.fromTapes([...K])). */
+
 export type LoadedResponse = {
   type: 'loaded';
-  tape: TapeSnapshot;
-  alphabet: string[];
+  tapes: TapeSnapshot[];
+  alphabets: string[][];
   halted: boolean;
   stepsApplied: number;
-  nextCommand: Command | null;
+  nextCommands: Command[] | null;
 };
 
 export type SteppedResponse = {
   type: 'stepped';
-  tape: TapeSnapshot;
+  tapes: TapeSnapshot[];
   halted: boolean;
-  command: Command | null;
-  nextCommand: Command | null;
+  commands: Command[] | null;
+  nextCommands: Command[] | null;
   stepsApplied: number;
 };
 
 export type RanResponse = {
   type: 'ran';
-  tape: TapeSnapshot;
+  tapes: TapeSnapshot[];
   halted: boolean;
   truncated: boolean;
-  commands: Command[];
+  commands: Command[][];
   startStep: number;
   stepsApplied: number;
 };
