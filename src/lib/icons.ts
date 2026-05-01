@@ -9,6 +9,23 @@ import step from '@tabler/icons/outline/player-skip-forward.svg?raw';
 import pause from '@tabler/icons/outline/player-pause.svg?raw';
 import takeControl from '@tabler/icons/outline/device-gamepad-2.svg?raw';
 import eraser from '@tabler/icons/outline/eraser.svg?raw';
+import resetCode from '@tabler/icons/outline/arrow-back-up.svg?raw';
 import github from '@tabler/icons/outline/brand-github.svg?raw';
 
-export const icons = { left: arrowLeft, right: arrowRight, stay, keep, apply, load, run, step, pause, takeControl, eraser, github };
+export const icons = {
+  left: arrowLeft,
+  right: arrowRight,
+  stay,
+  keep,
+  apply,
+  load,
+  run,
+  step,
+  pause,
+  takeControl,
+  eraser,
+  resetCode,
+  github,
+} as const;
+
+export type IconName = keyof typeof icons;

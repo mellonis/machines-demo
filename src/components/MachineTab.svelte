@@ -1,0 +1,597 @@
+<script lang="ts">
+  import { onDestroy, onMount, untrack } from 'svelte';
+  import Tape from './Tape.svelte';
+  import ControlPanel from './ControlPanel.svelte';
+  import Log from './Log.svelte';
+  import type { LogEntry, LogKind } from './Log.svelte';
+  import { MachineRunner } from '../lib/runner.ts';
+  import { type Command, type Engine, type TapeSnapshot } from '../lib/types.ts';
+  import { startDemoLoop } from '../lib/demoLoop.ts';
+  import { startAutoStep, parseInterval } from '../lib/autoStep.ts';
+  import { describeCommand, formatAlphabet, formatTape } from '../lib/format.ts';
+  import { defaultCode } from '../lib/defaultCode.ts';
+  import { loadCode } from '../lib/persist.ts';
+  import { icons } from '../lib/icons.ts';
+  import pkg from '../../package.json';
+
+  type Props = { engine: Engine };
+  let { engine }: Props = $props();
+
+  /* ───── constants ───── */
+
+  const SYNTHETIC_ALPHABET: readonly string[] = [' ', 'a', 'b', '*'];
+  const NEUTRAL_COMMAND: Command = { movement: 'S', symbol: null };
+  const APP_VERSION = pkg.version;
+
+  type ExecutionMode =
+    | 'DEMO'
+    | 'MANUAL'
+    | 'RUNNING_STEP'
+    | 'RUNNING_AUTO'
+    | 'RUNNING_CONTINUOUS'
+    | 'HALTED';
+
+  /* ───── state ───── */
+
+  let executionMode = $state<ExecutionMode>('DEMO');
+  let userTookControl = $state(false);
+  let demoEnabled = $state(true);
+  let halted = $state(false);
+  let alphabet = $state<readonly string[]>(SYNTHETIC_ALPHABET);
+  let entries = $state<LogEntry[]>([]);
+  let lastSnapshot = $state<TapeSnapshot | null>(null);
+  let pendingOp = $state<'load' | 'run' | null>(null);
+  let stepInFlight = $state(false);
+  let withPause = $state(false);
+  let intervalText = $state('1s');
+  let workerLive = $state(false);
+  // engine is fixed for a MachineTab instance (parent remounts on engine change
+  // via {#key activeEngine}). untrack() acknowledges we want a one-time read.
+  let code = $state<string>(
+    untrack(() => loadCode(engine) ?? defaultCode(engine)),
+  );
+
+  let tapeRef = $state<ReturnType<typeof Tape> | undefined>();
+  let panelRef = $state<ReturnType<typeof ControlPanel> | undefined>();
+
+  // Editor pulls in all of CodeMirror (~500 KB unzipped). Lazy-load it so the
+  // initial paint of header + tape + control-panel ships in a small bundle;
+  // the editor chunk loads in parallel and slots in once ready.
+  const editorPromise = import('./Editor.svelte').then((m) => m.default);
+
+  const runner = new MachineRunner(untrack(() => engine));
+
+  /* ───── derived ─────
+   * Single source of truth for button-disabled state and panel visibility.
+   * Every UI flag derives from (executionMode, halted, workerLive, pendingOp)
+   * — no per-handler bespoke resets, no manual mode-switch tables.
+   */
+
+  const intervalMs = $derived(parseInterval(intervalText));
+  const intervalIsValid = $derived(intervalMs !== null);
+  const latestEntry = $derived(entries.length > 0 ? entries[entries.length - 1] : null);
+
+  const panelEnabled = $derived(executionMode === 'MANUAL');
+  const applyVisible = $derived(executionMode === 'DEMO' || executionMode === 'MANUAL');
+  const takeControlVisible = $derived(
+    executionMode !== 'MANUAL' && executionMode !== 'RUNNING_CONTINUOUS',
+  );
+  const beltTransitionsOn = $derived(executionMode !== 'RUNNING_CONTINUOUS');
+
+  const loadDisabled = $derived(pendingOp !== null);
+  const stepDisabled = $derived(
+    pendingOp !== null ||
+      halted ||
+      !workerLive ||
+      executionMode === 'RUNNING_CONTINUOUS',
+  );
+  // stepInFlight is intentionally NOT in the disabled state — the worker call
+  // is fast (~ms), and we don't want the user to see flicker on rapid clicks.
+  // Soft-debounced inside doStep() instead.
+  const runDisabled = $derived(
+    pendingOp !== null ||
+      halted ||
+      !workerLive ||
+      executionMode === 'RUNNING_AUTO' ||
+      executionMode === 'RUNNING_CONTINUOUS' ||
+      (withPause && !intervalIsValid),
+  );
+
+  /* ───── log helpers ───── */
+
+  function report(text: string, kind?: LogKind): void {
+    entries = [...entries, { text, kind }];
+  }
+
+  function appendBatch(items: LogEntry[]): void {
+    if (items.length === 0) return;
+    entries = [...entries, ...items];
+  }
+
+  function clearLog(): void {
+    entries = [];
+  }
+
+  /* ───── side-effect handlers (one source of truth on error) ───── */
+
+  function failHalted(err: unknown): void {
+    const msg = err instanceof Error ? err.message : String(err);
+    report(`error: ${msg}`, 'error');
+    halted = true;
+    executionMode = 'HALTED';
+  }
+
+  /* ───── load / step / run ───── */
+
+  async function doLoad({ userInitiated = false } = {}): Promise<void> {
+    if (userInitiated) demoEnabled = false;
+    report('loading…');
+    pendingOp = 'load';
+    try {
+      const res = await runner.load(code);
+      workerLive = true;
+      alphabet = res.alphabet;
+      lastSnapshot = res.tape;
+      tapeRef?.setFromSnapshot(res.tape);
+      halted = res.halted;
+      appendBatch([
+        { text: `alphabet: ${formatAlphabet(res.alphabet)}` },
+        { text: `tape: ${formatTape(res.tape)}` },
+      ]);
+      report(res.halted ? 'loaded — halted immediately' : 'loaded — ready', 'ok');
+      executionMode = userTookControl ? 'MANUAL' : 'DEMO';
+      if (res.nextCommand) panelRef?.reflect(res.nextCommand);
+    } catch (err) {
+      workerLive = false;
+      alphabet = SYNTHETIC_ALPHABET;
+      tapeRef?.clear();
+      lastSnapshot = null;
+      halted = true;
+      const msg = err instanceof Error ? err.message : String(err);
+      report(`error: ${msg}`, 'error');
+      executionMode = userTookControl ? 'MANUAL' : 'DEMO';
+    } finally {
+      pendingOp = null;
+    }
+  }
+
+  async function doStep(): Promise<void> {
+    // Step button doubles as "Pause" while RUNNING_AUTO.
+    if (executionMode === 'RUNNING_AUTO') {
+      executionMode = 'RUNNING_STEP';
+      report('paused');
+      return;
+    }
+    // Soft-debounce: drop rapid clicks while a worker step is in flight. The
+    // belt animation does NOT block — the user can click again as soon as the
+    // worker returns (~ms), even mid-slide.
+    if (stepInFlight) return;
+    if (executionMode !== 'RUNNING_STEP') {
+      if (lastSnapshot) tapeRef?.setFromSnapshot(lastSnapshot);
+      executionMode = 'RUNNING_STEP';
+    }
+    stepInFlight = true;
+    let res;
+    try {
+      res = await runner.step();
+    } catch (err) {
+      failHalted(err);
+      return;
+    } finally {
+      stepInFlight = false;
+    }
+    lastSnapshot = res.tape;
+    halted = res.halted;
+    if (res.halted) {
+      report(`halted after ${res.stepsApplied} step(s)`, 'ok');
+      executionMode = 'HALTED';
+    } else {
+      report(`step ${res.stepsApplied}: ${describeCommand(res.command)}`);
+    }
+    if (res.command) {
+      void tapeRef?.apply(res.command, { animate: true });
+      // Show what's queued for the *next* click, not what just applied.
+      // Keeps panel state consistent under rapid clicks.
+      panelRef?.reflect(res.nextCommand ?? NEUTRAL_COMMAND);
+    } else {
+      tapeRef?.setFromSnapshot(res.tape);
+    }
+  }
+
+  async function doRun(): Promise<void> {
+    if (withPause) {
+      if (executionMode !== 'RUNNING_STEP' && lastSnapshot) {
+        tapeRef?.setFromSnapshot(lastSnapshot);
+      }
+      executionMode = 'RUNNING_AUTO';
+      report(`auto-stepping every ${intervalMs}ms`);
+      // Auto-step loop is started by the $effect that watches executionMode.
+      return;
+    }
+    if (lastSnapshot) tapeRef?.setFromSnapshot(lastSnapshot);
+    panelRef?.reflect(NEUTRAL_COMMAND);
+    executionMode = 'RUNNING_CONTINUOUS';
+    report('running…');
+    pendingOp = 'run';
+    try {
+      const res = await runner.run();
+      lastSnapshot = res.tape;
+      tapeRef?.setFromSnapshot(res.tape);
+      halted = true;
+      panelRef?.reflect(NEUTRAL_COMMAND);
+      if (res.commands.length > 0) {
+        appendBatch(
+          res.commands.map((cmd, i) => ({
+            text: `step ${res.startStep + i + 1}: ${describeCommand(cmd)}`,
+          })),
+        );
+      }
+      if (res.truncated) {
+        report(`truncated at ${res.stepsApplied} steps (limit hit)`, 'warn');
+      } else {
+        report(`halted after ${res.stepsApplied} step(s)`, 'ok');
+      }
+      executionMode = 'HALTED';
+    } catch (err) {
+      failHalted(err);
+    } finally {
+      pendingOp = null;
+    }
+  }
+
+  function takeControl(): void {
+    userTookControl = true;
+    executionMode = 'MANUAL';
+  }
+
+  function onApply(cmd: Command): void {
+    tapeRef?.apply(cmd, { animate: true });
+    report(`applied: ${describeCommand(cmd)}`);
+  }
+
+  function resetCodeToDefault(): void {
+    code = defaultCode(engine);
+  }
+
+  /* ───── effects ─────
+   * Demo loop, auto-step loop, and belt-transitions all derive from state.
+   */
+
+  $effect(() => {
+    if (executionMode === 'DEMO' && demoEnabled) {
+      return startDemoLoop({
+        reflect: (cmd) => panelRef?.reflect(cmd),
+        apply: (cmd) => {
+          panelRef?.flashApply();
+          tapeRef?.apply(cmd, { animate: true });
+        },
+        getAlphabet: () => alphabet,
+      });
+    }
+  });
+
+  $effect(() => {
+    if (executionMode === 'RUNNING_AUTO' && intervalMs !== null) {
+      return startAutoStep(intervalMs, async () => {
+        try {
+          const res = await runner.step();
+          lastSnapshot = res.tape;
+          halted = res.halted;
+          if (executionMode !== 'RUNNING_AUTO') return;
+          if (res.command) {
+            panelRef?.reflect(res.command);
+            tapeRef?.apply(res.command, { animate: true });
+          } else {
+            tapeRef?.setFromSnapshot(res.tape);
+          }
+          if (res.halted) {
+            report(`halted after ${res.stepsApplied} step(s)`, 'ok');
+            executionMode = 'HALTED';
+          } else {
+            report(`step ${res.stepsApplied}: ${describeCommand(res.command)}`);
+          }
+        } catch (err) {
+          failHalted(err);
+        }
+      });
+    }
+  });
+
+  $effect(() => {
+    tapeRef?.setTransitionsEnabled(beltTransitionsOn);
+  });
+
+  /* ───── lifecycle ───── */
+
+  onMount(() => {
+    void doLoad();
+  });
+
+  onDestroy(() => {
+    runner.terminate();
+  });
+</script>
+
+<section class="tab">
+  <div class="panel-tape">
+    <Tape bind:this={tapeRef} />
+
+    <ControlPanel
+      bind:this={panelRef}
+      {alphabet}
+      enabled={panelEnabled}
+      visible={true}
+      {applyVisible}
+      {onApply}
+    />
+
+    {#if takeControlVisible}
+      <button class="take-control" type="button" onclick={takeControl}>
+        {@html icons.takeControl}
+        <span class="btn-label">Take control</span>
+      </button>
+    {/if}
+
+    <Log {entries} onclear={clearLog} />
+  </div>
+
+  <div class="panel-editor">
+    <div class="controls">
+      <button type="button" disabled={loadDisabled} onclick={() => doLoad({ userInitiated: true })}>
+        {@html icons.load}<span class="btn-label">Load</span>
+      </button>
+      <button type="button" disabled={stepDisabled} onclick={doStep}>
+        {@html executionMode === 'RUNNING_AUTO' ? icons.pause : icons.step}
+        <span class="btn-label">{executionMode === 'RUNNING_AUTO' ? 'Pause' : 'Step'}</span>
+      </button>
+      <button type="button" disabled={runDisabled} onclick={doRun}>
+        {@html icons.run}<span class="btn-label">Run</span>
+      </button>
+      <label class="checkbox">
+        <input type="checkbox" bind:checked={withPause} disabled={runDisabled} />
+        <span>with pause</span>
+      </label>
+      {#if withPause}
+        <input
+          type="text"
+          class="interval-input"
+          class:invalid={!intervalIsValid}
+          bind:value={intervalText}
+          placeholder="1s"
+        />
+      {/if}
+    </div>
+    <div
+      class="status"
+      class:error={latestEntry?.kind === 'error'}
+      class:warn={latestEntry?.kind === 'warn'}
+      class:ok={latestEntry?.kind === 'ok'}
+    >
+      {latestEntry?.text ?? ''}
+    </div>
+    {#await editorPromise}
+      <div class="editor-loading">Loading editor…</div>
+    {:then Editor}
+      <Editor {engine} bind:code onreset={resetCodeToDefault} />
+    {:catch err}
+      <div class="editor-error">Failed to load editor: {err.message}</div>
+    {/await}
+    <div class="version">v{APP_VERSION}</div>
+  </div>
+</section>
+
+<style>
+  .tab {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    overflow: hidden;
+  }
+
+  .panel-tape {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 24px;
+    border-right: 1px solid var(--cell-border);
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  .panel-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 24px;
+    overflow: hidden;
+  }
+
+  .take-control {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    gap: 6px;
+    height: 30px;
+    padding: 4px 12px;
+    background: transparent;
+    border: 1px solid rgba(95, 208, 104, 0.28);
+    color: rgba(95, 208, 104, 0.7);
+    border-radius: 6px;
+    cursor: pointer;
+    font: inherit;
+    font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+    font-size: 13px;
+    transition:
+      background-color var(--anim-button-hover-ms) ease,
+      border-color var(--anim-button-hover-ms) ease,
+      color var(--anim-button-hover-ms) ease;
+  }
+
+  .take-control:hover {
+    background: rgba(95, 208, 104, 0.14);
+    border-color: var(--ok);
+    color: var(--ok);
+  }
+
+  .take-control :global(svg) {
+    width: 16px;
+    height: 16px;
+    display: block;
+    flex-shrink: 0;
+    opacity: 0.85;
+  }
+
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .controls button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--cell-bg);
+    border: 1px solid var(--cell-border);
+    color: var(--fg);
+    padding: 6px 14px;
+    font: inherit;
+    cursor: pointer;
+    border-radius: 6px;
+  }
+
+  .controls button:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .controls button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .controls button :global(svg) {
+    width: 16px;
+    height: 16px;
+    display: block;
+    flex-shrink: 0;
+  }
+
+  .checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--muted);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .checkbox input {
+    accent-color: var(--accent);
+    margin: 0;
+  }
+
+  .interval-input {
+    width: 64px;
+    background: var(--cell-bg);
+    border: 1px solid var(--cell-border);
+    color: var(--fg);
+    padding: 4px 8px;
+    font: inherit;
+    font-size: 13px;
+    border-radius: 4px;
+  }
+
+  .interval-input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  .interval-input.invalid {
+    border-color: var(--error);
+    color: var(--error);
+  }
+
+  .version {
+    font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+    font-size: 11px;
+    color: var(--muted);
+    text-align: right;
+    padding-top: 4px;
+  }
+
+  .editor-loading,
+  .editor-error {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--cell-border);
+    border-radius: 6px;
+    background: var(--editor-bg);
+    color: var(--muted);
+    font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+    font-size: 13px;
+  }
+
+  .editor-error {
+    color: var(--error);
+  }
+
+  /* Status: hidden on desktop (the log panel covers this); shown on mobile
+     where the log panel collapses. Sits right after the controls bar so it
+     reads as the result of the last action. */
+  .status {
+    display: none;
+    font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+    font-size: 13px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-height: 1.2em;
+  }
+
+  .status.error { color: var(--error); }
+  .status.warn  { color: var(--warn); }
+  .status.ok    { color: var(--ok); }
+
+  @media (max-width: 768px) {
+    .tab {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto 1fr;
+      overflow: visible;
+    }
+
+    .panel-tape {
+      padding: 16px 16px 24px;
+      border-right: none;
+      border-bottom: 1px solid var(--cell-border);
+    }
+
+    .panel-editor {
+      padding: 16px;
+      min-height: 60vh;
+    }
+
+    .status {
+      display: block;
+    }
+
+    .controls button {
+      padding: 4px 10px;
+      font-size: 13px;
+      gap: 4px;
+    }
+
+    .controls button :global(svg) {
+      width: 14px;
+      height: 14px;
+    }
+  }
+</style>
