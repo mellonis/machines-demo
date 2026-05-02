@@ -1,5 +1,7 @@
 # machines-demo
 
+[![GitHub issues](https://img.shields.io/github/issues/mellonis/machines-demo)](https://github.com/users/mellonis/projects/5)
+
 Interactive in-browser playground for **Turing** and **Post** machines.
 
 **Live demo:** [demo.machines.mellonis.ru](https://demo.machines.mellonis.ru)
