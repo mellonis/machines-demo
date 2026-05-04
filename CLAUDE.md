@@ -48,7 +48,7 @@ src/
 **`MachineView.svelte`** is the orchestrator (UI is split into `TapesStack`, `Toolbar`, `ControlPanel`, `Editor`, `Log`). It owns:
 
 - `executionMode` (`$state<ExecutionMode>`) — see state machine below
-- `logEntries`, `alphabets`, `lastSnapshots`, `halted`, `code`, `withPause`, `intervalText`, `demoBank` — all `$state` (multi-tape: `alphabets`/`lastSnapshots` are per-tape arrays)
+- `logEntries`, `alphabets`, `lastSnapshots`, `halted`, `code`, `withPause`, `intervalText` — all `$state` (multi-tape: `alphabets`/`lastSnapshots` are per-tape arrays)
 - `pendingOp: 'load' | 'run' | null` and `stepInFlight: boolean` — concurrency guards
 - `panelEnabled` / `applyVisible` / `takeControlVisible` / `loadDisabled` / `stepDisabled` / `runDisabled` / `tapeCount` — all `$derived` (single source of truth for UI state)
 - `mirrorMachine` / `mirrorTapeBlock` — a real `TuringMachine` instance on the main thread that mirrors the worker's tape state. Built by `_buildMirrorMachine` after each `reloadWorker`; advanced one step at a time by `_runMirrorStep` (uses an `ifOtherSymbol` one-step `State` so the upstream library's transitions drive the visualization, not bespoke UI code). `renderFromMirror` hands each `mirrorTapeBlock.tapes[i]` to the matching `<Tape>` via `TapesStack.setFromTape(i, tape, …)`.
@@ -61,7 +61,7 @@ src/
 
 | Mode | Panel | Apply visible | Take control | Belt behavior |
 |---|---|---|---|---|
-| `DEMO` | disabled mirror | yes (flashes) | yes | timer-driven random commands; loads `selectedExample.code` (canonical), not the editor's `code`. Auto-stops on first user-clicked Build (`demoEnabled = false`); Build also pulls a real-step "demo bank" via a temp worker for visually meaningful symbol writes. |
+| `DEMO` | disabled mirror | yes (flashes) | yes | timer-driven random commands generated per tick from each tape's alphabet (40% keep, otherwise uniform). Loads `selectedExample.code` (canonical), not the editor's `code`. Auto-stops on first user-clicked Build (`demoEnabled = false`). |
 | `MANUAL` | enabled | yes | hidden | user-driven via Apply (writes to `mirrorMachine` via the same `ifOtherSymbol` one-step path used by Step) |
 | `RUNNING_STEP` | disabled mirror | hidden | yes | one slide per Step click; also serves as the **paused** state for `RUNNING_AUTO` |
 | `RUNNING_AUTO` | disabled mirror | hidden | yes | timer-driven worker steps; Step button shows pause icon + "Pause" label; click → `RUNNING_STEP` |

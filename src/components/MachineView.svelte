@@ -29,8 +29,6 @@
 
   const NEUTRAL_COMMAND: Command = { movement: 'S', symbol: null };
 
-  const DEMO_BANK_SIZE = 50;
-
   // Length must match MAX_TAPES — worker rejects loads with more tapes.
   const CARET_COLORS: readonly string[] = [
     '#6ea8fe', // blue
@@ -60,8 +58,6 @@
   let lastSnapshots = $state<TapeSnapshot[] | null>(null);
   let pendingOp = $state<'load' | 'run' | null>(null);
   let stepInFlight = $state(false);
-  let demoBank = $state<Command[][] | null>(null);
-  let demoLoadSeq = 0;
   let mirrorMachine: turing.TuringMachine | null = null;
   let mirrorTapeBlock: turing.TapeBlock | null = null;
   let codeChangedWarned = false;
@@ -259,8 +255,8 @@
 
   // Reloads the worker + rebuilds mirrorMachine. `source` defaults to the
   // current editor `code`; `doLoad` passes `selectedExample.code` instead for
-  // non-user-initiated DEMO loads. Does NOT change executionMode or demoBank
-  // — callers own those.
+  // non-user-initiated DEMO loads. Does NOT change executionMode — callers
+  // own that.
   async function reloadWorker(source: string = code): Promise<boolean> {
     pendingOp = 'load';
     try {
@@ -303,9 +299,7 @@
   }
 
   async function doLoad({ userInitiated = false } = {}): Promise<void> {
-    const seq = ++demoLoadSeq;
     if (userInitiated) demoEnabled = false;
-    demoBank = null;
     reportSeparator();
     report(userInitiated ? 'loading…' : 'demo machine is loading…');
 
@@ -325,28 +319,6 @@
     report(halted ? 'loaded — halted immediately' : 'loaded — ready', 'ok');
     await tick();
     if (userTookControl) reflectNeutral();
-
-    // Build demo bank using a separate worker — main runner is never touched,
-    // so Take Control → Apply works at any point without racing this.
-    if (!userTookControl && !halted && demoEnabled && workerLive) {
-      void buildDemoBank(seq, source);
-    }
-  }
-
-  async function buildDemoBank(seq: number, source: string): Promise<void> {
-    const tempRunner = new MachineRunner(engine);
-    try {
-      await tempRunner.build(source);
-      const bankRes = await tempRunner.run(DEMO_BANK_SIZE);
-      // Discard if a newer load has started since we began.
-      if (bankRes.commands.length > 0 && seq === demoLoadSeq) {
-        demoBank = bankRes.commands;
-      }
-    } catch {
-      // ignore — demo falls back to random commands
-    } finally {
-      tempRunner.terminate();
-    }
   }
 
   async function doStep(): Promise<void> {
@@ -501,7 +473,6 @@
         renderFromMirror(commands, true);
       },
       getAlphabets: () => alphabets,
-      getBank: () => demoBank,
     });
   });
 
