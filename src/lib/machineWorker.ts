@@ -11,9 +11,8 @@
 import * as turing from '@turing-machine-js/machine';
 import * as post from '@post-machine-js/machine';
 
+import { MAX_STEPS, MAX_TAPES } from './caps.ts';
 import {
-  MAX_STEPS,
-  MAX_TAPES,
   type Command,
   type Engine,
   type Movement,
@@ -77,6 +76,10 @@ function movementCode(m: symbol): Movement {
 }
 
 function commandsFromYield(y: MachineYield): Command[] {
+  // `mv` is a JS Symbol primitive (the upstream library encodes movements as
+  // unique Symbols — `turing.movements.left/right/stay`). Kept short here to
+  // avoid shadowing the surrounding string-typed `movement` (the wire-format
+  // 'L' | 'R' | 'S' code).
   return y.movements.map((mv, i) => {
     const movement = movementCode(mv);
     const written = y.nextSymbols[i];
@@ -86,10 +89,16 @@ function commandsFromYield(y: MachineYield): Command[] {
 }
 
 function snapshotTapes(): TapeSnapshot[] {
+  // Sent on `loaded` (initial state), `ran` (post-run state — halted or
+  // truncated), and `error` (partial state when a step / run threw mid-flight,
+  // e.g. no edge in the state graph for the current symbol). Full tape — no
+  // trim — so the main-thread mirror starts from the user's exact tape and
+  // the user can navigate beyond the initial window without blanks appearing
+  // where original symbols should be. We don't mutate `t.viewportWidth`
+  // either; user tapes stay at the library default.
   return tapes.map((t) => ({
     symbols: [...t.symbols],
     position: t.position,
-    blank: t.alphabet.blankSymbol,
   }));
 }
 
@@ -97,7 +106,7 @@ function snapshotAlphabets(): string[][] {
   return tapes.map((t) => [...t.alphabet.symbols]);
 }
 
-function load(engine: Engine, code: string): void {
+function build(engine: Engine, code: string): void {
   reset();
   const imports: Record<string, unknown> =
     engine === 'post' ? { ...post } : { ...turing };
@@ -174,7 +183,7 @@ function step(): { commands: Command[] | null; nextCommands: Command[] | null } 
 }
 
 function runToEnd(maxSteps: number): { commands: Command[][]; truncated: boolean; startStep: number } {
-  if (!generator) throw new Error('not loaded');
+  if (!generator) throw new Error('not built');
   const startStep = stepsApplied;
   const commands: Command[][] = [];
   let extra = 0;
@@ -200,31 +209,28 @@ function send(msg: WorkerResponse): void {
 self.onmessage = (e: MessageEvent<unknown>) => {
   const msg = e.data;
   if (!msg || typeof msg !== 'object' || !('type' in msg)) {
-    send({ type: 'error', message: 'malformed worker message', stack: null });
+    send({ type: 'error', message: 'malformed worker message' });
     return;
   }
 
   const req = msg as WorkerRequest;
   try {
-    if (req.type === 'load') {
-      load(req.engine, req.code);
+    if (req.type === 'build') {
+      build(req.engine, req.code);
       send({
-        type: 'loaded',
+        type: 'built',
         tapes: snapshotTapes(),
         alphabets: snapshotAlphabets(),
         halted,
-        stepsApplied,
-        nextCommands: pendingCommand ? commandsFromYield(pendingCommand) : null,
       });
       return;
     }
 
     if (req.type === 'step') {
-      if (!machine) throw new Error('not loaded');
+      if (!machine) throw new Error('not built');
       const { commands, nextCommands } = step();
       send({
         type: 'stepped',
-        tapes: snapshotTapes(),
         halted,
         commands,
         nextCommands,
@@ -234,12 +240,11 @@ self.onmessage = (e: MessageEvent<unknown>) => {
     }
 
     if (req.type === 'run') {
-      if (!machine) throw new Error('not loaded');
+      if (!machine) throw new Error('not built');
       const { commands, truncated, startStep } = runToEnd(req.maxSteps ?? MAX_STEPS);
       send({
         type: 'ran',
         tapes: snapshotTapes(),
-        halted,
         truncated,
         commands,
         startStep,
@@ -250,10 +255,14 @@ self.onmessage = (e: MessageEvent<unknown>) => {
 
     throw new Error(`unknown message type: ${(req as { type: string }).type}`);
   } catch (err) {
+    // Carry the current tape state when present — a step/run that errors
+    // mid-flight has typically already applied N steps; sending the partial
+    // state lets the main-thread mirror jump to it instead of stranding the
+    // user on the loaded tape.
     send({
       type: 'error',
       message: err instanceof Error ? err.message : String(err),
-      stack: err instanceof Error ? (err.stack ?? null) : null,
+      tapes: tapes.length > 0 ? snapshotTapes() : undefined,
     });
   }
 };

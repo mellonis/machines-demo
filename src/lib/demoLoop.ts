@@ -1,12 +1,12 @@
-import { MOVEMENTS, type Command } from './types.ts';
+import { MOVEMENTS, type Alphabets, type Command } from './types.ts';
 
 export const DEMO_INTERVAL_MS = 1600;
 export const DEMO_REFLECT_DELAY_MS = 700;
 
 const KEEP_PROBABILITY = 0.4;
 
-function pickRandom<T>(arr: readonly T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
+function pickRandom<T>(array: readonly T[]): T {
+  return array[Math.floor(Math.random() * array.length)];
 }
 
 function randomCommand(alphabet: readonly string[]): Command {
@@ -16,9 +16,12 @@ function randomCommand(alphabet: readonly string[]): Command {
 }
 
 export type DemoCallbacks = {
-  reflect: (cmds: Command[]) => void;
-  apply: (cmds: Command[]) => void;
-  getAlphabets: () => readonly (readonly string[])[];
+  reflect: (commands: Command[]) => void;
+  apply: (commands: Command[]) => void;
+  getAlphabets: () => Alphabets;
+  /** If provided and returns a non-empty array, each tick picks a random entry
+   *  instead of generating fake commands from the alphabet. */
+  getBank?: () => Command[][] | null;
 };
 
 /**
@@ -28,15 +31,24 @@ export type DemoCallbacks = {
  *
  * Always array-shape — single-tape engines (Post) just see length-1 arrays.
  */
-export function startDemoLoop(cb: DemoCallbacks): () => void {
-  let applyTimer: ReturnType<typeof setTimeout> | null = null;
+export function startDemoLoop(callbacks: DemoCallbacks): () => void {
+  let applyTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
   const tick = (): void => {
-    const cmds = cb.getAlphabets().map((a) => randomCommand(a));
-    cb.reflect(cmds);
-    applyTimer = setTimeout(() => {
-      applyTimer = null;
-      cb.apply(cmds);
+    const bank = callbacks.getBank?.();
+    let commands: Command[];
+    if (bank && bank.length > 0) {
+      // Use real symbol writes from the bank; randomize movements for visual
+      // variety (real machine steps are movement-biased, e.g. all-R counters).
+      const entry = bank[Math.floor(Math.random() * bank.length)];
+      commands = entry.map((command) => ({ ...command, movement: pickRandom(MOVEMENTS) }));
+    } else {
+      commands = callbacks.getAlphabets().map((a) => randomCommand(a));
+    }
+    callbacks.reflect(commands);
+    applyTimeoutId = setTimeout(() => {
+      applyTimeoutId = null;
+      callbacks.apply(commands);
     }, DEMO_REFLECT_DELAY_MS);
   };
 
@@ -45,6 +57,6 @@ export function startDemoLoop(cb: DemoCallbacks): () => void {
 
   return () => {
     clearInterval(intervalId);
-    if (applyTimer !== null) clearTimeout(applyTimer);
+    if (applyTimeoutId !== null) clearTimeout(applyTimeoutId);
   };
 }

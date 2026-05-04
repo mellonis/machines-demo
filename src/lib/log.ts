@@ -17,4 +17,7 @@ export type LogEntry = {
   /** Optional structured per-tape rows, rendered below the header. */
   rows?: LogRow[];
   kind?: LogKind;
+  /** Renders as a horizontal divider instead of a text row. Used to visually
+   * group log activity per Build/Step/Run session. */
+  separator?: boolean;
 };

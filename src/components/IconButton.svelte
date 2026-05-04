@@ -3,31 +3,54 @@
 
   type Props = {
     icon: IconName;
-    label?: string;
     title?: string;
-    disabled?: boolean;
-    class?: string;
-    onclick?: (e: MouseEvent) => void;
+    onClick?: (e: MouseEvent) => void;
   };
 
-  let {
-    icon,
-    label,
-    title,
-    disabled = false,
-    class: cls = '',
-    onclick,
-  }: Props = $props();
+  let { icon, title, onClick }: Props = $props();
 </script>
 
 <button
   type="button"
-  class={cls}
-  {disabled}
-  {onclick}
+  class="overlay"
+  onclick={onClick}
   {title}
-  aria-label={title ?? label}
+  aria-label={title}
 >
   {@html icons[icon]}
-  {#if label}<span class="btn-label">{label}</span>{/if}
 </button>
+
+<style>
+  /* Corner-overlay icon button — sits at top-right of a position:relative
+     parent (editor box, log panel) as a tertiary action like reset / clear.
+     z-index lifts it above content that paints later in the DOM (CodeMirror
+     chrome, log entries). */
+  .overlay {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 10;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    color: var(--muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--fg);
+    }
+
+    :global(svg) {
+      width: 14px;
+      height: 14px;
+      display: block;
+    }
+  }
+</style>

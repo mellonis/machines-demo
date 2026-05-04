@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import type { Command, TapeSnapshot } from '../lib/types.ts';
+  import * as turing from '@turing-machine-js/machine';
+  import { VIEWPORT_WIDTH } from '../lib/caps.ts';
 
   // showCaret: render the head ▲ marker and reserve room below the belt.
   // For multi-tape stacks, only the bottom belt sets this true so the heads
@@ -10,64 +11,42 @@
   type Props = { showCaret?: boolean; caretColor?: string };
   let { showCaret = true, caretColor }: Props = $props();
 
-  // Belt geometry. CSS owns dimensions (cell-w, cell-gap, visible-cells); JS
-  // only owns counts that matter for indexing the cell array — keeping a
-  // single source of truth for cell width avoided a stale-inline-style bug
-  // where the responsive CSS calc was overridden by hardcoded JS values.
-  // VISIBLE_CELLS is the desktop count; mobile CSS shrinks the viewport to
-  // show fewer cells (the rest fade out via the mask). DOM always renders the
-  // full TOTAL_CELLS regardless of breakpoint.
-  const VISIBLE_CELLS = 19; // odd; head sits at exact middle
-  const BUFFER_CELLS = 2;
-  const TOTAL_CELLS = VISIBLE_CELLS + BUFFER_CELLS * 2;
-  const MIDDLE_INDEX = (TOTAL_CELLS - 1) / 2;
+  // Per-cell shape — `sym` is the literal alphabet symbol the user defined
+  // (no UI substitution). `blank` flags cells holding the alphabet's blank,
+  // so CSS can dim them without conflating with whatever character the user
+  // chose for blank.
+  type Cell = { sym: string; blank: boolean };
 
-  let symbols = $state<string[]>([]);
-  let head = $state(0);
-  let blank = $state(' ');
+  // The rendered window — exactly `VIEWPORT_WIDTH` reactive cells. DOM
+  // always renders all of them; mobile CSS shrinks --visible-cells so the
+  // edges fade behind the mask. `setFromTape` reassigns `viewport` to a
+  // `VIEWPORT_WIDTH`-long array (length guaranteed because the parent sets
+  // `viewportWidth = VIEWPORT_WIDTH` on every tape).
+  const blankCell = (): Cell => ({ sym: '', blank: true });
+  let viewport = $state<Cell[]>(new Array(VIEWPORT_WIDTH).fill(null).map(blankCell));
 
   let stripEl: HTMLDivElement | undefined;
 
-  export function setFromSnapshot(snap: TapeSnapshot | null): void {
-    if (!snap) {
-      symbols = [];
-      head = 0;
+  // Single render path. Reads the upstream tape's `.viewport` (the library
+  // does the slice/center math; we just copy). `null` clears the window.
+  // `delta` (±1/0) drives the prep-shift slide when `animate` is true.
+  // `sym` (not `symbol`) avoids shadowing the built-in TS/JS `symbol` type
+  // used by the upstream library for movement primitives.
+  export async function setFromTape(
+    tape: turing.Tape | null,
+    delta: -1 | 0 | 1 = 0,
+    animate = false,
+  ): Promise<void> {
+    if (!tape) {
+      viewport = new Array(VIEWPORT_WIDTH).fill(null).map(blankCell);
       return;
     }
-    symbols = [...snap.symbols];
-    head = snap.position;
-    blank = snap.blank;
+    const blank = tape.alphabet.blankSymbol;
+    viewport = tape.viewport.map((sym) => ({ sym, blank: sym === blank }));
+    if (animate && delta !== 0) await _animateSlide(delta);
   }
 
-  export function clear(): void {
-    symbols = [];
-    head = 0;
-  }
-
-  /**
-   * Apply a command. With `animate: true` performs the prep-shift trick:
-   * re-render with new head, snap-translate by ±1 cell without transition,
-   * force reflow, then translate back to 0 with transition on — produces
-   * a smooth slide.
-   *
-   * `await tick()` ensures the reactive head/symbols update has flushed to
-   * the DOM before we manipulate transform; without it Svelte 5's microtask
-   * scheduling can prep-shift against stale cell positions.
-   */
-  export async function apply(
-    cmd: Command,
-    { animate = false }: { animate?: boolean } = {},
-  ): Promise<void> {
-    const delta = cmd.movement === 'L' ? -1 : cmd.movement === 'R' ? 1 : 0;
-    if (cmd.symbol !== null) {
-      const next = [...symbols];
-      next[head] = cmd.symbol;
-      symbols = next;
-    }
-    head += delta;
-
-    if (!animate || delta === 0 || !stripEl) return;
-
+  async function _animateSlide(delta: -1 | 0 | 1): Promise<void> {
     await tick();
     if (!stripEl) return;
     stripEl.classList.remove('transitions-on');
@@ -86,15 +65,6 @@
       stripEl.style.transform = 'translateX(0)';
     }
   }
-
-  function cellInfo(i: number): { display: string; isBlank: boolean; isOutOfRange: boolean } {
-    const abs = head + (i - MIDDLE_INDEX);
-    const raw = symbols[abs];
-    const isOutOfRange = raw === undefined;
-    const isBlank = isOutOfRange || raw === blank;
-    const display = isBlank ? '␣' : raw;
-    return { display, isBlank, isOutOfRange };
-  }
 </script>
 
 <div
@@ -105,10 +75,9 @@
   <div class="viewport">
     <div class="center">
       <div class="strip transitions-on" bind:this={stripEl}>
-        {#each Array(TOTAL_CELLS) as _cell, i}
-          {@const c = cellInfo(i)}
-          <div class="cell" class:out-of-range={c.isOutOfRange}>
-            <span class="sym">{c.display}</span>
+        {#each viewport as cell}
+          <div class="cell" class:blank={cell.blank}>
+            <span class="sym">{cell.sym}</span>
           </div>
         {/each}
       </div>
@@ -132,33 +101,47 @@
     justify-content: center;
     font-family: ui-monospace, 'SF Mono', Consolas, monospace;
     padding-bottom: 14px;
-  }
 
-  /* ▲ marker below the head cell. CSS-border triangle (not a Unicode glyph)
-     so its visible edges exactly match its box — `left:50%; translateX(-50%)`
-     then aligns it pixel-perfect with the head-thread line. Lives on the
-     outer wrapper because the viewport has overflow:hidden. */
-  .ui-belt::after {
-    content: '';
-    position: absolute;
-    bottom: 0;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 0;
-    height: 0;
-    border-left: 5px solid transparent;
-    border-right: 5px solid transparent;
-    border-bottom: 8px solid var(--head);
-  }
+    /* ▲ marker below the head cell. CSS-border triangle (not a Unicode glyph)
+       so its visible edges exactly match its box — `left:50%; translateX(-50%)`
+       then aligns it pixel-perfect with the head-thread line. Lives on the
+       outer wrapper because the viewport has overflow:hidden. */
+    &::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 0;
+      height: 0;
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-bottom: 8px solid var(--head);
+    }
 
-  /* Multi-tape stack: non-bottom belts drop the marker and the room reserved
-     for it, so the stack reads as one continuous column of heads. */
-  .ui-belt.no-caret {
-    padding-bottom: 0;
-  }
+    /* Multi-tape stack: non-bottom belts drop the marker and the room reserved
+       for it, so the stack reads as one continuous column of heads. */
+    &.no-caret {
+      padding-bottom: 0;
 
-  .ui-belt.no-caret::after {
-    content: none;
+      &::after {
+        content: none;
+      }
+    }
+
+    /* Tablet / large mobile (single-column layout, lots of horizontal room). */
+    @media (max-width: 768px) {
+      --cell-w: 28px;
+      --cell-h: 36px;
+      --visible-cells: 17;
+    }
+
+    /* Phone-sized — fewer cells, smaller cells to fit ≤480px viewports. */
+    @media (max-width: 480px) {
+      --cell-w: 26px;
+      --cell-h: 34px;
+      --visible-cells: 11;
+    }
   }
 
   .viewport {
@@ -200,10 +183,10 @@
     align-items: center;
     height: 100%;
     transform: translateX(0);
-  }
 
-  .strip.transitions-on {
-    transition: transform var(--anim-belt-slide-ms) ease;
+    &.transitions-on {
+      transition: transform var(--anim-belt-slide-ms) ease;
+    }
   }
 
   .cell {
@@ -219,20 +202,24 @@
     border-radius: 4px;
     font-size: 16px;
     white-space: pre;
+
+    /* Visual hint for blank cells — independent of which character the user
+       chose for blank. Dimmed border + dimmed symbol distinguish them
+       without normalizing the displayed character (so a user-defined `'␣'`
+       symbol in the alphabet stays visually distinct from a blank cell). */
+    &.blank {
+      border-color: color-mix(in srgb, var(--cell-border) 40%, var(--cell-bg));
+
+      .sym { opacity: 0.4; }
+    }
+
+    @media (max-width: 768px) {
+      font-size: 14px;
+    }
   }
 
   .sym {
     pointer-events: none;
-  }
-
-  /* Cells beyond the actual tape range — visually dim to hint "infinite blank".
-     Dim only border + symbol; the cell bg must stay opaque so the head-thread
-     line behind the stack is masked rather than bleeding through. */
-  .cell.out-of-range {
-    border-color: color-mix(in srgb, var(--cell-border) 40%, var(--cell-bg));
-  }
-  .cell.out-of-range .sym {
-    opacity: 0.4;
   }
 
   .caret {
@@ -246,27 +233,5 @@
     border-radius: 4px;
     box-shadow: 0 0 0 1px var(--head) inset;
     pointer-events: none;
-  }
-
-  /* Tablet / large mobile (single-column layout, but lots of horizontal room).
-     Belt was way too narrow at ~757px under the old phone-tuned mobile rules. */
-  @media (max-width: 768px) {
-    .ui-belt {
-      --cell-w: 28px;
-      --cell-h: 36px;
-      --visible-cells: 17;
-    }
-    .cell {
-      font-size: 14px;
-    }
-  }
-
-  /* Phone-sized — fewer cells, smaller cells to actually fit ≤480px viewports. */
-  @media (max-width: 480px) {
-    .ui-belt {
-      --cell-w: 26px;
-      --cell-h: 34px;
-      --visible-cells: 11;
-    }
   }
 </style>

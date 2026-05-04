@@ -1,13 +1,13 @@
 <script lang="ts">
-  import { icons } from '../lib/icons.ts';
+  import IconButton from './IconButton.svelte';
   import type { LogEntry } from '../lib/log.ts';
 
   type Props = {
     entries: LogEntry[];
-    onclear: () => void;
+    onClear: () => void;
   };
 
-  let { entries, onclear }: Props = $props();
+  let { entries, onClear }: Props = $props();
 
   let scrollEl: HTMLDivElement | undefined;
 
@@ -19,50 +19,52 @@
 </script>
 
 <div class="log-panel">
-  <button
-    type="button"
-    class="clear"
-    onclick={onclear}
-    title="Clear log"
-    aria-label="Clear log"
-  >
-    {@html icons.eraser}
-  </button>
+  <IconButton icon="eraser" title="Clear log" onClick={onClear} />
   <div class="content" bind:this={scrollEl}>
     {#each entries as entry, i (i)}
-      <div class="line" class:error={entry.kind === 'error'} class:warn={entry.kind === 'warn'} class:ok={entry.kind === 'ok'}>
-        <div
-          class="head"
-          style={entry.color && !entry.kind ? `color: ${entry.color};` : undefined}
-        >{entry.text}</div>
-        {#if entry.rows && entry.rows.length > 0}
-          {#each entry.rows as row, j (j)}
-            <div class="row" style={row.color ? `color: ${row.color};` : undefined}>
-              {row.text}
-            </div>
-          {/each}
-        {/if}
-      </div>
+      {#if entry.separator}
+        <hr class="sep" />
+      {:else}
+        <div class="line" class:error={entry.kind === 'error'} class:warn={entry.kind === 'warn'} class:ok={entry.kind === 'ok'}>
+          <div
+            class="head"
+            style={entry.color && !entry.kind ? `color: ${entry.color};` : undefined}
+          >{entry.text}</div>
+          {#if entry.rows && entry.rows.length > 0}
+            {#each entry.rows as row, j (j)}
+              <div class="row" style={row.color ? `color: ${row.color};` : undefined}>
+                {row.text}
+              </div>
+            {/each}
+          {/if}
+        </div>
+      {/if}
     {/each}
   </div>
 </div>
 
 <style>
   /* Desktop only — on mobile the panel is hidden and the latest entry is
-     mirrored as a single-line status in MachineTab.svelte. */
+     mirrored as a single-line status in MachineView.svelte. */
 
   .log-panel {
     position: relative;
     flex: 1;
     min-height: 80px;
+    display: flex;
+    flex-direction: column;
     background: var(--editor-bg);
     border: 1px solid var(--cell-border);
     border-radius: var(--surface-radius);
+
+    @media (max-width: 768px) {
+      display: none;
+    }
   }
 
   .content {
-    position: absolute;
-    inset: 0;
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
     padding: 8px 10px;
     font-family: ui-monospace, 'SF Mono', Consolas, monospace;
@@ -70,37 +72,33 @@
     color: var(--muted);
   }
 
-  .clear {
-    position: absolute;
-    top: 6px;
-    right: 6px;
-    z-index: 1;
-    width: 22px;
-    height: 22px;
-    padding: 0;
-    background: transparent;
-    border: none;
-    border-radius: 4px;
-    color: var(--muted);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .clear:hover {
-    background: rgba(255, 255, 255, 0.06);
-    color: var(--fg);
-  }
-
-  .clear :global(svg) {
-    width: 14px;
-    height: 14px;
-    display: block;
-  }
-
+  /* Kind-marked entries get a left stripe in addition to header tinting so
+     they remain distinguishable even when the tape palette (red/green/…)
+     overlaps the kind colors (error/ok/…). The stripe is a structural cue
+     that doesn't rely on color uniqueness. */
   .line {
     padding: 1px 0;
+
+    &.error,
+    &.warn,
+    &.ok {
+      padding-left: 8px;
+      border-left: 3px solid transparent;
+    }
+
+    &.error { border-left-color: var(--error); }
+    &.warn  { border-left-color: var(--warn); }
+    &.ok    { border-left-color: var(--ok); }
+
+    &.error .head { color: var(--error); }
+    &.warn  .head { color: var(--warn); }
+    &.ok    .head { color: var(--ok); }
+  }
+
+  .sep {
+    border: none;
+    border-top: 1px solid var(--cell-border);
+    margin: 6px 0;
   }
 
   .head {
@@ -112,30 +110,5 @@
     white-space: pre-wrap;
     word-break: break-word;
     padding-left: 2px;
-  }
-
-  /* Kind-marked entries get a left stripe in addition to header tinting so
-     they remain distinguishable even when the tape palette (red/green/…)
-     overlaps the kind colors (error/ok/…). The stripe is a structural cue
-     that doesn't rely on color uniqueness. */
-  .line.error,
-  .line.warn,
-  .line.ok {
-    padding-left: 8px;
-    border-left: 3px solid transparent;
-  }
-
-  .line.error { border-left-color: var(--error); }
-  .line.warn  { border-left-color: var(--warn); }
-  .line.ok    { border-left-color: var(--ok); }
-
-  .line.error .head { color: var(--error); }
-  .line.warn  .head { color: var(--warn); }
-  .line.ok    .head { color: var(--ok); }
-
-  @media (max-width: 768px) {
-    .log-panel {
-      display: none;
-    }
   }
 </style>
