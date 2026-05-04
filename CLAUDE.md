@@ -37,18 +37,19 @@ src/
     ├── autoStep.ts          paused-auto-step controller + parseInterval
     ├── completions.ts       CodeMirror autocomplete: machine namespace + locals
     ├── syntaxLinter.ts      Lezer-based syntax-error markers
-    ├── persist.ts           localStorage helpers per engine
+    ├── persist.ts           localStorage helpers per engine — code, example, snippets (UUID-keyed)
     ├── defaultCode.ts       starter Turing / Post snippets
     ├── format.ts            describeAppliedCommand / formatTape / commandsEntry / tapesEntry
     └── icons.ts             Tabler icon namespace (?raw imports)
 ```
 
-**`App.svelte`** picks the active engine from `?machine=` and renders one `<MachineView engine={...}>` keyed by engine — switching engines unmounts and remounts the tab (kills CodeMirror undo, cheap CPU).
+**`App.svelte`** picks the active engine from the URL pathname (`/turing`, `/post`) and renders one `<MachineView engine={...}>` keyed by engine — switching engines unmounts and remounts the tab (kills CodeMirror undo, cheap CPU). Legacy `?machine=<engine>` URLs are rewritten to the path form on first load. SPA-fallback routing is required (nginx `try_files $uri $uri/ /index.html;` in `vps/nginx/sites/demo.machines.mellonis.ru`; Vite default in dev).
 
 **`MachineView.svelte`** is the orchestrator (UI is split into `TapesStack`, `Toolbar`, `ControlPanel`, `Editor`, `Log`). It owns:
 
 - `executionMode` (`$state<ExecutionMode>`) — see state machine below
 - `logEntries`, `alphabets`, `lastSnapshots`, `halted`, `code`, `withPause`, `intervalText` — all `$state` (multi-tape: `alphabets`/`lastSnapshots` are per-tape arrays)
+- `selectedExampleId`, `snippets`, `loadedSnippetId` — all `$state`. `loadedSnippetId` is the UUID of the currently loaded user snippet (or `null` for a bundled example); drives `sourceCode`, `dirty`, and `resetVisible` ($derived). See the *Snippets* section below.
 - `pendingOp: 'load' | 'run' | null` and `stepInFlight: boolean` — concurrency guards
 - `panelEnabled` / `applyVisible` / `takeControlVisible` / `loadDisabled` / `stepDisabled` / `runDisabled` / `tapeCount` — all `$derived` (single source of truth for UI state)
 - `mirrorMachine` / `mirrorTapeBlock` — a real `TuringMachine` instance on the main thread that mirrors the worker's tape state. Built by `_buildMirrorMachine` after each `reloadWorker`; advanced one step at a time by `_runMirrorStep` (uses an `ifOtherSymbol` one-step `State` so the upstream library's transitions drive the visualization, not bespoke UI code). `renderFromMirror` hands each `mirrorTapeBlock.tapes[i]` to the matching `<Tape>` via `TapesStack.setFromTape(i, tape, …)`.
@@ -110,7 +111,7 @@ The component owns no tape state of its own beyond the fixed-size `viewport: $st
 
 The head ▲ marker below each bottom belt is a **CSS-border triangle** (not a Unicode glyph) so its visible edges exactly match its box and `left:50%; translateX(-50%)` aligns pixel-perfect with the head-thread line. `.viewport` (CSS class on the outer wrapper, not the JS variable) carries `background: var(--bg)` to mask the head-thread behind the stack across the whole tape row — without that, the 4px inter-cell gap passes through the head column during slide animations and exposes the line.
 
-**Bundled examples use `'␣'` (U+2423 OPEN BOX) as the literal blank symbol in their alphabets.** Convention: pick a visible glyph for blank if you want to see blank cells out of the box; the demo no longer normalizes blanks to a special UI character.
+**Bundled Turing examples use `' '` (space) as the blank symbol** — matching the Post machine's fixed blank — so both tabs feel consistent. Blank cells render dimmed (`.cell.blank` CSS) regardless of which character is chosen as blank.
 
 ## Multi-tape stack and head-thread connector
 
@@ -125,7 +126,7 @@ A `.head-thread` div sits behind the stack as the first child of `.tapes-stack` 
 
 ## Conventions
 
-- **localStorage** keys `machines-demo:code:turing` / `machines-demo:code:post` persist editor contents (via `lib/persist.ts`, errors swallowed).
+- **localStorage** keys follow `machines-demo:<engine>:<key>` hierarchy (non-engine key `machines-demo:theme` is the only exception): `code` persists editor contents, `example` the selected bundled example id, `snippets` the user snippet map (keyed by UUID → `{ title, code, savedAt }`). The currently loaded snippet's UUID is **not** stored here — it lives in the URL (`?snippet=<uuid>`) so it's bookmarkable / shareable. (Via `lib/persist.ts`, errors swallowed.)
 - **`report(text, kind?)`** in MachineView is the single log entry point — appends to `logEntries`. `reportSeparator()` pushes a `{separator: true}` entry that `Log.svelte` renders as an `<hr>`; called before each Build / first-Step / Run so distinct sessions read as visually grouped. The mobile-status `latestEntry $derived` skips separator entries.
 - **CSS nesting** is used throughout (native, no preprocessor) — Vite's CSS pipeline handles it; supported by all evergreen browsers. Keep nesting shallow (≤2 levels) to preserve specificity readability.
 - **No UI substitution of alphabet symbols.** The user picks the blank glyph in their alphabet; the UI renders the literal symbol. CSS classes (`Tape.svelte#.cell.blank`, `ControlPanel.svelte#.cp-btn.blank`) provide visual hints (dim border / opacity) so blank cells remain recognisable regardless of which character was chosen — no character is reserved for "blank visualization", so no alphabet glyph collides with one.
@@ -137,6 +138,24 @@ A `.head-thread` div sits behind the stack as the first child of `.tapes-stack` 
 - **No static literal fallbacks in `var()`.** A `var()` fallback must itself be another CSS custom property (e.g. `var(--dot, var(--head))`) — never a hardcoded color, length, or time. Literals leak out of the design system and bypass theming. Two patterns satisfy this:
   - **Globally-scoped tokens** (colors, surface vars, animation timings) — declared in `:root` in `app.css`. Optionally promoted to `@property` for type-checking and animatable customs (e.g. `@property --anim-button-hover-ms { syntax: '<time>'; inherits: true; initial-value: 120ms }`). When `@property`'s `initial-value` must mirror another token (it can't reference `var()`), document the coupling with a `/* follows --x — keep in sync when theming */` comment above the literal value.
   - **Optional, per-element customs** (e.g. `--dot` in `ControlPanel.svelte`) — either fall back to another token at the read site (`var(--dot, var(--head))`) or declare a class-level default (`.tape-dot { --dot: var(--head); background: var(--dot) }`). Pick the class-level default when the same custom is read in multiple places, the inline fallback when it's a one-off.
+
+## Snippets
+
+User-saved code lives in `localStorage` under `machines-demo:<engine>:snippets`, keyed by UUID → `{ title, code, savedAt }`. Title is user-visible (matches the save-popover input); UUID is the stable identity that survives renames and is the share key (issue #24).
+
+The currently loaded snippet's UUID lives in the URL query string (`?snippet=<uuid>`), not in localStorage. On mount, MachineView reads it; on `loadedSnippetId` change a `$effect` rewrites it via `history.replaceState` (no history entries — switching engines is the only operation that pushes). If the URL UUID isn't in `snippets`, MachineView reports `snippet not found: <uuid>` once and falls back to the `code` localStorage key. The bad param is dropped on the next state change (the `$effect` writes the canonical URL).
+
+Reset and save UIs share two derivations in MachineView:
+- `sourceCode` — the code Reset would restore: the loaded snippet's saved code, or the selected bundled example's code, or `null` when the loaded snippet was deleted (no target).
+- `dirty` = `sourceCode !== null && code !== sourceCode` — drives the accent dot on the save icon, the popover's *Save changes* button enabled state, and `resetVisible` (alias of `dirty`). When the editor matches its source — or `sourceCode` is null — both the reset button and the dirty dot disappear, since clicking them would be a no-op.
+
+Save UX (Toolbar.svelte):
+- Click the floppy → open popover. With a snippet loaded, the popover shows *Save changes to "<title>"* (primary, accent border) plus an *or save as new* section with a name input.
+- ⌘S / Ctrl-S → silently saves the loaded snippet via `onSaveChanges`; opens the popover when nothing is loaded.
+- ⌘⇧S / Ctrl-Shift-S → always opens the popover (Save As).
+- The keydown listener `preventDefault`s to suppress the browser's *Save Page* dialog and is a no-op when the popover is already open (so Enter inside the input keeps its meaning).
+
+`saveSnippet` matches by `title` to preserve the UUID on overwrite, returning `{ id, snippet }` so MachineView can sync `snippets` reactively without re-reading localStorage.
 
 ## Editor
 

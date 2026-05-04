@@ -21,7 +21,7 @@ const {
   haltState, ifOtherSymbol, movements,
 } = imports;
 
-const alphabet = new Alphabet(['␣', 'a', 'b', 'c', '*']);
+const alphabet = new Alphabet([' ', 'a', 'b', 'c', '*']);
 const tape = new Tape({ alphabet, symbols: ['a', 'b', 'c', 'b', 'a'] });
 const tapeBlock = TapeBlock.fromTapes([tape]);
 const machine = new TuringMachine({ tapeBlock });
@@ -55,10 +55,10 @@ const TURING_COPY_TWO_TAPES = `// Task: copy tape 0 ('abab') onto blank tape 1, 
 
 const {
   Alphabet, State, Tape, TapeBlock, TuringMachine,
-  haltState, movements,
+  haltState, ifOtherSymbol, movements,
 } = imports;
 
-const alphabet = new Alphabet(['␣', 'a', 'b']);
+const alphabet = new Alphabet([' ', 'a', 'b']);
 const t0 = new Tape({ alphabet, symbols: ['a', 'b', 'a', 'b'] });
 const t1 = new Tape({ alphabet, symbols: [] });
 const tapeBlock = TapeBlock.fromTapes([t0, t1]);
@@ -67,19 +67,19 @@ const machine = new TuringMachine({ tapeBlock });
 const { symbol } = tapeBlock;
 
 const initialState = new State({
-  [symbol(['a', '␣'])]: {
+  [symbol(['a', ifOtherSymbol])]: {
     command: [
       { symbol: 'a', movement: movements.right },
       { symbol: 'a', movement: movements.right },
     ],
   },
-  [symbol(['b', '␣'])]: {
+  [symbol(['b', ifOtherSymbol])]: {
     command: [
       { symbol: 'b', movement: movements.right },
       { symbol: 'b', movement: movements.right },
     ],
   },
-  [symbol(['␣', '␣'])]: {
+  [symbol([' ', ifOtherSymbol])]: {
     command: [
       { movement: movements.stay },
       { movement: movements.stay },
