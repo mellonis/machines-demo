@@ -19,7 +19,9 @@
 </script>
 
 <div class="log-panel">
-  <IconButton icon="eraser" title="Clear log" onClick={onClear} />
+  {#if entries.length > 0}
+    <IconButton icon="eraser" title="Clear log" onClick={onClear} />
+  {/if}
   <div class="content" bind:this={scrollEl}>
     {#each entries as entry, i (i)}
       {#if entry.separator}

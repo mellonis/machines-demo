@@ -6,10 +6,14 @@
   import { theme } from './lib/theme.svelte.ts';
   import { ENGINES, type Engine } from './lib/types.ts';
 
+  // Engine lives in the URL path (`/turing`, `/post`). The first path segment
+  // is the engine; anything else (`/`, `/foo`) normalises to the default
+  // engine. Requires SPA-fallback routing on the server (nginx
+  // `try_files $uri $uri/ /index.html;` for prod; Vite's default in dev).
   function readEngineFromUrl(): Engine {
     try {
-      const v = new URL(window.location.href).searchParams.get('machine');
-      return (ENGINES as readonly string[]).includes(v ?? '') ? (v as Engine) : 'turing';
+      const seg = window.location.pathname.replace(/^\/+/, '').split('/')[0];
+      return (ENGINES as readonly string[]).includes(seg) ? (seg as Engine) : 'turing';
     } catch {
       return 'turing';
     }
@@ -18,6 +22,27 @@
   let activeEngine = $state<Engine>('turing');
 
   onMount(() => {
+    // Backwards-compat: legacy `?machine=<engine>` → `/<engine>`. Rewrite the
+    // URL once on mount so old bookmarks/links don't silently lose context.
+    const url = new URL(window.location.href);
+    const legacy = url.searchParams.get('machine');
+    if (legacy !== null) {
+      url.searchParams.delete('machine');
+      if ((ENGINES as readonly string[]).includes(legacy)) {
+        url.pathname = '/' + legacy;
+      }
+      history.replaceState(null, '', url);
+    }
+
+    // Normalise unknown/root paths to `/<default-engine>` so the URL always
+    // reflects the active engine (no silent fallback discrepancy).
+    const seg = window.location.pathname.replace(/^\/+/, '').split('/')[0];
+    if (!(ENGINES as readonly string[]).includes(seg)) {
+      const normalised = new URL(window.location.href);
+      normalised.pathname = '/turing';
+      history.replaceState(null, '', normalised);
+    }
+
     activeEngine = readEngineFromUrl();
     const onPopState = () => {
       activeEngine = readEngineFromUrl();
@@ -29,13 +54,9 @@
   function selectEngine(engine: Engine): void {
     if (engine === activeEngine) return;
     activeEngine = engine;
-    const url = new URL(window.location.href);
-    if (engine === 'turing') {
-      url.searchParams.delete('machine');
-    } else {
-      url.searchParams.set('machine', engine);
-    }
-    history.pushState(null, '', url);
+    // Drop existing query params: they are engine-scoped (e.g. `?snippet=`)
+    // and don't carry over to the other engine's namespace.
+    history.pushState(null, '', '/' + engine);
   }
 
   const themeIcon = $derived(

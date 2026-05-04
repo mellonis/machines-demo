@@ -18,7 +18,15 @@
     findExample,
     type Example,
   } from '../lib/defaultCode.ts';
-  import { loadCode, loadExampleId, saveExampleId } from '../lib/persist.ts';
+  import {
+    loadCode,
+    loadExampleId,
+    saveExampleId,
+    loadSnippets,
+    saveSnippet,
+    deleteSnippet,
+    type Snippets,
+  } from '../lib/persist.ts';
   import { icons } from '../lib/icons.ts';
 
   type Props = { engine: Engine };
@@ -70,9 +78,26 @@
     return (persistedId && findExample(engine, persistedId)) || defaultExample(engine);
   });
   let selectedExampleId = $state<string>(initialExample.id);
-  let code = $state<string>(
-    untrack(() => loadCode(engine) ?? initialExample.code),
-  );
+  const initialSnippets = untrack(() => loadSnippets(engine));
+  let snippets = $state<Snippets>(initialSnippets);
+  // Active snippet is read from the URL (`?snippet=<uuid>`) — bookmarkable,
+  // shareable, and the future-#24 share key. When the URL points at a snippet
+  // that exists locally, its code becomes the editor's code; otherwise we fall
+  // back to localStorage and report the bad UUID once on mount.
+  const initial = untrack(() => {
+    const raw = new URL(window.location.href).searchParams.get('snippet');
+    const urlId = raw !== null && raw !== '' ? raw : null;
+    if (urlId !== null && urlId in initialSnippets) {
+      return { loadedSnippetId: urlId, code: initialSnippets[urlId].code, badUrlId: null as string | null };
+    }
+    return {
+      loadedSnippetId: null as string | null,
+      code: loadCode(engine) ?? initialExample.code,
+      badUrlId: urlId,
+    };
+  });
+  let loadedSnippetId = $state<string | null>(initial.loadedSnippetId);
+  let code = $state<string>(initial.code);
 
   const selectedExample = $derived(
     findExample(engine, selectedExampleId) ?? defaultExample(engine),
@@ -116,6 +141,16 @@
     executionMode !== 'MANUAL' && executionMode !== 'RUNNING_CONTINUOUS',
   );
   const beltTransitionsOn = $derived(executionMode !== 'RUNNING_CONTINUOUS');
+
+  // The code Reset would restore to: the loaded snippet's saved code, or the
+  // selected bundled example's code, or null when the loaded snippet was
+  // deleted (no target — Reset is hidden in that branch).
+  const sourceCode = $derived.by(() => {
+    if (loadedSnippetId !== null) return snippets[loadedSnippetId]?.code ?? null;
+    return selectedExample.code;
+  });
+  const dirty = $derived(sourceCode !== null && code !== sourceCode);
+  const resetVisible = $derived(dirty);
 
   const loadDisabled = $derived(pendingOp !== null);
   // Step/Run stay enabled in HALTED — they reload-from-code on entry, which
@@ -433,18 +468,63 @@
   }
 
   function resetCodeToSelected(): void {
+    if (loadedSnippetId !== null) {
+      const snippet = snippets[loadedSnippetId];
+      if (snippet) code = snippet.code;
+      return;
+    }
     code = selectedExample.code;
   }
 
   function pickExample(ex: Example): void {
     selectedExampleId = ex.id;
     code = ex.code;
+    loadedSnippetId = null;
+  }
+
+  function onSaveSnippet(title: string): void {
+    const { id, snippet } = saveSnippet(engine, title, code);
+    snippets = { ...snippets, [id]: snippet };
+    loadedSnippetId = id;
+  }
+
+  function onSaveChanges(): void {
+    if (loadedSnippetId === null) return;
+    const existing = snippets[loadedSnippetId];
+    if (!existing) return;
+    const { id, snippet } = saveSnippet(engine, existing.title, code);
+    snippets = { ...snippets, [id]: snippet };
+    report(`saved "${existing.title}"`, 'ok');
+  }
+
+  function onLoadSnippet(id: string): void {
+    const snippet = snippets[id];
+    if (snippet) {
+      code = snippet.code;
+      loadedSnippetId = id;
+    }
+  }
+
+  function onDeleteSnippet(id: string): void {
+    deleteSnippet(engine, id);
+    const { [id]: _, ...rest } = snippets;
+    snippets = rest;
+    // Keep loadedSnippetId set so `resetVisible` hides the reset button when
+    // the snippet is gone — otherwise reset would silently jump to the
+    // bundled example.
   }
 
   // Persist the selected example id (separate from the editor code) so the
   // reset button keeps targeting the chosen source across reloads.
   $effect(() => {
     saveExampleId(engine, selectedExampleId);
+  });
+
+  $effect(() => {
+    const url = new URL(window.location.href);
+    if (loadedSnippetId !== null) url.searchParams.set('snippet', loadedSnippetId);
+    else url.searchParams.delete('snippet');
+    history.replaceState(null, '', url);
   });
 
   /* ───── effects ─────
@@ -508,6 +588,7 @@
   /* ───── lifecycle ───── */
 
   onMount(() => {
+    if (initial.badUrlId !== null) report(`snippet not found: ${initial.badUrlId}`, 'error');
     void doLoad();
   });
 
@@ -558,6 +639,13 @@
       onRun={doRun}
       onStop={stopMachine}
       onPickExample={pickExample}
+      {snippets}
+      {loadedSnippetId}
+      {dirty}
+      {onSaveSnippet}
+      {onSaveChanges}
+      {onLoadSnippet}
+      {onDeleteSnippet}
     />
     <div
       class="status"
@@ -570,7 +658,7 @@
     {#await editorPromise}
       <div class="editor-loading">Loading editor…</div>
     {:then Editor}
-      <Editor {engine} bind:code onReset={resetCodeToSelected} />
+      <Editor {engine} bind:code onReset={resetCodeToSelected} {resetVisible} />
     {:catch err}
       <div class="editor-error">Failed to load editor: {err.message}</div>
     {/await}

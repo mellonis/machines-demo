@@ -1,6 +1,7 @@
 <script lang="ts">
   import { icons } from '../lib/icons.ts';
   import type { Example } from '../lib/defaultCode.ts';
+  import type { Snippets } from '../lib/persist.ts';
 
   // Execution-mode strings the toolbar cares about. Kept loose (string union
   // matching MachineView's ExecutionMode) so we don't duplicate the type.
@@ -19,11 +20,18 @@
     selectedExampleId: string;
     withPause: boolean;
     intervalText: string;
+    snippets: Snippets;
+    loadedSnippetId: string | null;
+    dirty: boolean;
     onBuild: () => void;
     onStep: () => void;
     onRun: () => void;
     onStop: () => void;
     onPickExample: (ex: Example) => void;
+    onSaveSnippet: (title: string) => void;
+    onSaveChanges: () => void;
+    onLoadSnippet: (id: string) => void;
+    onDeleteSnippet: (id: string) => void;
   };
 
   let {
@@ -36,11 +44,18 @@
     selectedExampleId,
     withPause = $bindable(),
     intervalText = $bindable(),
+    snippets,
+    loadedSnippetId,
+    dirty,
     onBuild,
     onStep,
     onRun,
     onStop,
     onPickExample,
+    onSaveSnippet,
+    onSaveChanges,
+    onLoadSnippet,
+    onDeleteSnippet,
   }: Props = $props();
 
   // Examples dropdown — fully owned here so the outside-click and Escape
@@ -69,6 +84,87 @@
       document.removeEventListener('keydown', onKey);
     };
   });
+
+  let saveOpen = $state(false);
+  let saveName = $state('');
+  let pendingOverwrite = $state(false);
+  let saveMenuEl: HTMLDivElement | undefined;
+  let nameInputEl = $state<HTMLInputElement | undefined>(undefined);
+
+  const loadedSnippet = $derived(
+    loadedSnippetId !== null ? snippets[loadedSnippetId] ?? null : null,
+  );
+  const trimmedName = $derived(saveName.trim());
+  const snippetTitles = $derived(new Set(Object.values(snippets).map((s) => s.title)));
+  const saveNameExists = $derived(trimmedName !== '' && snippetTitles.has(trimmedName));
+  const saveEnabled = $derived(trimmedName !== '');
+
+  $effect(() => {
+    if (!saveOpen) return;
+    const onPointer = (e: MouseEvent): void => {
+      if (!saveMenuEl?.contains(e.target as Node)) closeSavePopover();
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') closeSavePopover();
+    };
+    document.addEventListener('mousedown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  });
+
+  $effect(() => {
+    if (saveOpen && nameInputEl) nameInputEl.focus();
+  });
+
+  $effect(() => {
+    if (!saveOpen) return;
+    void trimmedName;
+    pendingOverwrite = false;
+  });
+
+  function closeSavePopover(): void {
+    saveOpen = false;
+    saveName = '';
+    pendingOverwrite = false;
+  }
+
+  // ⌘S / ⌘⇧S — preventDefault is what stops the browser's Save Page dialog.
+  $effect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.key !== 's' && e.key !== 'S') return;
+      e.preventDefault();
+      if (saveOpen) return; // popover has its own Enter binding
+      if (e.shiftKey) {
+        saveName = '';
+        saveOpen = true;
+      } else if (loadedSnippet !== null) {
+        onSaveChanges();
+      } else {
+        saveName = '';
+        saveOpen = true;
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  });
+
+  function doSave(): void {
+    if (!saveEnabled) return;
+    if (saveNameExists && !pendingOverwrite) {
+      pendingOverwrite = true;
+      return;
+    }
+    onSaveSnippet(trimmedName);
+    closeSavePopover();
+  }
+
+  const sortedSnippets = $derived(
+    Object.entries(snippets).sort((a, b) => b[1].savedAt - a[1].savedAt),
+  );
 
   // with-pause / interval are configuration for the *next* Run; meaningless
   // mid-run, so hide them in the running modes (they'd just be inert chrome).
@@ -107,9 +203,82 @@
             </button>
           </li>
         {/each}
+        {#if sortedSnippets.length > 0}
+          <li role="separator" class="divider"></li>
+          <li role="none" class="section-label">My snippets</li>
+          {#each sortedSnippets as [id, snippet] (id)}
+            <li role="none" class="snippet-row">
+              <button
+                type="button"
+                role="menuitem"
+                onclick={() => { onLoadSnippet(id); examplesOpen = false; }}
+              >{snippet.title}</button>
+              <button
+                type="button"
+                class="delete-btn"
+                aria-label="Delete snippet {snippet.title}"
+                title="Delete"
+                onclick={(e) => { e.stopPropagation(); onDeleteSnippet(id); }}
+              >{@html icons.xSmall}</button>
+            </li>
+          {/each}
+        {/if}
       </ul>
     {/if}
   </div>
+
+  <div class="save-menu" bind:this={saveMenuEl}>
+    <button
+      type="button"
+      class="icon-only"
+      class:dirty
+      aria-label="Save snippet"
+      aria-haspopup="dialog"
+      aria-expanded={saveOpen}
+      title="Save snippet (⌘S)"
+      onclick={() => { if (saveOpen) closeSavePopover(); else { saveName = ''; saveOpen = true; } }}
+    >
+      {@html icons.saveFloppy}
+    </button>
+    {#if saveOpen}
+      <div class="save-popover" role="dialog" aria-label="Save snippet">
+        {#if loadedSnippet !== null}
+          <button
+            type="button"
+            class="save-changes"
+            disabled={!dirty}
+            onclick={() => { onSaveChanges(); closeSavePopover(); }}
+          >
+            Save changes to "{loadedSnippet.title}"
+          </button>
+          <div class="popover-section-label">or save as new</div>
+        {/if}
+        <input
+          type="text"
+          bind:this={nameInputEl}
+          bind:value={saveName}
+          placeholder="Snippet name"
+          maxlength="80"
+          onkeydown={(e) => {
+            if (e.key === 'Enter') doSave();
+            if (e.key === 'Escape') closeSavePopover();
+          }}
+        />
+        {#if pendingOverwrite}
+          <div class="overwrite-confirm">
+            <span>Overwrite "{trimmedName}"?</span>
+            <button type="button" class="confirm-yes" onclick={doSave}>Yes</button>
+            <button type="button" onclick={() => (pendingOverwrite = false)}>No</button>
+          </div>
+        {:else}
+          <button type="button" disabled={!saveEnabled} onclick={doSave}>
+            {loadedSnippet !== null ? 'Save as new' : 'Save'}
+          </button>
+        {/if}
+      </div>
+    {/if}
+  </div>
+
   <button type="button" disabled={loadDisabled} onclick={onBuild}>
     {@html icons.build}<span class="btn-label">Build</span>
   </button>
@@ -208,8 +377,24 @@
     display: inline-flex;
   }
 
-  .toolbar .examples-menu .icon-only {
+  .toolbar .examples-menu .icon-only,
+  .toolbar .save-menu .icon-only {
     padding: 6px 8px;
+  }
+
+  .toolbar .save-menu .icon-only.dirty {
+    position: relative;
+
+    &::after {
+      content: '';
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+    }
   }
 
   .dropdown {
@@ -254,6 +439,161 @@
         color: var(--accent);
         background: color-mix(in srgb, var(--accent) 18%, transparent);
       }
+    }
+  }
+
+  .divider {
+    height: 1px;
+    background: var(--divider);
+    margin: 4px 6px;
+    padding: 0;
+  }
+
+  .section-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 4px 10px 2px;
+  }
+
+  .snippet-row {
+    display: flex;
+    align-items: center;
+
+    button:first-child {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .delete-btn {
+      flex-shrink: 0;
+      width: 28px;
+      padding: 4px;
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      border-radius: 4px;
+      cursor: pointer;
+      opacity: 0.6;
+
+      &:hover {
+        color: var(--error);
+        background: color-mix(in srgb, var(--error) 12%, transparent);
+        opacity: 1;
+      }
+
+      :global(svg) {
+        width: 14px;
+        height: 14px;
+      }
+    }
+  }
+
+  .save-menu {
+    position: relative;
+    display: inline-flex;
+  }
+
+  .save-popover {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    min-width: 220px;
+    background: var(--cell-bg);
+    border: 1px solid var(--surface-border);
+    border-radius: 6px;
+    box-shadow: 0 8px 24px var(--shadow);
+
+    input[type='text'] {
+      background: var(--cell-bg);
+      border: 1px solid var(--cell-border);
+      color: var(--fg);
+      padding: 5px 8px;
+      font: inherit;
+      font-size: 13px;
+      border-radius: 4px;
+      width: 100%;
+      box-sizing: border-box;
+
+      &:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+    }
+
+    > button {
+      align-self: flex-end;
+      padding: 5px 14px;
+      font-size: 13px;
+    }
+
+    .save-changes {
+      align-self: stretch;
+      text-align: left;
+      border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+      color: var(--accent);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+
+      &:hover:not(:disabled) {
+        border-color: var(--accent) !important;
+        background: color-mix(in srgb, var(--accent) 10%, transparent);
+      }
+    }
+
+    .popover-section-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+      padding: 4px 0 0;
+      border-top: 1px solid var(--divider);
+      margin-top: 2px;
+    }
+  }
+
+  .overwrite-confirm {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+
+    span {
+      flex: 1;
+      font-size: 12px;
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .confirm-yes {
+      border-color: color-mix(in srgb, var(--ok) 50%, transparent);
+      color: var(--ok);
+      font-size: 12px;
+      padding: 3px 10px;
+
+      &:hover {
+        border-color: var(--ok) !important;
+        color: var(--ok) !important;
+      }
+    }
+
+    button:not(.confirm-yes) {
+      font-size: 12px;
+      padding: 3px 10px;
     }
   }
 
