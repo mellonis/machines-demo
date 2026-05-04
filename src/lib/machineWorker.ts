@@ -49,6 +49,50 @@ type MachineYield = {
   nextSymbols: string[];
 };
 
+/* ───── sandbox: ban ambient capabilities user code shouldn't reach ─────
+ *
+ * The engine is synchronous and the worker boundary already isolates the
+ * main thread, so network/timer/concurrency APIs have no legitimate use in
+ * user code. Two layers, both best-effort:
+ *
+ *   1. Parameter shadow inside `build()` — bare references like `fetch(...)`
+ *      resolve to the function parameter (a stub that throws an informative
+ *      error) instead of the worker global.
+ *   2. `globalThis` redefine, applied once at worker startup — catches
+ *      `globalThis.fetch` / `self.fetch` and similar.
+ *
+ * Bypass paths exist in pure JS: `(new Function('return this'))()` (the
+ * Function constructor evaluates in global scope, escaping the parameter
+ * shadow), and `(0, eval)('globalThis')`. `Promise` stays available — the
+ * engine is synchronous so `await` is a no-op for stepping anyway, but
+ * blocking it would make most JS unwriteable. For airtight isolation see
+ * issue #18 (ShadowRealm).
+ */
+
+const SANDBOX_BLOCKED_GLOBALS = [
+  'fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource',
+  'BroadcastChannel', 'MessageChannel',
+  'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval',
+  'queueMicrotask', 'requestIdleCallback', 'cancelIdleCallback',
+  'Worker', 'importScripts',
+] as const;
+
+const sandboxStub = (name: string) => () => {
+  throw new Error(`${name} is not available in this sandbox`);
+};
+
+for (const name of SANDBOX_BLOCKED_GLOBALS) {
+  try {
+    Object.defineProperty(globalThis, name, {
+      get: sandboxStub(name),
+      configurable: true,
+    });
+  } catch {
+    // Some hosts may have non-configurable globals; the parameter shadow
+    // in `build()` is the primary defense and still applies.
+  }
+}
+
 /* ───── runtime state ───── */
 
 let machine: AnyMachine | null = null;
@@ -111,8 +155,11 @@ function build(engine: Engine, code: string): void {
   const imports: Record<string, unknown> =
     engine === 'post' ? { ...post } : { ...turing };
 
-  const userFn = new Function('imports', code) as (i: Record<string, unknown>) => unknown;
-  const result = userFn(imports);
+  const userFn = new Function('imports', ...SANDBOX_BLOCKED_GLOBALS, code) as (
+    i: Record<string, unknown>,
+    ...stubs: unknown[]
+  ) => unknown;
+  const result = userFn(imports, ...SANDBOX_BLOCKED_GLOBALS.map(sandboxStub));
 
   if (!result || typeof result !== 'object') {
     throw new Error('user code must return { machine, initialState?, tape? }');
