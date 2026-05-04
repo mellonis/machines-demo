@@ -211,6 +211,7 @@
               <button
                 type="button"
                 role="menuitem"
+                class:selected={id === loadedSnippetId}
                 onclick={() => { onLoadSnippet(id); examplesOpen = false; }}
               >{snippet.title}</button>
               <button
