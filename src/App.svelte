@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { turingVersion, postVersion } from 'virtual:lib-versions';
   import MachineView from './components/MachineView.svelte';
   import { icons } from './lib/icons.ts';
   import { ENGINES, type Engine } from './lib/types.ts';
@@ -55,6 +56,21 @@
       Post
     </button>
   </nav>
+  <span class="lib-versions">
+    <a
+      href="https://www.npmjs.com/package/@turing-machine-js/machine"
+      target="_blank"
+      rel="noopener"
+      title="@turing-machine-js/machine on npm"
+    >turing v{turingVersion}</a>
+    <span class="sep" aria-hidden="true">·</span>
+    <a
+      href="https://www.npmjs.com/package/@post-machine-js/machine"
+      target="_blank"
+      rel="noopener"
+      title="@post-machine-js/machine on npm"
+    >post v{postVersion}</a>
+  </span>
   <a
     class="repo-link"
     href="https://github.com/mellonis/machines-demo"
@@ -123,8 +139,30 @@
     }
   }
 
-  .repo-link {
+  .lib-versions {
     margin-left: auto;
+    font-size: 12px;
+    color: var(--muted);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+
+    a {
+      color: inherit;
+      text-decoration: none;
+      transition: color var(--anim-button-hover-ms) ease;
+
+      &:hover {
+        color: var(--fg);
+      }
+    }
+
+    .sep {
+      opacity: 0.6;
+    }
+  }
+
+  .repo-link {
     display: inline-flex;
     align-items: center;
     justify-content: center;
