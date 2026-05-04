@@ -9,4 +9,5 @@ declare module '*.svg?raw' {
 declare module 'virtual:lib-versions' {
   export const turingVersion: string;
   export const postVersion: string;
+  export const appVersion: string;
 }

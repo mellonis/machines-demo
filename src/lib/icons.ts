@@ -1,10 +1,12 @@
 import apply from '@tabler/icons/outline/corner-down-left.svg?raw';
 import build from '@tabler/icons/outline/hammer.svg?raw';
+import deviceDesktop from '@tabler/icons/outline/device-desktop.svg?raw';
 import eraser from '@tabler/icons/outline/eraser.svg?raw';
 import examples from '@tabler/icons/outline/file-code.svg?raw';
 import github from '@tabler/icons/outline/brand-github.svg?raw';
 import keep from '@tabler/icons/outline/keyframe-align-vertical.svg?raw';
 import left from '@tabler/icons/outline/arrow-narrow-left.svg?raw';
+import moon from '@tabler/icons/outline/moon.svg?raw';
 import pause from '@tabler/icons/outline/player-pause.svg?raw';
 import resetCode from '@tabler/icons/outline/arrow-back-up.svg?raw';
 import right from '@tabler/icons/outline/arrow-narrow-right.svg?raw';
@@ -12,16 +14,19 @@ import run from '@tabler/icons/outline/player-play.svg?raw';
 import stay from '@tabler/icons/outline/keyframe-align-horizontal.svg?raw';
 import step from '@tabler/icons/outline/player-skip-forward.svg?raw';
 import stop from '@tabler/icons/outline/player-stop.svg?raw';
+import sun from '@tabler/icons/outline/sun.svg?raw';
 import takeControl from '@tabler/icons/outline/device-gamepad-2.svg?raw';
 
 export const icons = {
   apply,
   build,
+  deviceDesktop,
   eraser,
   examples,
   github,
   keep,
   left,
+  moon,
   pause,
   resetCode,
   right,
@@ -29,6 +34,7 @@ export const icons = {
   stay,
   step,
   stop,
+  sun,
   takeControl,
 } as const;
 

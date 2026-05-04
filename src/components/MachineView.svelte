@@ -650,8 +650,8 @@
     height: 30px;
     padding: 4px 12px;
     background: transparent;
-    border: 1px solid rgba(95, 208, 104, 0.28);
-    color: rgba(95, 208, 104, 0.7);
+    border: 1px solid color-mix(in srgb, var(--ok) 28%, transparent);
+    color: color-mix(in srgb, var(--ok) 70%, transparent);
     border-radius: 6px;
     cursor: pointer;
     font: inherit;
@@ -663,7 +663,7 @@
       color var(--anim-button-hover-ms) ease;
 
     &:hover {
-      background: rgba(95, 208, 104, 0.14);
+      background: color-mix(in srgb, var(--ok) 14%, transparent);
       border-color: var(--ok);
       color: var(--ok);
     }

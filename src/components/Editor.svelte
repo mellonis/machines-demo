@@ -5,6 +5,7 @@
   import { importsCompletion } from '../lib/completions.ts';
   import { syntaxLinter } from '../lib/syntaxLinter.ts';
   import { saveCode } from '../lib/persist.ts';
+  import { theme } from '../lib/theme.svelte.ts';
   import IconButton from './IconButton.svelte';
   import type { Engine } from '../lib/types.ts';
 
@@ -23,7 +24,14 @@
   });
 
   const lang = javascript();
-  const extensions = $derived([...importsCompletion(engine), syntaxLinter]);
+  // Bundle oneDark only when the dark theme is active; the light theme falls
+  // back to CodeMirror's default highlighting so the editor reads as a plain
+  // light surface paired with --editor-bg.
+  const extensions = $derived(
+    theme.current === 'dark'
+      ? [oneDark, ...importsCompletion(engine), syntaxLinter]
+      : [...importsCompletion(engine), syntaxLinter],
+  );
 </script>
 
 <div class="editor">
@@ -31,7 +39,6 @@
   <CodeMirror
     bind:value={code}
     {lang}
-    theme={oneDark}
     {extensions}
   />
 </div>

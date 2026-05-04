@@ -203,7 +203,7 @@
     padding: 4px 0;
 
     & + & {
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      border-top: 1px solid var(--divider);
     }
   }
 
@@ -259,7 +259,7 @@
     &.movement {
       margin-left: auto;
       padding-left: 8px;
-      border-left: 1px solid rgba(255, 255, 255, 0.05);
+      border-left: 1px solid var(--divider);
     }
   }
 
@@ -267,7 +267,7 @@
     display: flex;
     justify-content: flex-end;
     padding-top: 6px;
-    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    border-top: 1px solid var(--divider);
   }
 
   .cp-btn {
@@ -278,7 +278,7 @@
     height: 28px;
     padding: 4px 8px;
     background: var(--cell-bg);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--hover-bg);
     color: var(--fg);
     border-radius: 4px;
     cursor: pointer;
@@ -291,7 +291,7 @@
       color var(--anim-button-hover-ms) ease;
 
     &:hover {
-      border-color: rgba(110, 168, 254, 0.5);
+      border-color: color-mix(in srgb, var(--accent) 50%, transparent);
       color: var(--accent);
     }
 
@@ -301,18 +301,18 @@
        even when the blank symbol is an invisible space. */
     &.blank {
       min-width: 30px;
-      border-color: color-mix(in srgb, rgba(255, 255, 255, 0.06) 40%, var(--cell-bg));
+      border-color: color-mix(in srgb, var(--hover-bg) 40%, var(--cell-bg));
       color: color-mix(in srgb, var(--fg) 40%, var(--cell-bg));
     }
 
     &.selected {
-      background: rgba(110, 168, 254, 0.2);
+      background: color-mix(in srgb, var(--accent) 20%, transparent);
       border-color: var(--accent);
       color: var(--accent);
     }
 
     &.pressed {
-      background: rgba(110, 168, 254, 0.4);
+      background: color-mix(in srgb, var(--accent) 40%, transparent);
       border-color: var(--accent);
       color: var(--accent);
       transform: scale(0.96);
