@@ -21,7 +21,7 @@ const {
   haltState, ifOtherSymbol, movements,
 } = imports;
 
-const alphabet = new Alphabet([' ', 'a', 'b', 'c', '*']);
+const alphabet = new Alphabet(['␣', 'a', 'b', 'c', '*']);
 const tape = new Tape({ alphabet, symbols: ['a', 'b', 'c', 'b', 'a'] });
 const tapeBlock = TapeBlock.fromTapes([tape]);
 const machine = new TuringMachine({ tapeBlock });
@@ -58,7 +58,7 @@ const {
   haltState, ifOtherSymbol, movements,
 } = imports;
 
-const alphabet = new Alphabet([' ', 'a', 'b']);
+const alphabet = new Alphabet(['␣', 'a', 'b']);
 const t0 = new Tape({ alphabet, symbols: ['a', 'b', 'a', 'b'] });
 const t1 = new Tape({ alphabet, symbols: [] });
 const tapeBlock = TapeBlock.fromTapes([t0, t1]);
@@ -79,7 +79,7 @@ const initialState = new State({
       { symbol: 'b', movement: movements.right },
     ],
   },
-  [symbol([' ', ifOtherSymbol])]: {
+  [symbol(['␣', ifOtherSymbol])]: {
     command: [
       { movement: movements.stay },
       { movement: movements.stay },
@@ -103,16 +103,19 @@ const POST_WALK_MARK = `// Task: walk right while marked; mark the first blank c
 
 const { PostMachine, Tape, check, mark, right, stop } = imports;
 
-const machine = new PostMachine({
-  10: check(20, 30),
-  20: right(10),
-  30: mark,
-  40: stop,
-});
+const machine = new PostMachine(
+  {
+    10: check(20, 30),
+    20: right(10),
+    30: mark,
+    40: stop,
+  },
+  { blankSymbol: '␣', markSymbol: '•' },
+);
 
 machine.replaceTapeWith(new Tape({
   alphabet: machine.tape.alphabet,
-  symbols: ['*', '*', ' '],
+  symbols: ['•', '•', '␣'],
 }));
 
 return { machine };
