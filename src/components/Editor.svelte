@@ -24,11 +24,13 @@
   });
 
   const lang = javascript();
-  // Bundle oneDark only when the dark theme is active; the light theme falls
-  // back to CodeMirror's default highlighting so the editor reads as a plain
-  // light surface paired with --editor-bg.
+  // Bundle oneDark only when the *resolved* theme is dark; the light theme
+  // falls back to CodeMirror's default highlighting paired with --editor-bg.
+  // Use `resolved`, not `current`: `current` may be 'system', and a 'system'
+  // choice on a dark OS would otherwise drop oneDark while the rest of the
+  // page renders dark.
   const extensions = $derived(
-    theme.current === 'dark'
+    theme.resolved === 'dark'
       ? [oneDark, ...importsCompletion(engine), syntaxLinter]
       : [...importsCompletion(engine), syntaxLinter],
   );
