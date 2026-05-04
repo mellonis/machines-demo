@@ -3,6 +3,8 @@
   import * as turing from '@turing-machine-js/machine';
   import { VIEWPORT_WIDTH } from '../lib/caps.ts';
 
+  const MIDDLE_INDEX = (VIEWPORT_WIDTH - 1) / 2;
+
   // showCaret: render the head ▲ marker and reserve room below the belt.
   // For multi-tape stacks, only the bottom belt sets this true so the heads
   // visually align as one column without a stranded marker between rows.
@@ -30,12 +32,15 @@
   // Single render path. Reads the upstream tape's `.viewport` (the library
   // does the slice/center math; we just copy). `null` clears the window.
   // `delta` (±1/0) drives the prep-shift slide when `animate` is true.
+  // `wrote` triggers a flash on the just-written cell (which sits at the
+  // visual center at slide-start; with delta we map back to its strip index).
   // `sym` (not `symbol`) avoids shadowing the built-in TS/JS `symbol` type
   // used by the upstream library for movement primitives.
   export async function setFromTape(
     tape: turing.Tape | null,
     delta: -1 | 0 | 1 = 0,
     animate = false,
+    wrote = false,
   ): Promise<void> {
     if (!tape) {
       viewport = new Array(VIEWPORT_WIDTH).fill(null).map(blankCell);
@@ -43,17 +48,31 @@
     }
     const blank = tape.alphabet.blankSymbol;
     viewport = tape.viewport.map((sym) => ({ sym, blank: sym === blank }));
-    if (animate && delta !== 0) await _animateSlide(delta);
+    const sliding = animate && delta !== 0;
+    if (!wrote && !sliding) return;
+    await tick();
+    if (wrote) _flashWriteAt(delta);
+    if (sliding) _animateSlide(delta);
   }
 
-  async function _animateSlide(delta: -1 | 0 | 1): Promise<void> {
-    await tick();
+  function _animateSlide(delta: -1 | 0 | 1): void {
     if (!stripEl) return;
     stripEl.classList.remove('transitions-on');
     stripEl.style.transform = `translateX(calc(${delta} * var(--pitch)))`;
     void stripEl.offsetWidth; // force reflow
     stripEl.classList.add('transitions-on');
     stripEl.style.transform = 'translateX(0)';
+  }
+
+  // The just-written cell is at strip index MIDDLE_INDEX - delta in the
+  // post-step viewport: with the prep-shift, that cell sits at the visual
+  // center at slide-start and rides outward as the strip settles.
+  function _flashWriteAt(delta: -1 | 0 | 1): void {
+    const cellEl = stripEl?.children[MIDDLE_INDEX - delta] as HTMLElement | undefined;
+    if (!cellEl) return;
+    cellEl.classList.remove('write-flash');
+    void cellEl.offsetWidth; // restart animation across rapid writes
+    cellEl.classList.add('write-flash');
   }
 
   export function setTransitionsEnabled(on: boolean): void {
@@ -213,8 +232,33 @@
       .sym { opacity: 0.4; }
     }
 
+    /* One-shot flash on the just-written cell — fades --head-tinted bg back
+       to the resting state. Class is toggled imperatively in setFromTape
+       (hence `:global` — Svelte's scoper can't see it on the template), and
+       a forced reflow restarts the animation across rapid successive writes. */
+    &:global(.write-flash) {
+      animation: cell-write var(--anim-cell-write-ms) ease-out;
+    }
+
     @media (max-width: 768px) {
       font-size: 14px;
+    }
+  }
+
+  @keyframes cell-write {
+    0% {
+      background: color-mix(in srgb, var(--head) 65%, var(--cell-bg));
+      border-color: var(--head);
+    }
+    100% {
+      background: var(--cell-bg);
+      border-color: var(--cell-border);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cell:global(.write-flash) {
+      animation: none;
     }
   }
 
