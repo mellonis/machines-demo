@@ -192,8 +192,8 @@
   }
 
   .stop-btn {
-    border-color: rgba(255, 107, 107, 0.4);
-    color: rgba(255, 107, 107, 0.8);
+    border-color: color-mix(in srgb, var(--error) 40%, transparent);
+    color: color-mix(in srgb, var(--error) 80%, transparent);
 
     &:hover {
       border-color: var(--error) !important;
@@ -226,7 +226,7 @@
     background: var(--cell-bg);
     border: 1px solid var(--surface-border);
     border-radius: 6px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 8px 24px var(--shadow);
 
     li {
       list-style: none;
@@ -246,13 +246,13 @@
       cursor: pointer;
 
       &:hover {
-        background: rgba(110, 168, 254, 0.14);
+        background: color-mix(in srgb, var(--accent) 14%, transparent);
         color: var(--accent);
       }
 
       &.selected {
         color: var(--accent);
-        background: rgba(110, 168, 254, 0.18);
+        background: color-mix(in srgb, var(--accent) 18%, transparent);
       }
     }
   }

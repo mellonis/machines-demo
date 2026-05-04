@@ -20,7 +20,6 @@
   } from '../lib/defaultCode.ts';
   import { loadCode, loadExampleId, saveExampleId } from '../lib/persist.ts';
   import { icons } from '../lib/icons.ts';
-  import pkg from '../../package.json';
 
   type Props = { engine: Engine };
   let { engine }: Props = $props();
@@ -37,7 +36,6 @@
     '#c084fc', // purple
     '#ffd166', // amber
   ];
-  const APP_VERSION = pkg.version;
 
   type ExecutionMode =
     | 'DEMO'
@@ -576,7 +574,6 @@
     {:catch err}
       <div class="editor-error">Failed to load editor: {err.message}</div>
     {/await}
-    <div class="version">v{APP_VERSION}</div>
   </div>
 </section>
 
@@ -650,8 +647,8 @@
     height: 30px;
     padding: 4px 12px;
     background: transparent;
-    border: 1px solid rgba(95, 208, 104, 0.28);
-    color: rgba(95, 208, 104, 0.7);
+    border: 1px solid color-mix(in srgb, var(--ok) 28%, transparent);
+    color: color-mix(in srgb, var(--ok) 70%, transparent);
     border-radius: 6px;
     cursor: pointer;
     font: inherit;
@@ -663,7 +660,7 @@
       color var(--anim-button-hover-ms) ease;
 
     &:hover {
-      background: rgba(95, 208, 104, 0.14);
+      background: color-mix(in srgb, var(--ok) 14%, transparent);
       border-color: var(--ok);
       color: var(--ok);
     }
@@ -675,14 +672,6 @@
       flex-shrink: 0;
       opacity: 0.85;
     }
-  }
-
-  .version {
-    font-family: ui-monospace, 'SF Mono', Consolas, monospace;
-    font-size: 11px;
-    color: var(--muted);
-    text-align: right;
-    padding-top: 4px;
   }
 
   .editor-loading,

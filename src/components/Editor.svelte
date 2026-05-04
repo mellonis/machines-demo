@@ -5,6 +5,7 @@
   import { importsCompletion } from '../lib/completions.ts';
   import { syntaxLinter } from '../lib/syntaxLinter.ts';
   import { saveCode } from '../lib/persist.ts';
+  import { theme } from '../lib/theme.svelte.ts';
   import IconButton from './IconButton.svelte';
   import type { Engine } from '../lib/types.ts';
 
@@ -23,7 +24,16 @@
   });
 
   const lang = javascript();
-  const extensions = $derived([...importsCompletion(engine), syntaxLinter]);
+  // Bundle oneDark only when the *resolved* theme is dark; the light theme
+  // falls back to CodeMirror's default highlighting paired with --editor-bg.
+  // Use `resolved`, not `current`: `current` may be 'system', and a 'system'
+  // choice on a dark OS would otherwise drop oneDark while the rest of the
+  // page renders dark.
+  const extensions = $derived(
+    theme.resolved === 'dark'
+      ? [oneDark, ...importsCompletion(engine), syntaxLinter]
+      : [...importsCompletion(engine), syntaxLinter],
+  );
 </script>
 
 <div class="editor">
@@ -31,7 +41,6 @@
   <CodeMirror
     bind:value={code}
     {lang}
-    theme={oneDark}
     {extensions}
   />
 </div>
@@ -44,6 +53,16 @@
     border: 1px solid var(--cell-border);
     border-radius: 6px;
     overflow: hidden;
+
+    /* svelte-codemirror-editor wraps CodeMirror in <div
+       class="codemirror-wrapper">. Without an explicit height on that
+       wrapper, .cm-editor's `height: 100%` resolves against an auto-
+       sized parent and CodeMirror's internal .cm-scroller never gets a
+       definite height — so the editor grows to its full code height
+       instead of scrolling internally. */
+    :global(.codemirror-wrapper) {
+      height: 100%;
+    }
 
     :global(.cm-editor) {
       height: 100%;

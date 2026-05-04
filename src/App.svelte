@@ -1,8 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { turingVersion, postVersion } from 'virtual:lib-versions';
+  import { turingVersion, postVersion, appVersion } from 'virtual:lib-versions';
   import MachineView from './components/MachineView.svelte';
   import { icons } from './lib/icons.ts';
+  import { theme } from './lib/theme.svelte.ts';
   import { ENGINES, type Engine } from './lib/types.ts';
 
   function readEngineFromUrl(): Engine {
@@ -36,6 +37,16 @@
     }
     history.pushState(null, '', url);
   }
+
+  const themeIcon = $derived(
+    theme.current === 'system'
+      ? icons.deviceDesktop
+      : theme.current === 'light' ? icons.sun : icons.moon,
+  );
+  const themeNext = $derived(
+    theme.current === 'system' ? 'light' : theme.current === 'light' ? 'dark' : 'system',
+  );
+  const themeLabel = $derived(`Theme: ${theme.current} — click to switch to ${themeNext}`);
 </script>
 
 <header>
@@ -56,6 +67,26 @@
       Post
     </button>
   </nav>
+  <button
+    type="button"
+    class="theme-toggle"
+    onclick={() => theme.cycle()}
+    title={themeLabel}
+    aria-label={themeLabel}
+  >
+    {@html themeIcon}
+  </button>
+</header>
+
+<main>
+  {#key activeEngine}
+    <MachineView engine={activeEngine} />
+  {/key}
+</main>
+
+<footer>
+  <span class="app-version" title="machines-demo version">v{appVersion}</span>
+  <span class="sep" aria-hidden="true">·</span>
   <span class="lib-versions">
     <a
       href="https://www.npmjs.com/package/@turing-machine-js/machine"
@@ -81,13 +112,7 @@
   >
     {@html icons.github}
   </a>
-</header>
-
-<main>
-  {#key activeEngine}
-    <MachineView engine={activeEngine} />
-  {/key}
-</main>
+</footer>
 
 <style>
   header {
@@ -139,30 +164,11 @@
     }
   }
 
-  .lib-versions {
+  /* Theme toggle sits at the right end of the header — pushed there by
+     `margin-left: auto` since the lib-versions chunk that previously held
+     that role moved to the footer. */
+  .theme-toggle {
     margin-left: auto;
-    font-size: 12px;
-    color: var(--muted);
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-
-    a {
-      color: inherit;
-      text-decoration: none;
-      transition: color var(--anim-button-hover-ms) ease;
-
-      &:hover {
-        color: var(--fg);
-      }
-    }
-
-    .sep {
-      opacity: 0.6;
-    }
-  }
-
-  .repo-link {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -170,11 +176,15 @@
     height: 28px;
     border-radius: 6px;
     color: var(--muted);
-    text-decoration: none;
+    background: transparent;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    font: inherit;
     transition: background-color var(--anim-button-hover-ms) ease, color var(--anim-button-hover-ms) ease;
 
     &:hover {
-      background: rgba(255, 255, 255, 0.06);
+      background: var(--hover-bg);
       color: var(--fg);
     }
 
@@ -192,6 +202,62 @@
 
     @media (max-width: 768px) {
       overflow: auto;
+    }
+  }
+
+  /* Bottom-right meta strip: app + lib versions + GitHub link. Compact and
+     low-emphasis; mirrors the header's muted treatment. */
+  footer {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    font-size: 11px;
+    color: var(--muted);
+    border-top: 1px solid var(--cell-border);
+
+    a {
+      color: inherit;
+      text-decoration: none;
+      transition: color var(--anim-button-hover-ms) ease;
+
+      &:hover {
+        color: var(--fg);
+      }
+    }
+
+    .sep {
+      opacity: 0.6;
+    }
+  }
+
+  .lib-versions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .repo-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    margin-left: 4px;
+    border-radius: 4px;
+    color: var(--muted);
+    transition: background-color var(--anim-button-hover-ms) ease, color var(--anim-button-hover-ms) ease;
+
+    &:hover {
+      background: var(--hover-bg);
+      color: var(--fg);
+    }
+
+    :global(svg) {
+      width: 14px;
+      height: 14px;
+      display: block;
     }
   }
 </style>

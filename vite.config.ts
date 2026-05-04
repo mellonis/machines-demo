@@ -7,6 +7,9 @@ const pkgVersion = (pkg: string): string =>
 
 const VIRTUAL_ID = 'virtual:lib-versions';
 
+const appVersion = (): string =>
+  JSON.parse(readFileSync('./package.json', 'utf-8')).version;
+
 const libVersions = (): Plugin => ({
   name: 'lib-versions',
   resolveId(id) {
@@ -16,8 +19,10 @@ const libVersions = (): Plugin => ({
     if (id !== `\0${VIRTUAL_ID}`) return;
     const turing = pkgVersion('@turing-machine-js/machine');
     const post = pkgVersion('@post-machine-js/machine');
+    const app = appVersion();
     return `export const turingVersion = ${JSON.stringify(turing)};
 export const postVersion = ${JSON.stringify(post)};
+export const appVersion = ${JSON.stringify(app)};
 `;
   },
 });
