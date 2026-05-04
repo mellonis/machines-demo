@@ -45,7 +45,7 @@ src/
 ├── app.ts                   # entry; mounts <App>
 ├── app.css                  # global tokens + base styles
 ├── components/
-│   ├── MachineTab.svelte    # per-engine orchestrator (one $state, derived disabled flags)
+│   ├── MachineView.svelte   # per-engine orchestrator (one $state, derived disabled flags)
 │   ├── Tape.svelte          # virtualized belt with prep-shift slide trick
 │   ├── ControlPanel.svelte  # L/S/R + alphabet chips + Apply
 │   ├── Editor.svelte        # CodeMirror wrapper + localStorage persist

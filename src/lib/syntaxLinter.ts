@@ -4,7 +4,7 @@ import { syntaxTree } from '@codemirror/language';
 /**
  * Editor preflight using the Lezer JS parser already loaded by
  * @codemirror/lang-javascript. Catches obvious syntax errors (unclosed braces,
- * missing parens, etc.) before the user clicks Load. Does NOT catch semantic
+ * missing parens, etc.) before the user clicks Build. Does NOT catch semantic
  * issues like `let const = 1` — for that you'd need a real type checker.
  */
 export const syntaxLinter = linter((view) => {

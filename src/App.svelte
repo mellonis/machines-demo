@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import MachineTab from './components/MachineTab.svelte';
+  import MachineView from './components/MachineView.svelte';
   import { icons } from './lib/icons.ts';
   import { ENGINES, type Engine } from './lib/types.ts';
 
@@ -69,7 +69,7 @@
 
 <main>
   {#key activeEngine}
-    <MachineTab engine={activeEngine} />
+    <MachineView engine={activeEngine} />
   {/key}
 </main>
 
@@ -80,35 +80,47 @@
     gap: 24px;
     padding: 12px 24px;
     border-bottom: 1px solid var(--cell-border);
-  }
 
-  header h1 {
-    font-size: 16px;
-    margin: 0;
-    font-weight: 500;
-    letter-spacing: 0.04em;
-    color: var(--head-dim);
+    h1 {
+      font-size: 16px;
+      margin: 0;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      color: var(--accent);
+
+      .title-prefix {
+        @media (max-width: 768px) {
+          display: none;
+        }
+      }
+    }
+
+    @media (max-width: 768px) {
+      flex-wrap: wrap;
+      gap: 12px;
+      padding: 10px 14px;
+    }
   }
 
   .tabs {
     display: flex;
     gap: 4px;
-  }
 
-  .tabs button {
-    background: transparent;
-    border: 1px solid transparent;
-    color: var(--muted);
-    padding: 4px 14px;
-    font: inherit;
-    cursor: pointer;
-    border-radius: 6px;
-  }
+    button {
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--muted);
+      padding: 4px 14px;
+      font: inherit;
+      cursor: pointer;
+      border-radius: 6px;
 
-  .tabs button.active {
-    color: var(--fg);
-    background: var(--cell-bg);
-    border-color: var(--cell-border);
+      &.active {
+        color: var(--fg);
+        background: var(--cell-bg);
+        border-color: var(--cell-border);
+      }
+    }
   }
 
   .repo-link {
@@ -122,37 +134,25 @@
     color: var(--muted);
     text-decoration: none;
     transition: background-color var(--anim-button-hover-ms) ease, color var(--anim-button-hover-ms) ease;
-  }
 
-  .repo-link:hover {
-    background: rgba(255, 255, 255, 0.06);
-    color: var(--fg);
-  }
+    &:hover {
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--fg);
+    }
 
-  .repo-link :global(svg) {
-    width: 18px;
-    height: 18px;
-    display: block;
+    :global(svg) {
+      width: 18px;
+      height: 18px;
+      display: block;
+    }
   }
 
   main {
     flex: 1;
     overflow: hidden;
     display: flex;
-  }
 
-  @media (max-width: 768px) {
-    header {
-      flex-wrap: wrap;
-      gap: 12px;
-      padding: 10px 14px;
-    }
-
-    header h1 .title-prefix {
-      display: none;
-    }
-
-    main {
+    @media (max-width: 768px) {
       overflow: auto;
     }
   }

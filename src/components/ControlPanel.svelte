@@ -1,23 +1,21 @@
 <script lang="ts">
   import { icons } from '../lib/icons.ts';
-  import type { Command, Movement } from '../lib/types.ts';
+  import type { Alphabets, Command, Movement } from '../lib/types.ts';
 
   type Props = {
-    alphabets: readonly (readonly string[])[];
+    alphabets: Alphabets;
     enabled: boolean;
-    visible: boolean;
     applyVisible: boolean;
     /** Show colored dot + "Tape N" label per row. Hidden for inherently
      * single-tape engines (Post) where the label is redundant. */
     showTapeLabels?: boolean;
     caretColors?: readonly string[];
-    onApply: (cmds: Command[]) => void;
+    onApply: (commands: Command[]) => void;
   };
 
   let {
     alphabets,
     enabled,
-    visible,
     applyVisible,
     showTapeLabels = true,
     caretColors,
@@ -25,7 +23,7 @@
   }: Props = $props();
 
   // Per-tape selection. Lengths follow `alphabets.length`. The $effect below
-  // resyncs whenever the tape count changes (new Load with different N).
+  // resyncs whenever the tape count changes (new Build with different N).
   let movements = $state<Movement[]>([]);
   let symbols = $state<(string | null)[]>([]);
 
@@ -37,45 +35,47 @@
     }
   });
 
+  // How long the Apply button stays in the `.pressed` (flash) state after a
+  // demo-driven apply. Long enough to read as a press, short enough to fall
+  // well within DEMO_REFLECT_DELAY_MS (700) so each tick's flash resolves
+  // before the next reflect.
+  const APPLY_FLASH_MS = 240;
+
   let flashing = $state(false);
-  let flashTimer: ReturnType<typeof setTimeout> | null = null;
+  let flashTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
   export function flashApply(): void {
     flashing = true;
-    if (flashTimer !== null) clearTimeout(flashTimer);
-    flashTimer = setTimeout(() => {
+    if (flashTimeoutId !== null) clearTimeout(flashTimeoutId);
+    flashTimeoutId = setTimeout(() => {
       flashing = false;
-      flashTimer = null;
-    }, 240);
+      flashTimeoutId = null;
+    }, APPLY_FLASH_MS);
   }
 
-  export function reflect(cmds: Command[]): void {
-    if (cmds.length !== alphabets.length) return;
-    movements = cmds.map((c) => c.movement);
-    symbols = cmds.map((c) => c.symbol);
+  export function reflect(commands: Command[]): void {
+    if (commands.length !== alphabets.length) return;
+    movements = commands.map((c) => c.movement);
+    symbols = commands.map((c) => c.symbol);
   }
 
   function selectMovement(i: number, m: Movement): void {
     if (!enabled) return;
-    const next = [...movements];
-    next[i] = m;
-    movements = next;
+    movements = movements.with(i, m);
   }
 
   function selectSymbol(i: number, s: string | null): void {
     if (!enabled) return;
-    const next = [...symbols];
-    next[i] = s;
-    symbols = next;
+    symbols = symbols.with(i, s);
   }
 
   function fireApply(): void {
     if (!enabled) return;
-    const cmds: Command[] = movements.map((mv, i) => ({
-      movement: mv,
+    const commands: Command[] = movements.map((movement, i) => ({
+      movement,
       symbol: symbols[i] ?? null,
     }));
-    onApply(cmds);
+    onApply(commands);
   }
 
   const MOVEMENT_BUTTONS: Array<{ code: Movement; svg: string; label: string }> = [
@@ -87,7 +87,6 @@
 
 <div
   class="control-panel"
-  class:hidden={!visible}
   class:disabled={!enabled}
   class:no-apply={!applyVisible}
 >
@@ -115,10 +114,15 @@
           >
             {@html icons.keep}
           </button>
+          <!-- `sym` not `symbol` — the latter shadows the built-in TS/JS
+               `symbol` type the upstream library uses for movement primitives.
+               No UI substitution: the button shows the literal alphabet
+               symbol, including whatever the user picked for blank. -->
           {#each alpha as sym, j (j)}
             <button
               type="button"
               class="cp-btn"
+              class:blank={j === 0}
               class:selected={symbols[i] === sym}
               title={j === 0 ? 'Write blank' : `Write ${sym}`}
               aria-label={showTapeLabels
@@ -126,7 +130,7 @@
                 : j === 0 ? 'Write blank' : `Write ${sym}`}
               onclick={() => selectSymbol(i, sym)}
             >
-              {j === 0 ? '␣' : sym}
+              {sym}
             </button>
           {/each}
         </div>
@@ -173,9 +177,16 @@
     border-radius: var(--surface-radius);
     background: var(--surface-bg);
     animation: enter var(--anim-belt-enter-ms) ease-out var(--anim-belt-enter-delay-panel-ms) backwards;
-  }
 
-  .control-panel.hidden { display: none; }
+    &.disabled .interactive {
+      opacity: 0.5;
+      pointer-events: none;
+    }
+
+    &.no-apply .apply-row {
+      display: none;
+    }
+  }
 
   .interactive {
     display: flex;
@@ -184,56 +195,72 @@
     transition: opacity 150ms ease;
   }
 
-  .control-panel.disabled .interactive {
-    opacity: 0.5;
-    pointer-events: none;
-  }
-
-  .control-panel.no-apply .apply-row {
-    display: none;
-  }
-
   .tape-row {
     display: flex;
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
     padding: 4px 0;
-  }
 
-  .tape-row + .tape-row {
-    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    & + & {
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+    }
   }
 
   .tape-dot {
+    /* Class-level default keeps `var(--dot)` resolvable without a fallback;
+       the inline `style="--dot: …"` from caretColors[i] overrides it when
+       a per-tape color is provided. */
+    --dot: var(--head);
     width: 10px;
     height: 10px;
     border-radius: 50%;
     flex-shrink: 0;
-    background: var(--dot, var(--head));
+    background: var(--dot);
   }
 
   .tape-label {
     font-size: 12px;
     color: var(--muted);
     min-width: 50px;
+
+    @media (max-width: 768px) {
+      min-width: 40px;
+    }
   }
 
   .row {
     display: flex;
     gap: 4px;
     flex-wrap: wrap;
-  }
 
-  .row.symbols {
-    flex: 1;
-    min-width: 0;
-  }
+    &.symbols {
+      flex: 1;
+      min-width: 0;
 
-  .row.movement {
-    margin-left: auto;
-    padding-left: 8px;
-    border-left: 1px solid rgba(255, 255, 255, 0.05);
+      /* Long alphabets shouldn't wrap a second row on a narrow phone — let
+         the symbols row scroll horizontally. */
+      @media (max-width: 768px) {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+
+        &::-webkit-scrollbar {
+          display: none;
+        }
+
+        .cp-btn {
+          flex-shrink: 0;
+        }
+      }
+    }
+
+    &.movement {
+      margin-left: auto;
+      padding-left: 8px;
+      border-left: 1px solid rgba(255, 255, 255, 0.05);
+    }
   }
 
   .apply-row {
@@ -262,31 +289,53 @@
       background-color var(--anim-button-hover-ms) ease,
       border-color var(--anim-button-hover-ms) ease,
       color var(--anim-button-hover-ms) ease;
-  }
 
-  .cp-btn:hover {
-    border-color: rgba(110, 168, 254, 0.5);
-    color: var(--accent);
-  }
+    &:hover {
+      border-color: rgba(110, 168, 254, 0.5);
+      color: var(--accent);
+    }
 
-  .cp-btn.selected {
-    background: rgba(110, 168, 254, 0.2);
-    border-color: var(--accent);
-    color: var(--accent);
-  }
+    /* Blank-symbol chip — matches Tape.svelte's `.cell.blank`: dim border +
+       dim glyph so the chip is recognisably "blank" regardless of which
+       character the user chose. Min-width keeps the chip a clickable size
+       even when the blank symbol is an invisible space. */
+    &.blank {
+      min-width: 30px;
+      border-color: color-mix(in srgb, rgba(255, 255, 255, 0.06) 40%, var(--cell-bg));
+      color: color-mix(in srgb, var(--fg) 40%, var(--cell-bg));
+    }
 
-  .cp-btn.pressed {
-    background: rgba(110, 168, 254, 0.4);
-    border-color: var(--accent);
-    color: var(--accent);
-    transform: scale(0.96);
-    transition: background-color 80ms ease, transform 80ms ease;
-  }
+    &.selected {
+      background: rgba(110, 168, 254, 0.2);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
 
-  .cp-btn :global(svg) {
-    width: 16px;
-    height: 16px;
-    display: block;
+    &.pressed {
+      background: rgba(110, 168, 254, 0.4);
+      border-color: var(--accent);
+      color: var(--accent);
+      transform: scale(0.96);
+      transition: background-color 80ms ease, transform 80ms ease;
+    }
+
+    :global(svg) {
+      width: 16px;
+      height: 16px;
+      display: block;
+    }
+
+    @media (max-width: 768px) {
+      min-width: 28px;
+      height: 26px;
+      padding: 2px 6px;
+      font-size: 12px;
+
+      :global(svg) {
+        width: 14px;
+        height: 14px;
+      }
+    }
   }
 
   .apply {
@@ -296,40 +345,5 @@
   @keyframes enter {
     from { opacity: 0; transform: translateY(20px); }
     to   { opacity: 1; transform: translateY(0); }
-  }
-
-  @media (max-width: 768px) {
-    .tape-label {
-      min-width: 40px;
-    }
-
-    .cp-btn {
-      min-width: 28px;
-      height: 26px;
-      padding: 2px 6px;
-      font-size: 12px;
-    }
-
-    .cp-btn :global(svg) {
-      width: 14px;
-      height: 14px;
-    }
-
-    /* Long alphabets shouldn't wrap a second row in a narrow phone — let the
-       symbols row scroll horizontally. */
-    .row.symbols {
-      flex-wrap: nowrap;
-      overflow-x: auto;
-      scrollbar-width: none;
-      -webkit-overflow-scrolling: touch;
-    }
-
-    .row.symbols::-webkit-scrollbar {
-      display: none;
-    }
-
-    .row.symbols .cp-btn {
-      flex-shrink: 0;
-    }
   }
 </style>

@@ -1,19 +1,17 @@
 <script lang="ts">
   import { onDestroy, onMount, tick, untrack } from 'svelte';
-  import Tape from './Tape.svelte';
+  import TapesStack from './TapesStack.svelte';
+  import Toolbar from './Toolbar.svelte';
   import ControlPanel from './ControlPanel.svelte';
   import Log from './Log.svelte';
   import type { LogEntry, LogKind } from '../lib/log.ts';
-  import { MachineRunner } from '../lib/runner.ts';
-  import { type Command, type Engine, type TapeSnapshot } from '../lib/types.ts';
+  import { MachineRunner, WorkerError } from '../lib/machineRunner.ts';
+  import * as turing from '@turing-machine-js/machine';
+  import { VIEWPORT_WIDTH } from '../lib/caps.ts';
+  import { type Alphabets, type Command, type Engine, type TapeSnapshot } from '../lib/types.ts';
   import { startDemoLoop } from '../lib/demoLoop.ts';
   import { startAutoStep, parseInterval } from '../lib/autoStep.ts';
-  import {
-    alphabetsEntry,
-    appliedEntry,
-    stepEntry,
-    tapesEntry,
-  } from '../lib/format.ts';
+  import { commandsEntry, tapesEntry } from '../lib/format.ts';
   import {
     defaultExample,
     examples,
@@ -29,13 +27,11 @@
 
   /* ───── constants ───── */
 
-  const SYNTHETIC_ALPHABETS: readonly (readonly string[])[] = [
-    [' ', 'a', 'b', '*'],
-  ];
   const NEUTRAL_COMMAND: Command = { movement: 'S', symbol: null };
 
-  // Per-tape caret colors for multi-tape stacks. Length must match MAX_TAPES
-  // (worker rejects loads with more tapes than the palette can color).
+  const DEMO_BANK_SIZE = 50;
+
+  // Length must match MAX_TAPES — worker rejects loads with more tapes.
   const CARET_COLORS: readonly string[] = [
     '#6ea8fe', // blue
     '#ff6b6b', // red
@@ -59,15 +55,20 @@
   let userTookControl = $state(false);
   let demoEnabled = $state(true);
   let halted = $state(false);
-  let alphabets = $state<readonly (readonly string[])[]>(SYNTHETIC_ALPHABETS);
-  let entries = $state<LogEntry[]>([]);
+  let alphabets = $state<Alphabets>([]);
+  let logEntries = $state<LogEntry[]>([]);
   let lastSnapshots = $state<TapeSnapshot[] | null>(null);
   let pendingOp = $state<'load' | 'run' | null>(null);
   let stepInFlight = $state(false);
+  let demoBank = $state<Command[][] | null>(null);
+  let demoLoadSeq = 0;
+  let mirrorMachine: turing.TuringMachine | null = null;
+  let mirrorTapeBlock: turing.TapeBlock | null = null;
+  let codeChangedWarned = false;
   let withPause = $state(false);
   let intervalText = $state('1s');
   let workerLive = $state(false);
-  // engine is fixed for a MachineTab instance (parent remounts on engine change
+  // engine is fixed for a MachineView instance (parent remounts on engine change
   // via {#key activeEngine}). untrack() acknowledges we want a one-time read.
   const engineExamples = untrack(() => examples(engine));
   const initialExample = untrack(() => {
@@ -78,14 +79,12 @@
   let code = $state<string>(
     untrack(() => loadCode(engine) ?? initialExample.code),
   );
-  let examplesOpen = $state(false);
-  let examplesMenuEl: HTMLDivElement | undefined;
 
   const selectedExample = $derived(
     findExample(engine, selectedExampleId) ?? defaultExample(engine),
   );
 
-  let tapeRefs = $state<Array<ReturnType<typeof Tape> | undefined>>([]);
+  let tapesStackRef = $state<ReturnType<typeof TapesStack> | undefined>();
   let panelRef = $state<ReturnType<typeof ControlPanel> | undefined>();
 
   // Editor pulls in all of CodeMirror (~500 KB unzipped). Lazy-load it so the
@@ -103,26 +102,18 @@
 
   const intervalMs = $derived(parseInterval(intervalText));
   const intervalIsValid = $derived(intervalMs !== null);
-  const latestEntry = $derived(entries.length > 0 ? entries[entries.length - 1] : null);
+  // Skip separators — mobile status mirrors a meaningful message, not a divider.
+  const latestEntry = $derived.by(() => {
+    for (let i = logEntries.length - 1; i >= 0; i--) {
+      if (!logEntries[i].separator) return logEntries[i];
+    }
+    return null;
+  });
 
   // ControlPanel handles both single- and multi-tape via Command[]; tape
   // labels are only useful to disambiguate, so show them only when N > 1.
   const tapeCount = $derived(lastSnapshots?.length ?? 1);
   const showTapeLabels = $derived(tapeCount > 1);
-  // Hard-stop gradient: each tape row is solid color[i]; transitions happen
-  // only in the inter-tape gap. Stops are pixel offsets built from the
-  // .tapes-stack CSS vars (--cell-h, --tape-gap) so they track breakpoints.
-  const headThreadBackground = $derived.by(() => {
-    const colors = CARET_COLORS.slice(0, tapeCount);
-    if (colors.length === 1) return colors[0];
-    const stops: string[] = [];
-    for (let i = 0; i < colors.length; i++) {
-      const top = `calc(${i} * (var(--cell-h) + var(--tape-gap)))`;
-      const bot = `calc(${i} * (var(--cell-h) + var(--tape-gap)) + var(--cell-h))`;
-      stops.push(`${colors[i]} ${top}`, `${colors[i]} ${bot}`);
-    }
-    return `linear-gradient(to bottom, ${stops.join(', ')})`;
-  });
   const panelEnabled = $derived(executionMode === 'MANUAL');
   const applyVisible = $derived(
     executionMode === 'DEMO' || executionMode === 'MANUAL',
@@ -133,9 +124,10 @@
   const beltTransitionsOn = $derived(executionMode !== 'RUNNING_CONTINUOUS');
 
   const loadDisabled = $derived(pendingOp !== null);
+  // Step/Run stay enabled in HALTED — they reload-from-code on entry, which
+  // also clears `halted`. Disabling would just force an extra Build click.
   const stepDisabled = $derived(
     pendingOp !== null ||
-      halted ||
       !workerLive ||
       executionMode === 'RUNNING_CONTINUOUS',
   );
@@ -144,13 +136,11 @@
   // Soft-debounced inside doStep() instead.
   const runDisabled = $derived(
     pendingOp !== null ||
-      halted ||
       !workerLive ||
       executionMode === 'RUNNING_AUTO' ||
       executionMode === 'RUNNING_CONTINUOUS' ||
       (withPause && !intervalIsValid),
   );
-
   /* ───── log helpers ───── */
 
   function report(textOrEntry: string | LogEntry, kind?: LogKind): void {
@@ -160,22 +150,37 @@
         : kind
           ? { ...textOrEntry, kind }
           : textOrEntry;
-    entries = [...entries, entry];
+    logEntries = [...logEntries, entry];
   }
 
   function appendBatch(items: LogEntry[]): void {
     if (items.length === 0) return;
-    entries = [...entries, ...items];
+    logEntries = [...logEntries, ...items];
+  }
+
+  // Visually divides log activity per session (Build / Step / Run). Skipped
+  // when the log is empty so we don't open with a stranded divider.
+  function reportSeparator(): void {
+    if (logEntries.length === 0) return;
+    logEntries = [...logEntries, { text: '', separator: true }];
   }
 
   function clearLog(): void {
-    entries = [];
+    logEntries = [];
   }
 
   /* ───── side-effect handlers (one source of truth on error) ───── */
 
   function failHalted(err: unknown): void {
     const msg = err instanceof Error ? err.message : String(err);
+    // Worker errored mid-step / mid-run. If it shipped a partial tape state,
+    // sync the mirror + display to it so the user sees where execution stuck
+    // (otherwise we'd strand them on the loaded tape).
+    if (err instanceof WorkerError && err.tapes && err.tapes.length > 0) {
+      lastSnapshots = err.tapes;
+      _buildMirrorMachine(err.tapes, alphabets);
+      setAllFromMirror();
+    }
     report(`error: ${msg}`, 'error');
     halted = true;
     executionMode = 'HALTED';
@@ -183,19 +188,112 @@
 
   /* ───── load / step / run ───── */
 
-  function applyToAll(commands: Command[], opts: { animate: boolean }): void {
-    commands.forEach((cmd, i) => {
-      void tapeRefs[i]?.apply(cmd, opts);
+  function _buildMirrorMachine(tapes: TapeSnapshot[], alphabets: Alphabets): void {
+    const libAlphabets = alphabets.map((syms) => new turing.Alphabet([...syms]));
+    // Mirror exactly what the worker had — full `symbols` and absolute head
+    // `position` — so the user can navigate beyond the initial window
+    // without blanks where original symbols should be. `viewportWidth` is
+    // ours to pick (the mirror is internal, no user code observes it); set
+    // it via the setter (NOT the constructor) so the library's `normalise()`
+    // pads `#symbols` to satisfy the viewport — the constructor stores
+    // `viewportWidth` without normalising, so a user tape of e.g. 4 cells
+    // would leave `.viewport` returning only 4 cells.
+    //
+    // WORKAROUND for mellonis/turing-machine-js#95 — when that lands, the
+    // `viewportWidth` field can move into the `new turing.Tape({...})` call
+    // and the post-construction setter assignment can be deleted.
+    const libTapes = tapes.map((snap, i) => {
+      const tape = new turing.Tape({
+        alphabet: libAlphabets[i],
+        symbols: [...snap.symbols],
+        position: snap.position,
+      });
+      tape.viewportWidth = VIEWPORT_WIDTH;
+      return tape;
+    });
+    mirrorTapeBlock = turing.TapeBlock.fromTapes(libTapes);
+    mirrorMachine = new turing.TuringMachine({ tapeBlock: mirrorTapeBlock });
+  }
+
+  function _runMirrorStep(commands: Command[]): void {
+    if (!mirrorMachine || !mirrorTapeBlock) return;
+    const oneStep = new turing.State({
+      [turing.ifOtherSymbol]: {
+        command: commands.map((command) => ({
+          symbol: command.symbol !== null ? command.symbol : turing.symbolCommands.keep,
+          movement:
+            command.movement === 'L' ? turing.movements.left
+            : command.movement === 'R' ? turing.movements.right
+            : turing.movements.stay,
+        })),
+        nextState: turing.haltState,
+      },
+    });
+    mirrorMachine.run({ initialState: oneStep });
+  }
+
+  // Push the current mirror tapes into the visible <Tape> instances. Used
+  // after `_buildMirrorMachine` (Build / Run-end / error-recovery) to seed
+  // the UI; does not animate.
+  function setAllFromMirror(): void {
+    if (!mirrorTapeBlock) return;
+    mirrorTapeBlock.tapes.forEach((tape, i) => {
+      tapesStackRef?.setFromTape(i, tape);
     });
   }
 
-  function setAllFromSnapshots(snaps: TapeSnapshot[]): void {
-    snaps.forEach((s, i) => tapeRefs[i]?.setFromSnapshot(s));
+  // Per-step render path — used in DEMO, MANUAL Apply, and RUNNING_*
+  // (except RUNNING_CONTINUOUS, which rebuilds in one shot). Advances the
+  // mirror with `commands`, then has each <Tape> read its updated mirror
+  // tape's `.viewport` and play the slide animation if requested.
+  function renderFromMirror(commands: Command[], animate: boolean): void {
+    if (!mirrorTapeBlock) return;
+    _runMirrorStep(commands);
+    mirrorTapeBlock.tapes.forEach((tape, i) => {
+      const command = commands[i];
+      const delta = (command?.movement === 'L' ? -1 : command?.movement === 'R' ? 1 : 0) as -1 | 0 | 1;
+      tapesStackRef?.setFromTape(i, tape, delta, animate);
+    });
   }
 
-  function reflectToActivePanel(cmds: Command[] | null): void {
-    if (!cmds || cmds.length === 0) return;
-    panelRef?.reflect(cmds);
+  // Reloads the worker + rebuilds mirrorMachine. `source` defaults to the
+  // current editor `code`; `doLoad` passes `selectedExample.code` instead for
+  // non-user-initiated DEMO loads. Does NOT change executionMode or demoBank
+  // — callers own those.
+  async function reloadWorker(source: string = code): Promise<boolean> {
+    pendingOp = 'load';
+    try {
+      const res = await runner.build(source);
+      workerLive = true;
+      alphabets = res.alphabets;
+      lastSnapshots = res.tapes;
+      halted = res.halted;
+      _buildMirrorMachine(res.tapes, res.alphabets);
+      await tick();
+      setAllFromMirror();
+      return true;
+    } catch (err) {
+      workerLive = false;
+      alphabets = [];
+      tapesStackRef?.clearAll();
+      lastSnapshots = null;
+      halted = true;
+      const msg = err instanceof Error ? err.message : String(err);
+      report(`error: ${msg}`, 'error');
+      return false;
+    } finally {
+      pendingOp = null;
+    }
+  }
+
+  function stopMachine(): void {
+    executionMode = 'HALTED';
+    report('stopped', 'warn');
+  }
+
+  function reflectToActivePanel(commands: Command[] | null): void {
+    if (!commands || commands.length === 0) return;
+    panelRef?.reflect(commands);
   }
 
   function reflectNeutral(): void {
@@ -204,39 +302,49 @@
   }
 
   async function doLoad({ userInitiated = false } = {}): Promise<void> {
+    const seq = ++demoLoadSeq;
     if (userInitiated) demoEnabled = false;
-    report('loading…');
-    pendingOp = 'load';
+    demoBank = null;
+    reportSeparator();
+    report(userInitiated ? 'loading…' : 'demo machine is loading…');
+
+    // For DEMO (initial / non-user load), always run the canonical example —
+    // user's persisted edits in the editor may be incomplete or broken; the
+    // demo should always show a working machine. Build button uses live code.
+    const source = userInitiated ? code : selectedExample.code;
+    const ok = await reloadWorker(source);
+
+    executionMode = userTookControl ? 'MANUAL' : 'DEMO';
+
+    if (!ok) return;
+
+    // Tape refs are bound by {#each tapes}: wait one tick for new
+    // <Tape> instances to mount before reflecting panel state.
+    appendBatch(tapesEntry(lastSnapshots!, alphabets, CARET_COLORS));
+    report(halted ? 'loaded — halted immediately' : 'loaded — ready', 'ok');
+    await tick();
+    if (userTookControl) reflectNeutral();
+
+    // Build demo bank using a separate worker — main runner is never touched,
+    // so Take Control → Apply works at any point without racing this.
+    if (!userTookControl && !halted && demoEnabled && workerLive) {
+      void buildDemoBank(seq, source);
+    }
+  }
+
+  async function buildDemoBank(seq: number, source: string): Promise<void> {
+    const tempRunner = new MachineRunner(engine);
     try {
-      const res = await runner.load(code);
-      workerLive = true;
-      alphabets = res.alphabets;
-      lastSnapshots = res.tapes;
-      // Tape refs are bound by {#each tapes}: wait one tick for the new
-      // <Tape> instances to mount before pushing snapshots into them.
-      await tick();
-      setAllFromSnapshots(res.tapes);
-      halted = res.halted;
-      appendBatch([
-        alphabetsEntry(res.alphabets, CARET_COLORS),
-        tapesEntry(res.tapes, CARET_COLORS),
-      ]);
-      report(res.halted ? 'loaded — halted immediately' : 'loaded — ready', 'ok');
-      executionMode = userTookControl ? 'MANUAL' : 'DEMO';
-      // Wait one tick so the right panel has mounted/swapped before reflect.
-      await tick();
-      reflectToActivePanel(res.nextCommands);
-    } catch (err) {
-      workerLive = false;
-      alphabets = SYNTHETIC_ALPHABETS;
-      tapeRefs.forEach((r) => r?.clear());
-      lastSnapshots = null;
-      halted = true;
-      const msg = err instanceof Error ? err.message : String(err);
-      report(`error: ${msg}`, 'error');
-      executionMode = userTookControl ? 'MANUAL' : 'DEMO';
+      await tempRunner.build(source);
+      const bankRes = await tempRunner.run(DEMO_BANK_SIZE);
+      // Discard if a newer load has started since we began.
+      if (bankRes.commands.length > 0 && seq === demoLoadSeq) {
+        demoBank = bankRes.commands;
+      }
+    } catch {
+      // ignore — demo falls back to random commands
     } finally {
-      pendingOp = null;
+      tempRunner.terminate();
     }
   }
 
@@ -251,10 +359,23 @@
     // belt animation does NOT block — the user can click again as soon as the
     // worker returns (~ms), even mid-slide.
     if (stepInFlight) return;
+
+    // First step from any non-RUNNING_STEP mode (DEMO / MANUAL / HALTED):
+    // reload so mirrorMachine and worker start from the current code (user
+    // may have edited it; HALTED entry effectively restarts the machine).
     if (executionMode !== 'RUNNING_STEP') {
-      if (lastSnapshots) setAllFromSnapshots(lastSnapshots);
+      reportSeparator();
+      report('loading…');
+      const ok = await reloadWorker();
+      if (!ok) {
+        executionMode = userTookControl ? 'MANUAL' : 'DEMO';
+        return;
+      }
       executionMode = 'RUNNING_STEP';
+      codeChangedWarned = false;
+      reflectNeutral();
     }
+
     stepInFlight = true;
     let res;
     try {
@@ -265,36 +386,48 @@
     } finally {
       stepInFlight = false;
     }
-    lastSnapshots = res.tapes;
     halted = res.halted;
     if (res.halted) {
       report(`halted after ${res.stepsApplied} step(s)`, 'ok');
       executionMode = 'HALTED';
     } else {
-      report(stepEntry(res.stepsApplied, res.commands, CARET_COLORS));
+      report(commandsEntry(res.commands, { stepNumber: res.stepsApplied }, CARET_COLORS));
     }
     if (res.commands) {
-      applyToAll(res.commands, { animate: true });
+      renderFromMirror(res.commands, true);
       // Show what's queued for the *next* click, not what just applied.
       // Keeps panel state consistent under rapid clicks.
       if (res.nextCommands) reflectToActivePanel(res.nextCommands);
       else reflectNeutral();
-    } else {
-      setAllFromSnapshots(res.tapes);
     }
   }
 
   async function doRun(): Promise<void> {
     if (withPause) {
-      if (executionMode !== 'RUNNING_STEP' && lastSnapshots) {
-        setAllFromSnapshots(lastSnapshots);
+      // Resume auto-stepping from current RUNNING_STEP position without reload.
+      if (executionMode !== 'RUNNING_STEP') {
+        reportSeparator();
+        report('loading…');
+        const ok = await reloadWorker();
+        if (!ok) {
+          executionMode = userTookControl ? 'MANUAL' : 'DEMO';
+          return;
+        }
       }
       executionMode = 'RUNNING_AUTO';
+      codeChangedWarned = false;
       report(`auto-stepping every ${intervalMs}ms`);
       // Auto-step loop is started by the $effect that watches executionMode.
       return;
     }
-    if (lastSnapshots) setAllFromSnapshots(lastSnapshots);
+
+    reportSeparator();
+    report('loading…');
+    const ok = await reloadWorker();
+    if (!ok) {
+      executionMode = userTookControl ? 'MANUAL' : 'DEMO';
+      return;
+    }
     reflectNeutral();
     executionMode = 'RUNNING_CONTINUOUS';
     report('running…');
@@ -302,13 +435,14 @@
     try {
       const res = await runner.run();
       lastSnapshots = res.tapes;
-      setAllFromSnapshots(res.tapes);
+      _buildMirrorMachine(res.tapes, alphabets);
+      setAllFromMirror();
       halted = true;
       reflectNeutral();
       if (res.commands.length > 0) {
         appendBatch(
-          res.commands.map((cmds, i) =>
-            stepEntry(res.startStep + i + 1, cmds, CARET_COLORS),
+          res.commands.map((commands, i) =>
+            commandsEntry(commands, { stepNumber: res.startStep + i + 1 }, CARET_COLORS),
           ),
         );
       }
@@ -328,11 +462,12 @@
   function takeControl(): void {
     userTookControl = true;
     executionMode = 'MANUAL';
+    reflectNeutral();
   }
 
-  function onApply(cmds: Command[]): void {
-    applyToAll(cmds, { animate: true });
-    report(appliedEntry(cmds, CARET_COLORS));
+  function onApply(commands: Command[]): void {
+    renderFromMirror(commands, true);
+    report(commandsEntry(commands, 'applied', CARET_COLORS));
   }
 
   function resetCodeToSelected(): void {
@@ -342,30 +477,12 @@
   function pickExample(ex: Example): void {
     selectedExampleId = ex.id;
     code = ex.code;
-    examplesOpen = false;
   }
 
   // Persist the selected example id (separate from the editor code) so the
   // reset button keeps targeting the chosen source across reloads.
   $effect(() => {
     saveExampleId(engine, selectedExampleId);
-  });
-
-  // Close dropdown on outside click / Escape — only while open.
-  $effect(() => {
-    if (!examplesOpen) return;
-    const onPointer = (e: MouseEvent): void => {
-      if (!examplesMenuEl?.contains(e.target as Node)) examplesOpen = false;
-    };
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') examplesOpen = false;
-    };
-    document.addEventListener('mousedown', onPointer);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onPointer);
-      document.removeEventListener('keydown', onKey);
-    };
   });
 
   /* ───── effects ─────
@@ -377,12 +494,13 @@
   $effect(() => {
     if (executionMode !== 'DEMO' || !demoEnabled) return;
     return startDemoLoop({
-      reflect: (cmds) => panelRef?.reflect(cmds),
-      apply: (cmds) => {
+      reflect: (commands) => panelRef?.reflect(commands),
+      apply: (commands) => {
         panelRef?.flashApply();
-        applyToAll(cmds, { animate: true });
+        renderFromMirror(commands, true);
       },
       getAlphabets: () => alphabets,
+      getBank: () => demoBank,
     });
   });
 
@@ -391,20 +509,17 @@
       return startAutoStep(intervalMs, async () => {
         try {
           const res = await runner.step();
-          lastSnapshots = res.tapes;
           halted = res.halted;
           if (executionMode !== 'RUNNING_AUTO') return;
           if (res.commands) {
             reflectToActivePanel(res.commands);
-            applyToAll(res.commands, { animate: true });
-          } else {
-            setAllFromSnapshots(res.tapes);
+            renderFromMirror(res.commands, true);
           }
           if (res.halted) {
             report(`halted after ${res.stepsApplied} step(s)`, 'ok');
             executionMode = 'HALTED';
           } else {
-            report(stepEntry(res.stepsApplied, res.commands, CARET_COLORS));
+            report(commandsEntry(res.commands, { stepNumber: res.stepsApplied }, CARET_COLORS));
           }
         } catch (err) {
           failHalted(err);
@@ -414,7 +529,19 @@
   });
 
   $effect(() => {
-    tapeRefs.forEach((r) => r?.setTransitionsEnabled(beltTransitionsOn));
+    tapesStackRef?.setTransitionsEnabled(beltTransitionsOn);
+  });
+
+  $effect(() => {
+    void code;  // subscribe; value unused (read happens via untrack below)
+    untrack(() => {
+      if (executionMode === 'RUNNING_STEP' || executionMode === 'RUNNING_AUTO') {
+        if (!codeChangedWarned) {
+          codeChangedWarned = true;
+          report('code changed — current execution continues from loaded state', 'warn');
+        }
+      }
+    });
   });
 
   /* ───── lifecycle ───── */
@@ -430,27 +557,19 @@
 
 <section class="tab">
   <div class="panel-tape">
-    <div class="tapes-stack">
-      <div class="head-thread" style:background={headThreadBackground}></div>
-      {#each Array(tapeCount) as _, i}
-        <Tape
-          bind:this={tapeRefs[i]}
-          showCaret={i === tapeCount - 1}
-          caretColor={CARET_COLORS[i]}
-        />
-      {/each}
-    </div>
+    <TapesStack bind:this={tapesStackRef} {tapeCount} caretColors={CARET_COLORS} />
 
-    <ControlPanel
-      bind:this={panelRef}
-      {alphabets}
-      enabled={panelEnabled}
-      visible={true}
-      {applyVisible}
-      {showTapeLabels}
-      caretColors={CARET_COLORS}
-      {onApply}
-    />
+    <div class="panel-enter-clip">
+      <ControlPanel
+        bind:this={panelRef}
+        {alphabets}
+        enabled={panelEnabled}
+        {applyVisible}
+        {showTapeLabels}
+        caretColors={CARET_COLORS}
+        {onApply}
+      />
+    </div>
 
     {#if takeControlVisible}
       <button class="take-control" type="button" onclick={takeControl}>
@@ -459,64 +578,26 @@
       </button>
     {/if}
 
-    <Log {entries} onclear={clearLog} />
+    <Log entries={logEntries} onClear={clearLog} />
   </div>
 
   <div class="panel-editor">
-    <div class="controls">
-      <div class="examples-menu" bind:this={examplesMenuEl}>
-        <button
-          type="button"
-          class="icon-only"
-          aria-label="Example code sources"
-          aria-haspopup="menu"
-          aria-expanded={examplesOpen}
-          title="Example code sources"
-          onclick={() => (examplesOpen = !examplesOpen)}
-        >
-          {@html icons.examples}
-        </button>
-        {#if examplesOpen}
-          <ul class="dropdown" role="menu">
-            {#each engineExamples as ex (ex.id)}
-              <li role="none">
-                <button
-                  type="button"
-                  role="menuitem"
-                  class:selected={ex.id === selectedExampleId}
-                  onclick={() => pickExample(ex)}
-                >
-                  {ex.title}
-                </button>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      </div>
-      <button type="button" disabled={loadDisabled} onclick={() => doLoad({ userInitiated: true })}>
-        {@html icons.load}<span class="btn-label">Load</span>
-      </button>
-      <button type="button" disabled={stepDisabled} onclick={doStep}>
-        {@html executionMode === 'RUNNING_AUTO' ? icons.pause : icons.step}
-        <span class="btn-label">{executionMode === 'RUNNING_AUTO' ? 'Pause' : 'Step'}</span>
-      </button>
-      <button type="button" disabled={runDisabled} onclick={doRun}>
-        {@html icons.run}<span class="btn-label">Run</span>
-      </button>
-      <label class="checkbox">
-        <input type="checkbox" bind:checked={withPause} disabled={runDisabled} />
-        <span>with pause</span>
-      </label>
-      {#if withPause}
-        <input
-          type="text"
-          class="interval-input"
-          class:invalid={!intervalIsValid}
-          bind:value={intervalText}
-          placeholder="1s"
-        />
-      {/if}
-    </div>
+    <Toolbar
+      {executionMode}
+      {loadDisabled}
+      {stepDisabled}
+      {runDisabled}
+      {intervalIsValid}
+      examples={engineExamples}
+      {selectedExampleId}
+      bind:withPause
+      bind:intervalText
+      onBuild={() => doLoad({ userInitiated: true })}
+      onStep={doStep}
+      onRun={doRun}
+      onStop={stopMachine}
+      onPickExample={pickExample}
+    />
     <div
       class="status"
       class:error={latestEntry?.kind === 'error'}
@@ -528,7 +609,7 @@
     {#await editorPromise}
       <div class="editor-loading">Loading editor…</div>
     {:then Editor}
-      <Editor {engine} bind:code onreset={resetCodeToSelected} />
+      <Editor {engine} bind:code onReset={resetCodeToSelected} />
     {:catch err}
       <div class="editor-error">Failed to load editor: {err.message}</div>
     {/await}
@@ -539,10 +620,18 @@
 <style>
   .tab {
     flex: 1;
+    min-height: 0;
     display: grid;
     grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr;
     gap: 0;
     overflow: hidden;
+
+    @media (max-width: 768px) {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto 1fr;
+      overflow: visible;
+    }
   }
 
   .panel-tape {
@@ -553,45 +642,18 @@
     border-right: 1px solid var(--cell-border);
     overflow: hidden;
     min-height: 0;
+
+    @media (max-width: 768px) {
+      padding: 16px 16px 24px;
+      border-right: none;
+      border-bottom: 1px solid var(--cell-border);
+    }
   }
 
-  /* Tight inter-belt spacing for multi-tape stacks; the bottom belt's
-     padding-bottom (reserving the ▲ marker) is preserved, while non-bottom
-     belts drop their padding (Tape's `.no-caret` rule). */
-  .tapes-stack {
-    /* --cell-h mirrors Tape.svelte's responsive cell height; --tape-gap is
-       the flex gap between belts. Both feed the head-thread gradient stops. */
-    --cell-h: 40px;
-    --tape-gap: 4px;
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    gap: var(--tape-gap);
-    animation: enter var(--anim-belt-enter-ms) ease-out backwards;
-  }
-
-  @media (max-width: 768px) {
-    .tapes-stack { --cell-h: 36px; }
-  }
-  @media (max-width: 480px) {
-    .tapes-stack { --cell-h: 34px; }
-  }
-
-  /* Vertical thread connecting per-tape caret boxes through the inter-belt
-     gaps and down to the ▲ marker. Sits behind tapes and is masked by the
-     opaque .viewport in each Tape, so visually it only renders in the gap
-     regions and the bottom belt's padding-bottom (where the marker lives).
-     The thread terminates at the marker's vertical center (CSS triangle is
-     8px tall in Tape.svelte, so 4px = half). The marker paints over the
-     overlapping segment and shares the gradient's bottom color. */
-  .head-thread {
-    position: absolute;
-    top: 0;
-    bottom: 4px;
-    left: 50%;
-    width: 2px;
-    transform: translateX(-50%);
-    pointer-events: none;
+  /* Clips the control-panel's enter animation so translateY(20px) can't
+     visually spill into the Take Control button's space below. */
+  .panel-enter-clip {
+    overflow: hidden;
   }
 
   @keyframes enter {
@@ -609,6 +671,11 @@
        content size (CodeMirror's full code height); without it the grid
        row stretches to fit and the editor never has internal scroll. */
     min-height: 0;
+
+    @media (max-width: 768px) {
+      padding: 16px;
+      min-height: 60vh;
+    }
   }
 
   .take-control {
@@ -631,149 +698,20 @@
       background-color var(--anim-button-hover-ms) ease,
       border-color var(--anim-button-hover-ms) ease,
       color var(--anim-button-hover-ms) ease;
-  }
 
-  .take-control:hover {
-    background: rgba(95, 208, 104, 0.14);
-    border-color: var(--ok);
-    color: var(--ok);
-  }
+    &:hover {
+      background: rgba(95, 208, 104, 0.14);
+      border-color: var(--ok);
+      color: var(--ok);
+    }
 
-  .take-control :global(svg) {
-    width: 16px;
-    height: 16px;
-    display: block;
-    flex-shrink: 0;
-    opacity: 0.85;
-  }
-
-  .controls {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .controls button {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    background: var(--cell-bg);
-    border: 1px solid var(--cell-border);
-    color: var(--fg);
-    padding: 6px 14px;
-    font: inherit;
-    cursor: pointer;
-    border-radius: 6px;
-  }
-
-  .controls button:hover:not(:disabled) {
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-
-  .controls button:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-
-  .controls button :global(svg) {
-    width: 16px;
-    height: 16px;
-    display: block;
-    flex-shrink: 0;
-  }
-
-  /* Examples dropdown — anchored to its trigger via position:relative on the
-     wrapper. The button is icon-only; the menu floats below it. */
-  .examples-menu {
-    position: relative;
-    display: inline-flex;
-  }
-
-  .controls .examples-menu .icon-only {
-    padding: 6px 8px;
-  }
-
-  .dropdown {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    z-index: 20;
-    list-style: none;
-    margin: 0;
-    padding: 4px;
-    min-width: 220px;
-    /* Opaque: --surface-bg has alpha and would let the editor code show
-       through when the dropdown overlays CodeMirror. */
-    background: var(--cell-bg);
-    border: 1px solid var(--surface-border, var(--cell-border));
-    border-radius: 6px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-  }
-
-  .dropdown li {
-    list-style: none;
-  }
-
-  .dropdown button {
-    display: block;
-    width: 100%;
-    text-align: left;
-    background: transparent;
-    border: none;
-    color: var(--fg);
-    padding: 6px 10px;
-    font: inherit;
-    font-size: 13px;
-    border-radius: 4px;
-    cursor: pointer;
-  }
-
-  .dropdown button:hover {
-    background: rgba(110, 168, 254, 0.14);
-    color: var(--accent);
-  }
-
-  .dropdown button.selected {
-    color: var(--accent);
-    background: rgba(110, 168, 254, 0.18);
-  }
-
-  .checkbox {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 13px;
-    color: var(--muted);
-    cursor: pointer;
-    user-select: none;
-  }
-
-  .checkbox input {
-    accent-color: var(--accent);
-    margin: 0;
-  }
-
-  .interval-input {
-    width: 64px;
-    background: var(--cell-bg);
-    border: 1px solid var(--cell-border);
-    color: var(--fg);
-    padding: 4px 8px;
-    font: inherit;
-    font-size: 13px;
-    border-radius: 4px;
-  }
-
-  .interval-input:focus {
-    outline: none;
-    border-color: var(--accent);
-  }
-
-  .interval-input.invalid {
-    border-color: var(--error);
-    color: var(--error);
+    :global(svg) {
+      width: 16px;
+      height: 16px;
+      display: block;
+      flex-shrink: 0;
+      opacity: 0.85;
+    }
   }
 
   .version {
@@ -815,43 +753,13 @@
     overflow: hidden;
     text-overflow: ellipsis;
     min-height: 1.2em;
-  }
 
-  .status.error { color: var(--error); }
-  .status.warn  { color: var(--warn); }
-  .status.ok    { color: var(--ok); }
+    &.error { color: var(--error); }
+    &.warn  { color: var(--warn); }
+    &.ok    { color: var(--ok); }
 
-  @media (max-width: 768px) {
-    .tab {
-      grid-template-columns: 1fr;
-      grid-template-rows: auto 1fr;
-      overflow: visible;
-    }
-
-    .panel-tape {
-      padding: 16px 16px 24px;
-      border-right: none;
-      border-bottom: 1px solid var(--cell-border);
-    }
-
-    .panel-editor {
-      padding: 16px;
-      min-height: 60vh;
-    }
-
-    .status {
+    @media (max-width: 768px) {
       display: block;
-    }
-
-    .controls button {
-      padding: 4px 10px;
-      font-size: 13px;
-      gap: 4px;
-    }
-
-    .controls button :global(svg) {
-      width: 14px;
-      height: 14px;
     }
   }
 </style>

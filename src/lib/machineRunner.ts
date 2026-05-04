@@ -1,14 +1,30 @@
-import MachineWorker from './worker.ts?worker';
+import MachineWorker from './machineWorker.ts?worker';
+import { MAX_STEPS, WORKER_TIMEOUT_MS } from './caps.ts';
 import {
-  MAX_STEPS,
-  WORKER_TIMEOUT_MS,
+  type BuiltResponse,
   type Engine,
-  type LoadedResponse,
   type RanResponse,
   type SteppedResponse,
+  type TapeSnapshot,
   type WorkerRequest,
   type WorkerResponse,
 } from './types.ts';
+
+/**
+ * Thrown when the worker rejected with `{ type: 'error' }`. Carries the
+ * partial `tapes` snapshot from the worker (when present) so the main thread
+ * can mirror the state where execution actually stuck — the alternative is
+ * the user seeing the loaded tape with no record of the steps that ran.
+ */
+export class WorkerError extends Error {
+  readonly tapes: TapeSnapshot[] | null;
+
+  constructor(message: string, tapes: TapeSnapshot[] | null) {
+    super(message);
+    this.name = 'WorkerError';
+    this.tapes = tapes;
+  }
+}
 
 type Pending = {
   resolve: (data: WorkerResponse) => void;
@@ -33,8 +49,10 @@ export class MachineRunner {
   }
 
   private spawnWorker(): void {
-    // B2: an in-flight request must be rejected before we tear down the worker,
-    //     otherwise its timer fires later and corrupts state for the next request.
+    // Reject any in-flight request before tearing down the worker. Without
+    // this, the pending request's timeout would survive the worker swap and
+    // fire later — clearing `this.pending` and rejecting whatever new request
+    // had taken its slot.
     this.rejectPending(new Error('superseded by new worker'));
     if (this.worker) {
       this.worker.terminate();
@@ -51,7 +69,7 @@ export class MachineRunner {
     this.pending = null;
     clearTimeout(p.timer);
     if (data.type === 'error') {
-      p.reject(new Error(data.message));
+      p.reject(new WorkerError(data.message, data.tapes ?? null));
     } else {
       p.resolve(data);
     }
@@ -66,7 +84,7 @@ export class MachineRunner {
   }
 
   private send(msg: WorkerRequest, timeoutMs: number = WORKER_TIMEOUT_MS): Promise<WorkerResponse> {
-    if (!this.worker) throw new Error('worker not spawned — call load() first');
+    if (!this.worker) throw new Error('worker not spawned — call build() first');
     if (this.pending) throw new Error('previous request still pending');
 
     return new Promise<WorkerResponse>((resolve, reject) => {
@@ -83,10 +101,10 @@ export class MachineRunner {
     });
   }
 
-  async load(code: string): Promise<LoadedResponse> {
+  async build(code: string): Promise<BuiltResponse> {
     this.spawnWorker();
-    const r = await this.send({ type: 'load', engine: this.engine, code });
-    if (r.type !== 'loaded') throw new Error(`unexpected response: ${r.type}`);
+    const r = await this.send({ type: 'build', engine: this.engine, code });
+    if (r.type !== 'built') throw new Error(`unexpected response: ${r.type}`);
     return r;
   }
 
