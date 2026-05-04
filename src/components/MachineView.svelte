@@ -252,7 +252,8 @@
     mirrorTapeBlock.tapes.forEach((tape, i) => {
       const command = commands[i];
       const delta = (command?.movement === 'L' ? -1 : command?.movement === 'R' ? 1 : 0) as -1 | 0 | 1;
-      tapesStackRef?.setFromTape(i, tape, delta, animate);
+      const wrote = command != null && command.symbol !== null;
+      tapesStackRef?.setFromTape(i, tape, delta, animate, wrote);
     });
   }
 

@@ -33,8 +33,9 @@
     tape: turing.Tape | null,
     delta: -1 | 0 | 1 = 0,
     animate = false,
+    wrote = false,
   ): void {
-    void tapeRefs[i]?.setFromTape(tape, delta, animate);
+    void tapeRefs[i]?.setFromTape(tape, delta, animate, wrote);
   }
 
   export function clearAll(): void {

@@ -28,6 +28,7 @@
   --anim-belt-enter-ms: 400ms;
   --anim-belt-enter-delay-panel-ms: 100ms;
   --anim-button-hover-ms: 120ms;
+  --anim-cell-write-ms: 320ms;
 
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   color-scheme: dark;
