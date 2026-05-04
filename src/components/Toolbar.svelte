@@ -166,6 +166,8 @@
     Object.entries(snippets).sort((a, b) => b[1].savedAt - a[1].savedAt),
   );
 
+  let deletePendingId = $state<string | null>(null);
+
   // with-pause / interval are configuration for the *next* Run; meaningless
   // mid-run, so hide them in the running modes (they'd just be inert chrome).
   const configVisible = $derived(
@@ -208,19 +210,37 @@
           <li role="none" class="section-label">My snippets</li>
           {#each sortedSnippets as [id, snippet] (id)}
             <li role="none" class="snippet-row">
-              <button
-                type="button"
-                role="menuitem"
-                class:selected={id === loadedSnippetId}
-                onclick={() => { onLoadSnippet(id); examplesOpen = false; }}
-              >{snippet.title}</button>
-              <button
-                type="button"
-                class="delete-btn"
-                aria-label="Delete snippet {snippet.title}"
-                title="Delete"
-                onclick={(e) => { e.stopPropagation(); onDeleteSnippet(id); }}
-              >{@html icons.xSmall}</button>
+              {#if deletePendingId === id}
+                <span class="delete-confirm-label">{snippet.title}</span>
+                <button
+                  type="button"
+                  class="delete-confirm-yes"
+                  aria-label="Confirm delete"
+                  title="Yes, delete"
+                  onclick={(e) => { e.stopPropagation(); onDeleteSnippet(id); deletePendingId = null; }}
+                >Delete</button>
+                <button
+                  type="button"
+                  class="delete-confirm-no"
+                  aria-label="Cancel delete"
+                  title="Cancel"
+                  onclick={(e) => { e.stopPropagation(); deletePendingId = null; }}
+                >Cancel</button>
+              {:else}
+                <button
+                  type="button"
+                  role="menuitem"
+                  class:selected={id === loadedSnippetId}
+                  onclick={() => { onLoadSnippet(id); examplesOpen = false; }}
+                >{snippet.title}</button>
+                <button
+                  type="button"
+                  class="delete-btn"
+                  aria-label="Delete snippet {snippet.title}"
+                  title="Delete"
+                  onclick={(e) => { e.stopPropagation(); deletePendingId = id; }}
+                >{@html icons.xSmall}</button>
+              {/if}
             </li>
           {/each}
         {/if}
@@ -492,6 +512,36 @@
         width: 14px;
         height: 14px;
       }
+    }
+
+    .delete-confirm-label {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 13px;
+      color: var(--muted);
+      padding: 0 6px;
+    }
+
+    .delete-confirm-yes {
+      flex-shrink: 0;
+      font-size: 12px;
+      padding: 3px 8px;
+      border-color: color-mix(in srgb, var(--error) 50%, transparent);
+      color: var(--error);
+
+      &:hover {
+        border-color: var(--error) !important;
+        color: var(--error) !important;
+      }
+    }
+
+    .delete-confirm-no {
+      flex-shrink: 0;
+      font-size: 12px;
+      padding: 3px 8px;
     }
   }
 
