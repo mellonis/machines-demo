@@ -17,7 +17,7 @@
     "@codemirror/theme-one-dark": "^6.1.0",
     "@post-machine-js/machine": "^3.0.1",
     "@tabler/icons": "^3.41.1",
-    "@turing-machine-js/machine": "^3.0.1",
+    "@turing-machine-js/machine": "^3.0.2",
     "codemirror": "^6.0.1",
     "svelte-codemirror-editor": "^2.1.0"
   },

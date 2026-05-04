@@ -189,24 +189,15 @@
     // Mirror exactly what the worker had — full `symbols` and absolute head
     // `position` — so the user can navigate beyond the initial window
     // without blanks where original symbols should be. `viewportWidth` is
-    // ours to pick (the mirror is internal, no user code observes it); set
-    // it via the setter (NOT the constructor) so the library's `normalise()`
-    // pads `#symbols` to satisfy the viewport — the constructor stores
-    // `viewportWidth` without normalising, so a user tape of e.g. 4 cells
-    // would leave `.viewport` returning only 4 cells.
-    //
-    // WORKAROUND for mellonis/turing-machine-js#95 — when that lands, the
-    // `viewportWidth` field can move into the `new turing.Tape({...})` call
-    // and the post-construction setter assignment can be deleted.
-    const libTapes = tapes.map((snap, i) => {
-      const tape = new turing.Tape({
-        alphabet: libAlphabets[i],
-        symbols: [...snap.symbols],
-        position: snap.position,
-      });
-      tape.viewportWidth = VIEWPORT_WIDTH;
-      return tape;
-    });
+    // ours to pick (the mirror is internal, no user code observes it); the
+    // library pads `#symbols` via `normalise()` so `tape.viewport` returns
+    // exactly that many cells.
+    const libTapes = tapes.map((snap, i) => new turing.Tape({
+      alphabet: libAlphabets[i],
+      symbols: [...snap.symbols],
+      position: snap.position,
+      viewportWidth: VIEWPORT_WIDTH,
+    }));
     mirrorTapeBlock = turing.TapeBlock.fromTapes(libTapes);
     mirrorMachine = new turing.TuringMachine({ tapeBlock: mirrorTapeBlock });
   }
