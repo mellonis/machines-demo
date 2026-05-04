@@ -14,9 +14,10 @@
     code: string;
     onReset: () => void;
     resetVisible?: boolean;
+    resetTitle?: string;
   };
 
-  let { engine, code = $bindable(), onReset, resetVisible = true }: Props = $props();
+  let { engine, code = $bindable(), onReset, resetVisible = true, resetTitle = 'Reset code to selected example' }: Props = $props();
 
   // Persist code to localStorage on every change. saveCode swallows quota /
   // private-mode errors internally.
@@ -39,7 +40,7 @@
 
 <div class="editor">
   {#if resetVisible}
-    <IconButton icon="resetCode" title="Reset code to selected example" onClick={onReset} />
+    <IconButton icon="resetCode" title={resetTitle} onClick={onReset} />
   {/if}
   <CodeMirror
     bind:value={code}

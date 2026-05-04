@@ -151,6 +151,11 @@
   });
   const dirty = $derived(sourceCode !== null && code !== sourceCode);
   const resetVisible = $derived(dirty);
+  const resetTitle = $derived(
+    loadedSnippetId !== null && loadedSnippetId in snippets
+      ? `Reset to "${snippets[loadedSnippetId].title}"`
+      : 'Reset to selected example',
+  );
 
   const loadDisabled = $derived(pendingOp !== null);
   // Step/Run stay enabled in HALTED — they reload-from-code on entry, which
@@ -658,7 +663,7 @@
     {#await editorPromise}
       <div class="editor-loading">Loading editor…</div>
     {:then Editor}
-      <Editor {engine} bind:code onReset={resetCodeToSelected} {resetVisible} />
+      <Editor {engine} bind:code onReset={resetCodeToSelected} {resetVisible} {resetTitle} />
     {:catch err}
       <div class="editor-error">Failed to load editor: {err.message}</div>
     {/await}
