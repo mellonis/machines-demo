@@ -54,6 +54,16 @@
     border-radius: 6px;
     overflow: hidden;
 
+    /* svelte-codemirror-editor wraps CodeMirror in <div
+       class="codemirror-wrapper">. Without an explicit height on that
+       wrapper, .cm-editor's `height: 100%` resolves against an auto-
+       sized parent and CodeMirror's internal .cm-scroller never gets a
+       definite height — so the editor grows to its full code height
+       instead of scrolling internally. */
+    :global(.codemirror-wrapper) {
+      height: 100%;
+    }
+
     :global(.cm-editor) {
       height: 100%;
       font-size: 13px;

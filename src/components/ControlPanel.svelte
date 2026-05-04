@@ -83,6 +83,30 @@
     { code: 'S', svg: icons.stay, label: 'stay' },
     { code: 'R', svg: icons.right, label: 'right' },
   ];
+
+  // Svelte action: tracks horizontal scroll position on the symbols row and
+  // toggles `can-scroll-left` / `can-scroll-right` classes. CSS uses these
+  // classes to drive a mask-image fade so the edges of the row hint at
+  // off-screen content only when there's actually content there to scroll
+  // to. Fires on scroll and on resize (alphabet length / panel width).
+  function scrollEdgeIndicator(node: HTMLElement) {
+    const update = () => {
+      const atLeft = node.scrollLeft <= 0;
+      const atRight = node.scrollLeft + node.clientWidth >= node.scrollWidth - 1;
+      node.classList.toggle('can-scroll-left', !atLeft);
+      node.classList.toggle('can-scroll-right', !atRight);
+    };
+    update();
+    node.addEventListener('scroll', update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(node);
+    return {
+      destroy() {
+        node.removeEventListener('scroll', update);
+        ro.disconnect();
+      },
+    };
+  }
 </script>
 
 <div
@@ -102,37 +126,39 @@
           <span class="tape-label">Tape {i + 1}</span>
         {/if}
         <div class="row symbols">
-          <button
-            type="button"
-            class="cp-btn keep"
-            class:selected={symbols[i] === null}
-            title="Keep current symbol"
-            aria-label={showTapeLabels
-              ? `Tape ${i + 1}: keep current symbol`
-              : 'Keep current symbol'}
-            onclick={() => selectSymbol(i, null)}
-          >
-            {@html icons.keep}
-          </button>
-          <!-- `sym` not `symbol` — the latter shadows the built-in TS/JS
-               `symbol` type the upstream library uses for movement primitives.
-               No UI substitution: the button shows the literal alphabet
-               symbol, including whatever the user picked for blank. -->
-          {#each alpha as sym, j (j)}
+          <div class="symbols-scroll" use:scrollEdgeIndicator>
             <button
               type="button"
-              class="cp-btn"
-              class:blank={j === 0}
-              class:selected={symbols[i] === sym}
-              title={j === 0 ? 'Write blank' : `Write ${sym}`}
+              class="cp-btn keep"
+              class:selected={symbols[i] === null}
+              title="Keep current symbol"
               aria-label={showTapeLabels
-                ? `Tape ${i + 1}: ${j === 0 ? 'write blank' : `write ${sym}`}`
-                : j === 0 ? 'Write blank' : `Write ${sym}`}
-              onclick={() => selectSymbol(i, sym)}
+                ? `Tape ${i + 1}: keep current symbol`
+                : 'Keep current symbol'}
+              onclick={() => selectSymbol(i, null)}
             >
-              {sym}
+              {@html icons.keep}
             </button>
-          {/each}
+            <!-- `sym` not `symbol` — the latter shadows the built-in TS/JS
+                 `symbol` type the upstream library uses for movement primitives.
+                 No UI substitution: the button shows the literal alphabet
+                 symbol, including whatever the user picked for blank. -->
+            {#each alpha as sym, j (j)}
+              <button
+                type="button"
+                class="cp-btn"
+                class:blank={j === 0}
+                class:selected={symbols[i] === sym}
+                title={j === 0 ? 'Write blank' : `Write ${sym}`}
+                aria-label={showTapeLabels
+                  ? `Tape ${i + 1}: ${j === 0 ? 'write blank' : `write ${sym}`}`
+                  : j === 0 ? 'Write blank' : `Write ${sym}`}
+                onclick={() => selectSymbol(i, sym)}
+              >
+                {sym}
+              </button>
+            {/each}
+          </div>
         </div>
         <div class="row movement">
           {#each MOVEMENT_BUTTONS as b (b.code)}
@@ -235,31 +261,95 @@
     flex-wrap: wrap;
 
     &.symbols {
+      /* Outer is the flex item that participates in .tape-row layout.
+         Splitting layout (outer) from overflow (inner .symbols-scroll)
+         is required: a single element doing both didn't scroll because
+         the flex algorithm derives its width from content, defeating
+         the overflow clip. */
       flex: 1;
       min-width: 0;
-
-      /* Long alphabets shouldn't wrap a second row on a narrow phone — let
-         the symbols row scroll horizontally. */
-      @media (max-width: 768px) {
-        flex-wrap: nowrap;
-        overflow-x: auto;
-        scrollbar-width: none;
-        -webkit-overflow-scrolling: touch;
-
-        &::-webkit-scrollbar {
-          display: none;
-        }
-
-        .cp-btn {
-          flex-shrink: 0;
-        }
-      }
+      display: block;
     }
 
     &.movement {
       margin-left: auto;
       padding-left: 8px;
       border-left: 1px solid var(--divider);
+    }
+  }
+
+  /* Inner scroll container for the symbols row — owns the overflow.
+     Long alphabets scroll horizontally instead of wrapping, so each
+     tape's row height stays constant and chips line up across tapes.
+
+     Edge fades: the `can-scroll-*` classes are toggled by the
+     scrollEdgeIndicator action; `mask-image` softens whichever edge
+     has off-screen content so the user sees an affordance for scroll. */
+  .symbols-scroll {
+    --edge-fade: 20px;
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 4px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+
+    .cp-btn {
+      flex-shrink: 0;
+    }
+
+    /* `can-scroll-*` classes are toggled at runtime by the
+       scrollEdgeIndicator action — Svelte's CSS scoper can't see
+       them in the template, hence :global(...). */
+    &:global(.can-scroll-left.can-scroll-right) {
+      -webkit-mask-image: linear-gradient(
+        to right,
+        transparent 0,
+        black var(--edge-fade),
+        black calc(100% - var(--edge-fade)),
+        transparent 100%
+      );
+      mask-image: linear-gradient(
+        to right,
+        transparent 0,
+        black var(--edge-fade),
+        black calc(100% - var(--edge-fade)),
+        transparent 100%
+      );
+    }
+
+    &:global(.can-scroll-left:not(.can-scroll-right)) {
+      -webkit-mask-image: linear-gradient(
+        to right,
+        transparent 0,
+        black var(--edge-fade),
+        black 100%
+      );
+      mask-image: linear-gradient(
+        to right,
+        transparent 0,
+        black var(--edge-fade),
+        black 100%
+      );
+    }
+
+    &:global(.can-scroll-right:not(.can-scroll-left)) {
+      -webkit-mask-image: linear-gradient(
+        to right,
+        black 0,
+        black calc(100% - var(--edge-fade)),
+        transparent 100%
+      );
+      mask-image: linear-gradient(
+        to right,
+        black 0,
+        black calc(100% - var(--edge-fade)),
+        transparent 100%
+      );
     }
   }
 
