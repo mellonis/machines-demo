@@ -99,3 +99,29 @@ export function deleteSnippet(engine: Engine, id: string): void {
     /* ignore */
   }
 }
+
+// Renames a snippet's title, preserving its UUID and code.
+// If another snippet already has newTitle, that snippet is deleted and the
+// renamed snippet takes its place (current snippet's UUID survives).
+// Returns the updated snippet, or null if `id` is not found.
+export function renameSnippet(
+  engine: Engine,
+  id: string,
+  newTitle: string,
+): Snippet | null {
+  try {
+    const current = loadSnippets(engine);
+    const snippet = current[id];
+    if (!snippet) return null;
+    if (snippet.title === newTitle) return snippet;
+    const conflictId = Object.entries(current).find(
+      ([k, s]) => k !== id && s.title === newTitle,
+    )?.[0];
+    if (conflictId !== undefined) delete current[conflictId];
+    current[id] = { ...snippet, title: newTitle, savedAt: Date.now() };
+    localStorage.setItem(engineKey(engine, 'snippets'), JSON.stringify(current));
+    return current[id];
+  } catch {
+    return null;
+  }
+}

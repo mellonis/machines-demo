@@ -32,6 +32,7 @@
     onSaveChanges: () => void;
     onLoadSnippet: (id: string) => void;
     onDeleteSnippet: (id: string) => void;
+    onRenameSnippet: (id: string, newTitle: string) => void;
   };
 
   let {
@@ -56,6 +57,7 @@
     onSaveChanges,
     onLoadSnippet,
     onDeleteSnippet,
+    onRenameSnippet,
   }: Props = $props();
 
   // Examples dropdown — fully owned here so the outside-click and Escape
@@ -168,6 +170,52 @@
 
   let deletePendingId = $state<string | null>(null);
 
+  let renameId = $state<string | null>(null);
+  let renameDraft = $state('');
+  let renameOverwrite = $state(false);
+  let renameInputEl = $state<HTMLInputElement | undefined>(undefined);
+
+  const snippetTitlesExcludingRename = $derived(
+    renameId !== null
+      ? new Set(Object.entries(snippets).filter(([k]) => k !== renameId).map(([, s]) => s.title))
+      : snippetTitles,
+  );
+  const renameTrimmed = $derived(renameDraft.trim());
+  const renameConflicts = $derived(
+    renameTrimmed !== '' && snippetTitlesExcludingRename.has(renameTrimmed),
+  );
+
+  $effect(() => {
+    if (renameId !== null && renameInputEl) renameInputEl.focus();
+  });
+
+  $effect(() => {
+    void renameTrimmed;
+    renameOverwrite = false;
+  });
+
+  function openRename(id: string): void {
+    renameId = id;
+    renameDraft = snippets[id]?.title ?? '';
+    renameOverwrite = false;
+  }
+
+  function cancelRename(): void {
+    renameId = null;
+    renameDraft = '';
+    renameOverwrite = false;
+  }
+
+  function commitRename(): void {
+    if (!renameId || renameTrimmed === '') return;
+    if (renameConflicts && !renameOverwrite) {
+      renameOverwrite = true;
+      return;
+    }
+    onRenameSnippet(renameId, renameTrimmed);
+    cancelRename();
+  }
+
   // with-pause / interval are configuration for the *next* Run; meaningless
   // mid-run, so hide them in the running modes (they'd just be inert chrome).
   const configVisible = $derived(
@@ -198,7 +246,7 @@
             <button
               type="button"
               role="menuitem"
-              class:selected={ex.id === selectedExampleId}
+              class:selected={ex.id === selectedExampleId && loadedSnippetId === null}
               onclick={() => pick(ex)}
             >
               {ex.title}
@@ -226,6 +274,49 @@
                   title="Cancel"
                   onclick={(e) => { e.stopPropagation(); deletePendingId = null; }}
                 >Cancel</button>
+              {:else if renameId === id}
+                {#if renameOverwrite}
+                  <span class="rename-conflict-label">Overwrite "{renameTrimmed}"?</span>
+                  <button
+                    type="button"
+                    class="rename-confirm-yes"
+                    onclick={(e) => { e.stopPropagation(); commitRename(); }}
+                  >Yes</button>
+                  <button
+                    type="button"
+                    class="rename-confirm-no"
+                    onclick={(e) => { e.stopPropagation(); renameOverwrite = false; }}
+                  >No</button>
+                {:else}
+                  <input
+                    type="text"
+                    class="rename-input"
+                    class:conflict={renameConflicts}
+                    bind:this={renameInputEl}
+                    bind:value={renameDraft}
+                    maxlength="80"
+                    onclick={(e) => e.stopPropagation()}
+                    onkeydown={(e) => {
+                      if (e.key === 'Enter') { e.stopPropagation(); commitRename(); }
+                      if (e.key === 'Escape') { e.stopPropagation(); cancelRename(); }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    class="rename-ok-btn"
+                    disabled={renameTrimmed === ''}
+                    aria-label="Confirm rename"
+                    title="Confirm rename"
+                    onclick={(e) => { e.stopPropagation(); commitRename(); }}
+                  >{@html icons.apply}</button>
+                  <button
+                    type="button"
+                    class="delete-btn"
+                    aria-label="Cancel rename"
+                    title="Cancel"
+                    onclick={(e) => { e.stopPropagation(); cancelRename(); }}
+                  >{@html icons.xSmall}</button>
+                {/if}
               {:else}
                 <button
                   type="button"
@@ -233,6 +324,13 @@
                   class:selected={id === loadedSnippetId}
                   onclick={() => { onLoadSnippet(id); examplesOpen = false; }}
                 >{snippet.title}</button>
+                <button
+                  type="button"
+                  class="rename-btn"
+                  aria-label="Rename snippet {snippet.title}"
+                  title="Rename"
+                  onclick={(e) => { e.stopPropagation(); openRename(id); }}
+                >{@html icons.pencil}</button>
                 <button
                   type="button"
                   class="delete-btn"
@@ -493,6 +591,9 @@
 
     .delete-btn {
       flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       width: 28px;
       padding: 4px;
       background: transparent;
@@ -512,6 +613,115 @@
         width: 14px;
         height: 14px;
       }
+    }
+
+    .rename-btn {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      padding: 4px;
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      border-radius: 4px;
+      cursor: pointer;
+      opacity: 0;
+
+      :global(svg) {
+        width: 14px;
+        height: 14px;
+      }
+    }
+
+    &:hover .rename-btn {
+      opacity: 0.6;
+
+      &:hover {
+        color: var(--accent);
+        background: color-mix(in srgb, var(--accent) 12%, transparent);
+        opacity: 1;
+      }
+    }
+
+    .rename-input {
+      flex: 1;
+      min-width: 0;
+      background: var(--cell-bg);
+      border: 1px solid var(--cell-border);
+      color: var(--fg);
+      padding: 3px 6px;
+      font: inherit;
+      font-size: 13px;
+      border-radius: 4px;
+
+      &:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+
+      &.conflict {
+        border-color: var(--error);
+      }
+    }
+
+    .rename-ok-btn {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      padding: 4px;
+      background: transparent;
+      border: none;
+      color: var(--accent);
+      border-radius: 4px;
+      cursor: pointer;
+
+      &:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--accent) 12%, transparent);
+      }
+
+      &:disabled {
+        opacity: 0.3;
+        cursor: not-allowed;
+      }
+
+      :global(svg) {
+        width: 14px;
+        height: 14px;
+      }
+    }
+
+    .rename-conflict-label {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 12px;
+      color: var(--muted);
+      padding: 0 4px;
+    }
+
+    .rename-confirm-yes {
+      flex-shrink: 0;
+      font-size: 12px;
+      padding: 3px 8px;
+      border-color: color-mix(in srgb, var(--ok) 50%, transparent);
+      color: var(--ok);
+
+      &:hover {
+        border-color: var(--ok) !important;
+        color: var(--ok) !important;
+      }
+    }
+
+    .rename-confirm-no {
+      flex-shrink: 0;
+      font-size: 12px;
+      padding: 3px 8px;
     }
 
     .delete-confirm-label {

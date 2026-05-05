@@ -8,6 +8,7 @@ import keep from '@tabler/icons/outline/keyframe-align-vertical.svg?raw';
 import left from '@tabler/icons/outline/arrow-narrow-left.svg?raw';
 import moon from '@tabler/icons/outline/moon.svg?raw';
 import pause from '@tabler/icons/outline/player-pause.svg?raw';
+import pencil from '@tabler/icons/outline/pencil.svg?raw';
 import resetCode from '@tabler/icons/outline/arrow-back-up.svg?raw';
 import right from '@tabler/icons/outline/arrow-narrow-right.svg?raw';
 import run from '@tabler/icons/outline/player-play.svg?raw';
@@ -30,6 +31,7 @@ export const icons = {
   left,
   moon,
   pause,
+  pencil,
   resetCode,
   right,
   run,

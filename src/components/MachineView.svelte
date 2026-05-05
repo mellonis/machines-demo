@@ -25,6 +25,7 @@
     loadSnippets,
     saveSnippet,
     deleteSnippet,
+    renameSnippet,
     type Snippets,
   } from '../lib/persist.ts';
   import { icons } from '../lib/icons.ts';
@@ -519,6 +520,14 @@
     // bundled example.
   }
 
+  function onRenameSnippet(id: string, newTitle: string): void {
+    const updated = renameSnippet(engine, id, newTitle);
+    if (!updated) return;
+    // On collision renameSnippet deletes the conflicting entry; rebuild the
+    // full map from localStorage so we don't have to replicate the logic here.
+    snippets = { ...loadSnippets(engine) };
+  }
+
   // Persist the selected example id (separate from the editor code) so the
   // reset button keeps targeting the chosen source across reloads.
   $effect(() => {
@@ -651,6 +660,7 @@
       {onSaveChanges}
       {onLoadSnippet}
       {onDeleteSnippet}
+      {onRenameSnippet}
     />
     <div
       class="status"
