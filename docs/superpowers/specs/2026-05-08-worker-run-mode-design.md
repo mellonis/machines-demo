@@ -8,47 +8,52 @@ The worker drives execution through `runStepByStep` only (`src/lib/machineWorker
 
 ## Decisions
 
-- **Always-runWithBreaks dispatch.** The Run button always uses the new path. If user code never sets `state.debug` / `haltState.debug`, no breaks fire and behavior is identical to today's sync run. The old `run` request type is dropped — one path, no main-thread introspection of user State needed to choose.
+- **Extend the existing `run` request.** Keep the request type name `run`; add an optional `debug` flag and break-pause support. The worker switches from the synchronous `runToEnd` helper to `await machine.run({ ... })`. Single request type, no dispatch decision on the main thread.
 - **Dedicated paused-at-break mode.** A new `RUNNING_PAUSED_AT_BREAK` is introduced rather than overloading the existing `RUNNING_STEP`. The two states are conceptually different: `RUNNING_STEP` is paused between full steps and *can* single-step; `RUNNING_PAUSED_AT_BREAK` is paused inside `run()` and *cannot* (the engine's `for` loop owns the iteration).
 - **`RUNNING_AUTO` unchanged.** Auto-step uses `runStepByStep`, so breakpoints don't fire there. Documented as a known constraint in the #38 example.
-- **"Debug mode" UI gate.** A user-facing checkbox controls whether breaks pause execution at all, so `state.debug` / `haltState.debug` assignments in user code stay valid across both modes (no edit-and-comment-out churn). Demo-side emulation today (the worker's `onDebugBreak` resolves instantly when off); cross-references [turing-machine-js#106](https://github.com/mellonis/turing-machine-js/issues/106) which proposes the same gate as a `debug: boolean` parameter on upstream `run()`.
+- **"Debug mode" UI gate.** A user-facing checkbox controls whether breaks pause execution at all, so `state.debug` / `haltState.debug` assignments in user code stay valid across both modes (no edit-and-comment-out churn). Demo-side emulation today (the worker's `onDebugBreak` resolves instantly when off); cross-references [turing-machine-js#106](https://github.com/mellonis/turing-machine-js/issues/106) which proposes the same gate as a `debug: boolean` parameter on upstream `run()`. The wire shape matches that proposal.
 
 ## Worker contract
 
-Drop `run`. Add `runWithBreaks` and `resume`. Add `paused` response. `build` / `step` unchanged. `stepped` / `ran` / `error` shapes unchanged.
+Extend `run` with an optional `debug` flag. Add `resume` request and `paused` response. `build` / `step` unchanged. `stepped` / `ran` / `error` shapes unchanged.
 
 | Direction | Type | Payload |
 |---|---|---|
-| → | `runWithBreaks` | `{ maxSteps?, debug }` |
+| → | `run` | `{ maxSteps?, debug? }` |
 | → | `resume` | `{}` |
 | ← | `paused` | `{ tapes, commands, stepsApplied, state, currentSymbols, debugBreak }` |
 
-`debug: boolean` is required (no default at the wire — main thread is always explicit). When `false`, the worker's `onDebugBreak` resolves instantly without posting `paused`. When `true`, the pause/resume flow runs.
+`debug: boolean` defaults to `false` — no surprise pauses if user code has leftover `state.debug` assignments. When `true`, the worker's `onDebugBreak` posts `paused` and awaits `resume`. When `false`, `onDebugBreak` returns immediately (pauses short-circuited at the wrapper level).
 
 Field shapes:
 
 - `tapes: TapeSnapshot[]` — full snapshot at break time (same producer as `built` / `ran` / `error`).
-- `commands: Command[][]` — per-step commands buffered since the previous `paused` (or since `runWithBreaks` started). Mirror replays them in the Log; tape state is restored from `tapes`.
+- `commands: Command[][]` — per-step commands buffered since the previous `paused` (or since `run` started). Mirror replays them in the Log; tape state is restored from `tapes`.
 - `stepsApplied: number` — running total across all segments of this run (matches `stepped` / `ran` semantics).
 - `state: string` — `m.state.name`. The user's `State` instance does not cross the boundary.
 - `currentSymbols: string[]` — the symbols under each head at break time.
 - `debugBreak: { before?: true; after?: true }` — copied from `m.debugBreak` (omitted shape = field absent, never `undefined`).
 
-Inside the worker, `runWithBreaks` calls:
+Inside the worker, `run` now calls:
 
 ```ts
+const debug = req.debug ?? false;
 await machine.run({
   initialState,
   stepsLimit: req.maxSteps ?? MAX_STEPS,
   onStep: (m) => { /* buffer per-step commands */ },
-  onDebugBreak: async (m) => {
-    send({ type: 'paused', ... });
-    await new Promise<void>((resolve) => { resumeResolve = resolve });
-  },
+  onDebugBreak: debug
+    ? async (m) => {
+        send({ type: 'paused', ... });
+        await new Promise<void>((resolve) => { resumeResolve = resolve });
+      }
+    : undefined,
 });
 ```
 
-A module-scoped `resumeResolve: (() => void) | null` holds the pending Promise. The `resume` request handler resolves it and clears the slot. `runWithBreaks` and `resume` are the only message types that touch this slot; concurrent `runWithBreaks` is rejected (existing `not built` / state-error pattern).
+When `debug` is `false`, `onDebugBreak` is omitted entirely — upstream's `run()` then skips break-handling without our wrapper paying any per-step cost. Once [turing-machine-js#106](https://github.com/mellonis/turing-machine-js/issues/106) lands, we can pass `debug` straight through to upstream and drop this conditional.
+
+A module-scoped `resumeResolve: (() => void) | null` holds the pending Promise. The `resume` request handler resolves it and clears the slot. `run` and `resume` are the only message types that touch this slot; concurrent `run` is rejected (existing `not built` / state-error pattern).
 
 After `run()` resolves (halt or stepsLimit), the worker sends the existing `ran` response. Errors thrown from inside `run()` (e.g. no edge for current symbol) flow through the existing catch and produce `error` with partial tape state.
 
@@ -59,7 +64,7 @@ ExecutionMode = 'DEMO' | 'MANUAL' | 'RUNNING_STEP' | 'RUNNING_AUTO'
               | 'RUNNING_CONTINUOUS' | 'RUNNING_PAUSED_AT_BREAK' | 'HALTED'
 ```
 
-`RUNNING_CONTINUOUS` now dispatches `runWithBreaks` instead of the dropped `run`.
+`RUNNING_CONTINUOUS` sends `run` with `debug` set to the user's "Debug mode" checkbox state.
 
 `RUNNING_PAUSED_AT_BREAK`:
 
@@ -80,7 +85,7 @@ Build from `RUNNING_PAUSED_AT_BREAK` is allowed and follows the existing pattern
 
 A checkbox lives in `Toolbar.svelte` next to `with pause`. State name `debugMode`, owned by `MachineView.svelte`, persisted to `localStorage` under `machines-demo:<engine>:debugMode` (mirroring the existing `withPause` pattern). Default off.
 
-The checkbox is purely a request-payload gate: every `runWithBreaks` request includes `debug: debugMode`. The UI never disables `withPause` when `debugMode` is on (or vice versa) — they target different execution modes:
+The checkbox is purely a request-payload gate: every `run` request includes `debug: debugMode`. The UI never disables `withPause` when `debugMode` is on (or vice versa) — they target different execution modes:
 
 | `withPause` | `debugMode` | Run button → | Breakpoints fire? |
 |---|---|---|---|
@@ -108,7 +113,7 @@ On the final `ran`: existing flow — render final tapes, batch-log buffered com
 
 Per-segment 5s budget instead of per-request:
 
-- `runWithBreaks` sent → start 5s.
+- `run` sent → start 5s.
 - `paused` received → stop the timer. (User is inspecting; no clock.)
 - `resume` sent → start a fresh 5s.
 - `ran` / `error` received → stop.
@@ -125,7 +130,7 @@ Still caps total work across all resumes. Enforced inside `run()` via `stepsLimi
 
 `MachineView.svelte:258` calls `mirrorMachine.run({ initialState: oneStep })` without `await`. Currently correct under v4 (the `run()` body runs synchronously when no `onDebugBreak` is set), but fragile against any internal yield the upstream might add.
 
-Make `_runMirrorStep` async and `await mirrorMachine.run(...)`. Propagate to its callers as needed. Aligns with the new `runWithBreaks` flow and is future-proof.
+Make `_runMirrorStep` async and `await mirrorMachine.run(...)`. Propagate to its callers as needed. Aligns with the new async `run` request flow and is future-proof.
 
 ## Out of scope
 
