@@ -132,11 +132,10 @@ let pendingCommand: MachineYield | null = null;
 // requests are rejected by the phase machine before they reach this slot.
 let resumeResolve: ((action: { step: boolean }) => void) | null = null;
 
-// Step-from-break trick: when the user resumes with step:true, arm the next
-// iteration's nextState with a one-shot before-break so the machine pauses
-// exactly one step later. pendingRestore undoes the mutation before the user
-// observes the new break (so the state graph is clean for subsequent runs).
-let pendingStepNext = false;
+// Step trick: when the user clicks Step, arm the iteration-we're-stepping-
+// through's state.debug.after = true so the engine fires an after-break in
+// the next iteration's body and we pause there. pendingRestore undoes the
+// mutation before the user observes the new break.
 let pendingRestore: (() => void) | null = null;
 
 // Per-run buffer of commands captured by onStep. Drained on `paused` (sent
@@ -149,16 +148,11 @@ let runStartStep = 0;
 // so the user can flip the checkbox without restarting.
 let debugEnabled = false;
 
-// Step semantics: with debug off, Step is "advance exactly one engine
-// iteration, then pause" (like the legacy runStepByStep mode). With debug on,
-// Step pauses at every break — the debug toggle dominates.
-//
-// `stepPending` is true between a Step click and its consuming pause.
-// `stepCountdown` decrements in onStep; pause-with-debug-off only fires
-// when both stepPending=true and stepCountdown=0 (one iteration boundary
-// crossed since the click).
+// Step semantics: with debug off, Step pauses at the next "after" break
+// event (= one iteration's command applied), matching the legacy step-by-
+// step mental model. Before-fires are skipped. With debug on, Step pauses
+// at every break (debug toggle dominates).
 let stepPending = false;
-let stepCountdown = 0;
 
 function reset(): void {
   phase = { kind: 'idle' };
@@ -169,13 +163,11 @@ function reset(): void {
   stepsApplied = 0;
   pendingCommand = null;
   resumeResolve = null;
-  pendingStepNext = false;
   pendingRestore = null;
   runCommandBuffer = [];
   runStartStep = 0;
   debugEnabled = false;
   stepPending = false;
-  stepCountdown = 0;
 }
 
 function expectPhase(...allowed: WorkerPhase['kind'][]): void {
@@ -329,7 +321,6 @@ async function run(maxSteps: number, debug: boolean): Promise<{ truncated: boole
   phase = { kind: 'running' };
   debugEnabled = debug;
   stepPending = false;
-  stepCountdown = 0;
 
   let truncated = false;
 
@@ -346,14 +337,13 @@ async function run(maxSteps: number, debug: boolean): Promise<{ truncated: boole
           pendingRestore = null;
         }
         if (debugEnabled) {
-          // Debug on: pause at every break. Step still consumes its pending
-          // flag so a later debug-off click doesn't carry an old step over.
+          // Debug on: pause at every break.
           stepPending = false;
-          stepCountdown = 0;
         } else {
-          // Debug off: only pause if we're stepping AND one iteration has
-          // already elapsed (countdown reached 0 via onStep).
-          if (!stepPending || stepCountdown > 0) return;
+          // Debug off: Step pauses only at after-fires (= one iteration's
+          // command applied). Before-fires are skipped — they signal the
+          // start of an iteration, not its result.
+          if (!stepPending || !m.debugBreak?.after) return;
           stepPending = false;
         }
         const commandsBatch = runCommandBuffer;
@@ -377,27 +367,21 @@ async function run(maxSteps: number, debug: boolean): Promise<{ truncated: boole
         phase = { kind: 'running' };
         if (action.step) {
           stepPending = true;
-          stepCountdown = 1;
-          if (m.debugBreak?.before) {
-            // m IS the current iteration — arm directly.
-            // onStep deferral path: when an `after` break fires, the engine
-            // substitutes m to prevYield in onDebugBreak, so the un-substituted
-            // machineState reaches us only via the next onStep call. If
-            // turing-machine-js#107 lands (escape hatch for un-substituted
-            // snapshot), this branch and pendingStepNext can collapse.
-            // state.debug is a DebugConfig instance with accessor-defined
-            // before/after — spreading skips them (not own enumerable). Read
-            // .after explicitly so the after filter survives a self-loop arm.
-            const ns = m.nextState as { debug: { before?: unknown; after?: unknown } | null };
-            const original = ns.debug;
-            const preservedAfter = original?.after;
-            ns.debug = preservedAfter !== undefined
-              ? { before: true, after: preservedAfter }
-              : { before: true };
-            pendingRestore = () => { ns.debug = original; };
-          } else {
-            pendingStepNext = true;
-          }
+          // Arm the iteration-we're-stepping-through's state.debug.after = true
+          // so its after-fire fires (in the next iteration's body) and we can
+          // pause there. For a `before` break: m IS that iteration (m.state).
+          // For an `after` break (m substituted to prevYield): the next iter's
+          // state lives at m.nextState. Preserve any original `before` filter.
+          // Read .before via the getter (DebugConfig accessor — spread skips it).
+          const target = (
+            m.debugBreak?.before ? m.state : m.nextState
+          ) as { debug: { before?: unknown; after?: unknown } | null };
+          const original = target.debug;
+          const preservedBefore = original?.before;
+          const newDebug: { before?: unknown; after?: unknown } = { after: true };
+          if (preservedBefore !== undefined) newDebug.before = preservedBefore;
+          target.debug = newDebug;
+          pendingRestore = () => { target.debug = original; };
         }
       };
 
@@ -407,21 +391,7 @@ async function run(maxSteps: number, debug: boolean): Promise<{ truncated: boole
   // machine's `run` signature to route correctly.
   const runOpts: Parameters<AnyMachine['run']>[0] = {
     stepsLimit: maxSteps,
-    onStep: (m: MachineYield & { nextState?: { debug: { before?: unknown; after?: unknown } | null } }) => {
-      if (pendingStepNext && m.nextState) {
-        const ns = m.nextState as { debug: { before?: unknown; after?: unknown } | null };
-        const original = ns.debug;
-        // state.debug is a DebugConfig instance — see direct-arm branch.
-        const preservedAfter = original?.after;
-        ns.debug = preservedAfter !== undefined
-          ? { before: true, after: preservedAfter }
-          : { before: true };
-        pendingRestore = () => { ns.debug = original; };
-        pendingStepNext = false;
-      }
-      // Step countdown: each engine iteration boundary decrements; pause
-      // (in onDebugBreak below) only fires when stepCountdown reaches 0.
-      if (stepCountdown > 0) stepCountdown--;
+    onStep: (m: MachineYield) => {
       runCommandBuffer.push(commandsFromYield(m));
       stepsApplied += 1;
     },
