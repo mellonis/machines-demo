@@ -111,12 +111,6 @@ export type PausedResponse = {
   /** At least one of `before` / `after` is `true`. Field shape mirrors the
    * upstream `m.debugBreak` type (omitted-key = false, never `undefined`). */
   debugBreak: { before?: true; after?: true };
-  /** True when this pause exists only because the worker temporarily armed
-   * `state.debug[when]` for Step semantics (cold-start arm or resume-step
-   * arm), false when the user's own `state.debug` would have fired the break
-   * regardless. Drives log format on the main thread: full break-state info
-   * for user breaks, generic 'paused' for step-induced pauses. */
-  stepInduced: boolean;
 };
 
 export type ErrorResponse = {

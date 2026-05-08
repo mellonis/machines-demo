@@ -22,7 +22,7 @@ Extend `run` with an optional `debug` flag. Add `resume` request and `paused` re
 | → | `run` | `{ maxSteps?, debug?, step? }` |
 | → | `resume` | `{ step? }` |
 | → | `setDebug` | `{ on }` |
-| ← | `paused` | `{ tapes, commands, stepsApplied, state, currentSymbols, debugBreak, stepInduced }` |
+| ← | `paused` | `{ tapes, commands, stepsApplied, state, currentSymbols, debugBreak }` |
 
 `debug: boolean` defaults to `false` — no surprise pauses if user code has leftover `state.debug` assignments. The worker's `onDebugBreak` is **always** wired and self-gates on a module-scoped `debugEnabled` flag, so a `setDebug` request from the main thread can flip behavior mid-run (the user toggling the checkbox without restarting). When `debugEnabled` is off, the hook returns immediately unless the user just clicked Step (see Step semantics below).
 
@@ -36,7 +36,6 @@ Field shapes (paused):
 - `state: string` — `m.state.name`. The user's `State` instance does not cross the boundary.
 - `currentSymbols: string[]` — the symbols under each head at break time.
 - `debugBreak: { before?: true; after?: true }` — copied from `m.debugBreak` (omitted shape = field absent, never `undefined`).
-- `stepInduced: boolean` — `true` when the pause exists only because the worker temporarily armed `state.debug[when]` for Step semantics, `false` when the user's own `state.debug` would have fired the break regardless. Computed by reading `m.state.debug[when]` AFTER `pendingRestore` runs (so we see the user's authored value, not our arm). Drives main-thread log format: full break-state info when `debug && !stepInduced`, generic `paused` otherwise.
 
 Inside the worker, `run` now calls:
 
@@ -69,7 +68,7 @@ await machine.run({
     } else {
       stepPending = false;
     }
-    send({ type: 'paused', ..., stepInduced: /* computed */ });
+    send({ type: 'paused', ... });
     await new Promise<{ step: boolean }>((resolve) => { resumeResolve = resolve });
     // on resume: if action.step, arm next pause via state.debug.after (see below)
   },
@@ -165,19 +164,15 @@ if (action.step) {
 }
 ```
 
-### `stepInduced`
+### Pause log format
 
-The user's mental model: "full break-state info should appear only when *I* authored a breakpoint". Worker-armed Step boundaries shouldn't surface state identity in the log — that would suggest the user set something they didn't.
+Reads as "we made a step, here's the result". `.after`-arming means iter K just ran when we pause; the log surfaces iter K's state and just-executed symbols:
 
-Worker computes `stepInduced` per pause by reading `m.state.debug[when]` AFTER `pendingRestore` runs:
-
-```ts
-const stepInduced = m.debugBreak?.before
-  ? !m.state.debug?.before
-  : !m.state.debug?.after;
+```
+paused at state <name> after applying command for symbols: [<syms>]
 ```
 
-After `pendingRestore`, `m.state.debug` reflects the user's authored value, not our temporary arm. If the relevant flag is unset, the pause exists only because we armed it → `stepInduced = true`. Main-thread `onPausedHandler` logs full break-state info only when `debugMode && !stepInduced`, otherwise generic `paused`.
+Same format for user-authored breakpoints (`state.debug.before` or `state.debug.after`) — uses the appropriate `before`/`after` verb. The `debug` toggle gates whether user-authored breaks fire, not how pauses are logged.
 
 ### Halt-iter quirks (engine-side)
 
@@ -218,9 +213,7 @@ On `paused`:
 
 1. Rebuild `mirrorMachine` from the snapshot tapes (snap, no animation) — same path as `ran`.
 2. Replay the buffered `commands: Command[][]` to the Log via `report` + `commandsEntry` — user sees the trace that led to the break.
-3. Append a single `ok`-styled log entry. Format depends on `debugMode && !paused.stepInduced`:
-   - **`true`** (debug on AND user-authored break): `paused at state <name> [before|after] applying command for symbols: [<syms>]`.
-   - **`false`** (debug off, OR worker-armed Step boundary): generic `paused`.
+3. Append a single `ok`-styled log entry: `paused at state <name> [before|after] applying command for symbols: [<syms>]`. Same format whether the break is user-authored or worker-armed for Step.
 4. Update `lastSnapshots`, set `executionMode = 'RUNNING_PAUSED_AT_BREAK'`.
 
 On `resume` (Continue clicked): nothing changes locally — wait for the next worker response (`paused`, `ran`, or `error`).
@@ -272,4 +265,4 @@ Make `_runMirrorStep` async and `await mirrorMachine.run(...)`. Propagate to its
 
 - [turing-machine-js#106](https://github.com/mellonis/turing-machine-js/issues/106) — `debug: boolean` parameter on `run()`. The worker can pass it straight through; the off-path flag-check inside `onDebugBreak` goes away (the runtime-toggle still requires our wrapper).
 - [turing-machine-js#108](https://github.com/mellonis/turing-machine-js/issues/108) — drain `pendingAfterFromPrev` after the engine's main loop so the halting iter's `after`-fire actually fires; warn-then-throw on `haltState.debug.after` assignment. The "halt-iter quirks" subsection in Step semantics goes away when this lands.
-- [turing-machine-js#107](https://github.com/mellonis/turing-machine-js/issues/107) — un-substituted snapshot for `after`-break consumers. **No longer needed for our Step path** — we arm `.after` (not `.before`) on the next iteration, and `m.state` for an after-fire payload is already `prevYield` (the just-executed state), which is exactly what we need to read for `stepInduced`. Filed before the `.after`-arming approach was settled; can stay open for other consumers.
+- [turing-machine-js#107](https://github.com/mellonis/turing-machine-js/issues/107) — un-substituted snapshot for `after`-break consumers. Not needed by our Step path (`.after`-arming on the next iteration uses `m.state` = `prevYield`, which is exactly the just-executed state we want to display). Stays open for other consumers that might want the un-substituted `machineState` at after-fires.

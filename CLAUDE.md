@@ -82,7 +82,7 @@ Step (cold-start and from break) always uses run-mode and arms `state.debug.afte
 - **Cold-start**: arms `initialState.debug.after = true` before invoking `machine.run(...)` (preserves any user-authored `state.debug.before`).
 - **From `RUNNING_PAUSED_AT_BREAK`**: `resume(step: true)` arms `m.state.debug.after` (when paused at before) or `m.nextState.debug.after` (when paused at after). `pendingRestore` undoes the mutation before the user observes the next break.
 
-`PausedResponse.stepInduced` distinguishes worker-armed Step boundaries from user-authored breakpoints. The worker computes it by reading `m.state.debug[when]` AFTER `pendingRestore` runs (so it reflects the user's authored value, not our arm). `MachineView#onPausedHandler` logs full `paused at state X before/after applying command for symbols: [...]` only when `debugMode && !stepInduced`; otherwise generic `paused`.
+`MachineView#onPausedHandler` always logs `paused at state X <when> applying command for symbols: [...]`. Reads as "we made a step, look at the result": `.after`-arming means iter K just ran when we pause, and the log surfaces iter K's state + just-executed symbols. The `debug` toggle gates whether user-authored breaks fire, not how pauses are logged.
 
 **Engine quirks at halt** (filed upstream as [`turing-machine-js#108`](https://github.com/mellonis/turing-machine-js/issues/108)): the halting iter's `after`-fire never fires (the engine's `prevYield`-deferred after pattern needs an iter K+1 that doesn't exist when iter K transitions to halt); `haltState.debug.after` is silently ignored (no halt-pause anchor). `haltState.debug.before` IS honored — fires on the iter that transitions to halt, OR'd into that iter's `beforeMatch`.
 
@@ -98,7 +98,7 @@ All shapes are TS discriminated unions in `src/lib/types.ts`. Single canonical `
 | `{ type: 'resume', step? }` | `paused` (next break) or `ran` (halt) |
 | `{ type: 'setDebug', on }` | (no response — fire-and-forget; flips worker-side `debugEnabled` flag) |
 
-`paused` interleaves with `ran`/`error` on the run channel: `{ type: 'paused', tapes, commands, stepsApplied, state, currentSymbols, debugBreak, stepInduced }`. The runner's `run({ onPaused })` Promise stays pending across paused/resume cycles; only `ran` / `error` complete it. Per-segment timer suspends on `paused`, restarts on `resume`-send, killed on `ran` / `error`.
+`paused` interleaves with `ran`/`error` on the run channel: `{ type: 'paused', tapes, commands, stepsApplied, state, currentSymbols, debugBreak }`. The runner's `run({ onPaused })` Promise stays pending across paused/resume cycles; only `ran` / `error` complete it. Per-segment timer suspends on `paused`, restarts on `resume`-send, killed on `ran` / `error`.
 
 On any failure: `{ type: 'error', message, tapes? }`. When the worker errors mid-step / mid-run (typical case: no edge in the state graph for the current symbol), the response also carries the partial tape state. The runner wraps `error` responses in a `WorkerError` (custom class with a `tapes` field); `MachineView.svelte#failHalted` rebuilds the mirror and updates `lastSnapshots` from those tapes — without this, the user would see only the loaded tape and lose every step the worker actually applied before throwing.
 

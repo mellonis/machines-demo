@@ -368,16 +368,6 @@ async function run(
           if (!stepPending || !m.debugBreak?.after) return;
           stepPending = false;
         }
-        // Distinguish step-induced pauses (worker armed state.debug for Step
-        // semantics) from user-induced pauses (user's own state.debug). Read
-        // m.state.debug AFTER pendingRestore so we see the user's setting,
-        // not our arm. m.state for an after-fire payload is the prev (just-
-        // executed) state — exactly the state whose .after we'd be checking.
-        const stateNow = m.state as { debug?: { before?: unknown; after?: unknown } | null };
-        const stepInduced = m.debugBreak?.before
-          ? !stateNow.debug?.before
-          : !stateNow.debug?.after;
-
         const commandsBatch = runCommandBuffer;
         runCommandBuffer = [];
         phase = { kind: 'paused' };
@@ -389,7 +379,6 @@ async function run(
           state: m.state.name ?? '',
           currentSymbols: [...m.currentSymbols],
           debugBreak: { ...m.debugBreak },
-          stepInduced,
         });
         const action = await new Promise<{ step: boolean }>((resolve) => {
           resumeResolve = (a) => {
