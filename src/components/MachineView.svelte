@@ -26,6 +26,8 @@
     saveSnippet,
     deleteSnippet,
     renameSnippet,
+    loadDebugMode,
+    saveDebugMode,
     type Snippets,
   } from '../lib/persist.ts';
   import { icons } from '../lib/icons.ts';
@@ -52,6 +54,7 @@
     | 'RUNNING_STEP'
     | 'RUNNING_AUTO'
     | 'RUNNING_CONTINUOUS'
+    | 'RUNNING_PAUSED_AT_BREAK'
     | 'HALTED';
 
   /* ───── state ───── */
@@ -69,6 +72,12 @@
   let mirrorTapeBlock: turing.TapeBlock | null = null;
   let codeChangedWarned = false;
   let withPause = $state(false);
+  let debugMode = $state<boolean>(untrack(() => loadDebugMode(engine)));
+
+  $effect(() => {
+    saveDebugMode(engine, debugMode);
+  });
+
   let intervalText = $state('1s');
   let workerLive = $state(false);
   // engine is fixed for a MachineView instance (parent remounts on engine change
@@ -139,9 +148,14 @@
     executionMode === 'DEMO' || executionMode === 'MANUAL',
   );
   const takeControlVisible = $derived(
-    executionMode !== 'MANUAL' && executionMode !== 'RUNNING_CONTINUOUS',
+    executionMode !== 'MANUAL' &&
+    executionMode !== 'RUNNING_CONTINUOUS' &&
+    executionMode !== 'RUNNING_PAUSED_AT_BREAK',
   );
-  const beltTransitionsOn = $derived(executionMode !== 'RUNNING_CONTINUOUS');
+  const beltTransitionsOn = $derived(
+    executionMode !== 'RUNNING_CONTINUOUS' &&
+    executionMode !== 'RUNNING_PAUSED_AT_BREAK',
+  );
 
   // The code Reset would restore to: the loaded snippet's saved code, or the
   // selected bundled example's code, or null when the loaded snippet was

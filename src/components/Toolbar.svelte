@@ -8,6 +8,7 @@
   type Mode =
     | 'DEMO' | 'MANUAL'
     | 'RUNNING_STEP' | 'RUNNING_AUTO' | 'RUNNING_CONTINUOUS'
+    | 'RUNNING_PAUSED_AT_BREAK'
     | 'HALTED';
 
   type Props = {
