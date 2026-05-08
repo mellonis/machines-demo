@@ -218,3 +218,24 @@ The Run / Continue button (Run while in RUNNING_PAUSED) doesn't reload — it se
 The button's label changes by mode: "Run" in non-PAUSED modes (cold-start), "Continue" in RUNNING_PAUSED. Same underlying action class; the label just clarifies intent.
 
 Walk-through 3 expands these scenarios with per-segment timer behavior, log replay, and edge cases.
+
+## 8. Action matrix
+
+Mode-transition outcomes for user actions across the three running / paused modes. Each cell is a scenario ID + one-line outcome, or `—` for hidden / disabled.
+
+**Matrix scope.** The matrix lists *user-action* exits only. Event-driven transitions — debug break firing, run completion, error, timeout, truncation — are not matrix rows. They appear in three other places: §1's master state diagram (edges), each mode's "Exit" line in §2 Mode reference, and walk-throughs 2 and 7-9. A reader looking only at the matrix should not conclude that, e.g., RUNNING_CONTINUOUS exits only via Stop or Take Control.
+
+| Action | RUNNING_AUTO | RUNNING_CONTINUOUS | RUNNING_PAUSED |
+|---|---|---|---|
+| **Step (debug=off)** | `S-step-auto-off`: pause label — suspend run loop, → PAUSED | — | `S-step-paused-off`: arm `.after` on next state, resume(step), → PAUSED |
+| **Step (debug=on)** | `S-step-auto-on`: pause label — suspend, → PAUSED | — | `S-step-paused-on`: arm `.after`, resume(step), → PAUSED (a user break may interpose first) |
+| **Stop** | `S-stop-auto`: terminate, → HALTED | `S-stop-cont`: terminate, → HALTED | `S-stop-paused`: terminate, suppress failHalted, → HALTED |
+| **Take Control** | `S-takectl-auto`: latch userTookControl=true, terminate, → MANUAL | `S-takectl-cont`: latch, terminate, → MANUAL | `S-takectl-paused`: latch, terminate, → MANUAL |
+
+Notes:
+- Every cell is a mode transition (or `—` for hidden / disabled). Flag-change actions (debug toggle, withPause toggle) live in §3 — they don't cause mode transitions.
+- **Build is hidden in RUNNING_AUTO / RUNNING_CONTINUOUS / RUNNING_PAUSED** — a pending worker request blocks Build. To rebuild, the user clicks Stop or Take Control first (terminate the worker), then Build is available from HALTED / MANUAL.
+- All RUNNING_* paths use `run()`. "Pause" from RUNNING_AUTO suspends inside run-mode (the throttle's setTimeout) and lands in PAUSED — the same paused state used by debug breaks.
+- **RUNNING_CONTINUOUS has the same control surface as RUNNING_AUTO** — Stop, Take Control, debug toggle all available. The modes differ only in throttle / animation; the control surface does not become a third axis of difference. Take Control mid-CONTINUOUS can lose the race to completion, but no race produces a broken state — terminate-or-complete are both clean exits.
+- Run / Continue is a single-column action (only meaningful from RUNNING_PAUSED). It's documented in §7 Resume from PAUSED rather than in the matrix.
+- DEMO, IDLE, MANUAL, HALTED are not matrix columns — they have their own sections (§4, §5, §6, §9).
