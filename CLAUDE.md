@@ -58,20 +58,33 @@ src/
 
 ## Execution modes
 
-`ExecutionMode = 'DEMO' | 'MANUAL' | 'RUNNING_STEP' | 'RUNNING_AUTO' | 'RUNNING_CONTINUOUS' | 'HALTED'`
+`ExecutionMode = 'DEMO' | 'MANUAL' | 'RUNNING_STEP' | 'RUNNING_AUTO' | 'RUNNING_CONTINUOUS' | 'RUNNING_PAUSED_AT_BREAK' | 'HALTED'`
 
 | Mode | Panel | Apply visible | Take control | Belt behavior |
 |---|---|---|---|---|
 | `DEMO` | disabled mirror | yes (flashes) | yes | timer-driven random commands generated per tick from each tape's alphabet (40% keep, otherwise uniform). Loads `selectedExample.code` (canonical), not the editor's `code`. Auto-stops on first user-clicked Build (`demoEnabled = false`). |
 | `MANUAL` | enabled | yes | hidden | user-driven via Apply (writes to `mirrorMachine` via the same `ifOtherSymbol` one-step path used by Step) |
-| `RUNNING_STEP` | disabled mirror | hidden | yes | one slide per Step click; also serves as the **paused** state for `RUNNING_AUTO` |
-| `RUNNING_AUTO` | disabled mirror | hidden | yes | timer-driven worker steps; Step button shows pause icon + "Pause" label; click → `RUNNING_STEP` |
+| `RUNNING_STEP` | disabled mirror | hidden | yes | legacy step path — **only** entered as the paused state for `RUNNING_AUTO`. Cold-start Step now goes through run-mode → `RUNNING_PAUSED_AT_BREAK` instead. |
+| `RUNNING_AUTO` | disabled mirror | hidden | yes | timer-driven worker steps via `runner.step()`; Step button shows pause icon + "Pause" label; click → `RUNNING_STEP`. Doesn't pause at debug breakpoints (no `onDebugBreak` plumbing on this path; tracked in #43). |
 | `RUNNING_CONTINUOUS` | neutral cmd shown | hidden | hidden | snap-to-final, transitions off; per-step commands batch-logged after the worker returns |
+| `RUNNING_PAUSED_AT_BREAK` | disabled mirror | hidden | hidden | worker is paused inside `machine.run({ ... })` at an `onDebugBreak` fire (user-authored or Step-armed). Run button labels "Continue"; Step sends `resume(step: true)`; Stop terminates the worker. |
 | `HALTED` | disabled mirror | hidden | yes | frozen at final state. Build/Step/Run remain enabled — Step/Run reload-from-code on entry (the same path as MANUAL/DEMO), effectively restarting the machine without an explicit Build click. |
 
-Take control is the only entry into `MANUAL`. Once the user takes control, demo never restarts. From `MANUAL` (or `DEMO`/`HALTED`), Step and Run both call `reloadWorker(code)` first — the user's manual `Apply`s and code edits are reconciled by always rebuilding the worker + `mirrorMachine` from the current editor `code`.
+Take control is the only entry into `MANUAL`. Once the user takes control, demo never restarts. From `MANUAL` (or `DEMO`/`HALTED`), Step and Run both call `reloadWorker(code)` first — the user's manual `Apply`s and code edits are reconciled by always rebuilding the worker + `mirrorMachine` from the current editor `code`. **Cold-start Step then enters run-mode via `runner.run({ step: true, debug, onPaused })`** — the worker arms `initialState.debug.after = true` so iter 1's after-fire is the step boundary, then transitions to `RUNNING_PAUSED_AT_BREAK`.
 
-A `Stop` button is shown next to Run while `RUNNING_STEP` / `RUNNING_AUTO` (`stopVisible`); clicking it sets `executionMode = 'HALTED'` and reports `'stopped'`. The auto-step `$effect` cleans itself up when mode leaves `RUNNING_AUTO`.
+A `Stop` button is shown next to Run while `RUNNING_STEP` / `RUNNING_AUTO` / `RUNNING_PAUSED_AT_BREAK` (`stopVisible`); clicking it sets `executionMode = 'HALTED'` and reports `'stopped'`. From `RUNNING_PAUSED_AT_BREAK` it also terminates the worker (the `runner.run()` Promise rejects; `failHalted` is suppressed via `stopRequested`). The auto-step `$effect` cleans itself up when mode leaves `RUNNING_AUTO`.
+
+## Debugger UX (debug mode + breakpoints)
+
+A `debug` checkbox in the Toolbar controls whether user-authored `state.debug` / `haltState.debug` breakpoints pause execution. State `debugMode` is owned by `MachineView.svelte`, persisted to `localStorage` under `machines-demo:<engine>:debugMode`. Mid-run toggle works via `runner.setDebug(on)` — a `$effect` watches `debugMode` and pushes the change to the worker, which flips an internal `debugEnabled` flag without restarting.
+
+Step (cold-start and from break) always uses run-mode and arms `state.debug.after = true` on the relevant state to fire one boundary pause:
+- **Cold-start**: arms `initialState.debug.after = true` before invoking `machine.run(...)` (preserves any user-authored `state.debug.before`).
+- **From `RUNNING_PAUSED_AT_BREAK`**: `resume(step: true)` arms `m.state.debug.after` (when paused at before) or `m.nextState.debug.after` (when paused at after). `pendingRestore` undoes the mutation before the user observes the next break.
+
+`PausedResponse.stepInduced` distinguishes worker-armed Step boundaries from user-authored breakpoints. The worker computes it by reading `m.state.debug[when]` AFTER `pendingRestore` runs (so it reflects the user's authored value, not our arm). `MachineView#onPausedHandler` logs full `paused at state X before/after applying command for symbols: [...]` only when `debugMode && !stepInduced`; otherwise generic `paused`.
+
+**Engine quirks at halt** (filed upstream as [`turing-machine-js#108`](https://github.com/mellonis/turing-machine-js/issues/108)): the halting iter's `after`-fire never fires (the engine's `prevYield`-deferred after pattern needs an iter K+1 that doesn't exist when iter K transitions to halt); `haltState.debug.after` is silently ignored (no halt-pause anchor). `haltState.debug.before` IS honored — fires on the iter that transitions to halt, OR'd into that iter's `beforeMatch`.
 
 ## Worker contract
 
@@ -81,7 +94,11 @@ All shapes are TS discriminated unions in `src/lib/types.ts`. Single canonical `
 |---|---|
 | `{ type: 'build', engine, code }` | `{ type: 'built', tapes, alphabets, halted }` |
 | `{ type: 'step' }` | `{ type: 'stepped', halted, commands, nextCommands, stepsApplied }` |
-| `{ type: 'run', maxSteps? }` | `{ type: 'ran', tapes, truncated, commands, startStep, stepsApplied }` |
+| `{ type: 'run', maxSteps?, debug?, step? }` | `{ type: 'ran', tapes, truncated, commands, startStep, stepsApplied }` (or interleaved `paused`s, see below) |
+| `{ type: 'resume', step? }` | `paused` (next break) or `ran` (halt) |
+| `{ type: 'setDebug', on }` | (no response — fire-and-forget; flips worker-side `debugEnabled` flag) |
+
+`paused` interleaves with `ran`/`error` on the run channel: `{ type: 'paused', tapes, commands, stepsApplied, state, currentSymbols, debugBreak, stepInduced }`. The runner's `run({ onPaused })` Promise stays pending across paused/resume cycles; only `ran` / `error` complete it. Per-segment timer suspends on `paused`, restarts on `resume`-send, killed on `ran` / `error`.
 
 On any failure: `{ type: 'error', message, tapes? }`. When the worker errors mid-step / mid-run (typical case: no edge in the state graph for the current symbol), the response also carries the partial tape state. The runner wraps `error` responses in a `WorkerError` (custom class with a `tapes` field); `MachineView.svelte#failHalted` rebuilds the mirror and updates `lastSnapshots` from those tapes — without this, the user would see only the loaded tape and lose every step the worker actually applied before throwing.
 
@@ -96,7 +113,7 @@ The main thread converts each `TapeSnapshot` to a `turing.Tape` once via `_build
 **Caps** (all in `lib/caps.ts`):
 - `MAX_TAPES = 5` — multi-tape limit; the worker rejects loads with more tapes than the caret palette can color.
 - `MAX_STEPS = 100_000` — `run`-mode hard cap; if `runToEnd` reaches it before the machine halts, the response sets `truncated: true`. Same backstop as `WORKER_TIMEOUT_MS` but counts steps instead of wall-clock time, so a tight loop that never yields still terminates eventually.
-- `WORKER_TIMEOUT_MS = 5_000` — wall-clock cap on a single worker request. The `MachineRunner` schedules a `setTimeout` and kills the worker (terminate + respawn next request) if the round-trip exceeds it.
+- `WORKER_TIMEOUT_MS = 5_000` — wall-clock cap on a single worker request **segment**. For `build` / `step` / `run`-without-pause it's a round-trip cap. For `run` with paused/resume cycles it's per-segment: timer suspends on each `paused` (user is inspecting; no clock), restarts on `resume`-send, killed on `ran`/`error`. The `MachineRunner` schedules a `setTimeout` and kills the worker (terminate + respawn next request) if any segment exceeds it.
 - `VIEWPORT_WIDTH = 23` — see Tape section below.
 
 Tape derivation in `machineWorker.ts` prefers `tapeBlock.tapes` so a user adapting the single-tape default snippet to multi-tape doesn't silently see only tape 0.

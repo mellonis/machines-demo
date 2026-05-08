@@ -62,11 +62,11 @@ User code and the engine live inside a Web Worker. The main thread holds the UI 
 
                       ↕  postMessage
 
-        requests:   build / step / run / resume
+        requests:   build / step / run / resume / setDebug
         responses:  built / stepped / ran / paused / error
 ```
 
-**Crosses the boundary:** `TapeSnapshot[]` (on `built` / `ran` / `error` / `paused`), per-step `Command[]` (movement + written symbol), tape alphabets, plus break metadata (state name, current symbols, `debugBreak` flags) on `paused` — plain data only.
+**Crosses the boundary:** `TapeSnapshot[]` (on `built` / `ran` / `error` / `paused`), per-step `Command[]` (movement + written symbol), tape alphabets, plus break metadata (state name, current symbols, `debugBreak` flags, `stepInduced` flag distinguishing user breakpoints from worker-armed Step boundaries) on `paused` — plain data only.
 
 **Never crosses:** the user's code, the `TuringMachine` / `State` / `Reference` instances it constructs, and the upstream library singletons (`haltState`, `ifOtherSymbol`, the `movements` Symbols). Identity-checked sentinels wouldn't survive `structuredClone`, and keeping user code worker-side is what justifies `'unsafe-eval'` in CSP — the worker is the actual security boundary.
 
