@@ -297,7 +297,12 @@ async function run(maxSteps: number, debug: boolean): Promise<{ truncated: boole
   // Initial-yield handling: build() always primes pendingCommand. We discard
   // the engine's runStepByStep generator and start a fresh `run()` from the
   // current initial state — the engine handles its own iteration internally.
-  generator = null;
+  // .return() triggers the generator's `finally` so it unlocks the tapeBlock;
+  // without it, the new run()'s internal generator hits "Lock check failed".
+  if (generator) {
+    generator.return();
+    generator = null;
+  }
   pendingCommand = null;
 
   runStartStep = stepsApplied;
