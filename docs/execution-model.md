@@ -161,3 +161,49 @@ The Apply button is **hidden** in DEMO, IDLE, and HALTED — it's MANUAL-only. E
 - `S-build-manual` — reload, → MANUAL.
 - `S-step-manual-{off,on}` — cold-start Step.
 - `S-run-manual-{off,on}-{auto,cont}` — cold-start Run.
+
+## 7. Starting and resuming runs
+
+The cold-start path (Build / Step / Run from IDLE, MANUAL, or HALTED — and DEMO's user-clicked equivalent) is unified: reload the worker, then either land back in a resting mode (Build) or enter `machine.run()` (Step / Run). The Resume sub-section covers Continue from RUNNING_PAUSED, which uses the same in-flight `run()` rather than reloading.
+
+### Cold-start
+
+The path is identical from IDLE, MANUAL, and HALTED. Each Build / Step / Run reloads the worker, builds a fresh mirror, then routes by action:
+
+- **Build** — reload only. → IDLE if `!userTookControl`, → MANUAL if `userTookControl`.
+- **Step** — reload, arm `initialState.debug.after = true` (preserving any user-authored `state.debug.before`), call `runner.run({ debug: debugMode, step: true })`. Worker pauses at iter 1's after-fire → RUNNING_PAUSED. With `debug=on` and a user-authored `state.debug.before` on `initialState`, the before-fire interposes first; same target mode.
+- **Run** — reload, call `runner.run({ debug: debugMode })`. → RUNNING_AUTO (`withPause=on`, with throttled `onStep`) or RUNNING_CONTINUOUS (`withPause=off`, no throttle). Debug breaks during the run land → RUNNING_PAUSED.
+
+If the reload itself fails (build error in user code), → HALTED with an error log; covered by walk-through 7.
+
+```mermaid
+flowchart TD
+    Start([User clicks Build, Step, or Run from IDLE / MANUAL / HALTED])
+    Start --> Reload[reload worker — build, mirror, alphabets]
+    Reload --> Action{which action?}
+    Reload -. build error .-> ErrorOut[→ HALTED with error log]
+    Action -->|Build| Resolve1{userTookControl?}
+    Resolve1 -->|true| ManualOut[→ MANUAL]
+    Resolve1 -->|false| IdleOut[→ IDLE]
+    Action -->|Step| ArmAfter[arm initialState.debug.after = true; preserve user-authored .before]
+    ArmAfter --> RunStep[runner.run debug=debugMode, step=true]
+    RunStep --> PauseOut[→ RUNNING_PAUSED at iter 1 after-fire]
+    Action -->|Run| WithPause{withPause?}
+    WithPause -->|true| RunAuto[runner.run debug=debugMode, with throttled onStep]
+    RunAuto --> AutoOut[→ RUNNING_AUTO]
+    WithPause -->|false| RunCont[runner.run debug=debugMode, no throttle]
+    RunCont --> ContOut[→ RUNNING_CONTINUOUS]
+    AutoOut -. user-authored break .-> PauseOut
+    ContOut -. user-authored break .-> PauseOut
+    RunStep -. user-authored .before fires before iter 1 after .-> PauseOut
+```
+
+**Cold-start scenario IDs.** Each origin (IDLE / MANUAL / HALTED) gets the same set:
+
+- `S-build-{idle,manual,halted}` — reload, → IDLE / MANUAL by `userTookControl`.
+- `S-step-{idle,manual,halted}-{off,on}` — Step cold-start. Off / on selects `debug` flag.
+- `S-run-{idle,manual,halted}-{off,on}-{auto,cont}` — Run cold-start. Off / on selects `debug`; auto / cont selects `withPause`.
+
+**DEMO origin.** Build / Step / Run from DEMO uses the same cold-start path; the click signals intent (kills the auto-loop) but doesn't flip `userTookControl`, so post-RUNNING_* completion and Build resolution land IDLE. Scenario IDs `S-build-demo`, `S-step-demo-{off,on}`, `S-run-demo-{off,on}-{auto,cont}` mirror the IDLE entries.
+
+**Post-RUNNING_* completion** — when a run reaches halt naturally (or via Stop), the resolution is HALTED. The next Build / Step / Run from HALTED then resolves to IDLE or MANUAL by `userTookControl`. The track is preserved across the run.
