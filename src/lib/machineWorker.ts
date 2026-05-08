@@ -345,12 +345,15 @@ async function run(maxSteps: number, debug: boolean): Promise<{ truncated: boole
             // machineState reaches us only via the next onStep call. If
             // turing-machine-js#107 lands (escape hatch for un-substituted
             // snapshot), this branch and pendingStepNext can collapse.
-            const ns = m.nextState as { debug: { before?: true; after?: true } | null };
+            // state.debug is a DebugConfig instance with accessor-defined
+            // before/after — spreading skips them (not own enumerable). Read
+            // .after explicitly so the after filter survives a self-loop arm.
+            const ns = m.nextState as { debug: { before?: unknown; after?: unknown } | null };
             const original = ns.debug;
-            // Spread to preserve any existing `after` flag — critical for
-            // self-loop states where ns === current state and after=true
-            // must remain so pendingAfterFromPrev still propagates.
-            ns.debug = { ...(original ?? {}), before: true };
+            const preservedAfter = original?.after;
+            ns.debug = preservedAfter !== undefined
+              ? { before: true, after: preservedAfter }
+              : { before: true };
             pendingRestore = () => { ns.debug = original; };
           } else {
             pendingStepNext = true;
@@ -365,12 +368,15 @@ async function run(maxSteps: number, debug: boolean): Promise<{ truncated: boole
   // machine's `run` signature to route correctly.
   const runOpts: Parameters<AnyMachine['run']>[0] = {
     stepsLimit: maxSteps,
-    onStep: (m: MachineYield & { nextState?: { debug: { before?: true; after?: true } | null } }) => {
+    onStep: (m: MachineYield & { nextState?: { debug: { before?: unknown; after?: unknown } | null } }) => {
       if (pendingStepNext && m.nextState) {
-        const ns = m.nextState as { debug: { before?: true; after?: true } | null };
+        const ns = m.nextState as { debug: { before?: unknown; after?: unknown } | null };
         const original = ns.debug;
-        // Spread to preserve any existing `after` flag (see direct-arm branch).
-        ns.debug = { ...(original ?? {}), before: true };
+        // state.debug is a DebugConfig instance — see direct-arm branch.
+        const preservedAfter = original?.after;
+        ns.debug = preservedAfter !== undefined
+          ? { before: true, after: preservedAfter }
+          : { before: true };
         pendingRestore = () => { ns.debug = original; };
         pendingStepNext = false;
       }
