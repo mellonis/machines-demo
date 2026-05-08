@@ -255,3 +255,99 @@ HALTED is the terminal state — the machine reached its halt state, was stopped
 - `S-takectl-halted` — `userTookControl = true`, → MANUAL. Available only when `!userTookControl`.
 
 HALTED can be reached from any non-resting state. Build / Step / Run from HALTED, plus error and timeout handling, are walk-throughs in §10.
+
+## 10. Scenario walk-throughs
+
+Each walk-through expands a contested or non-obvious path with sequence, log entries, worker calls, and edge cases. Boundary cases only — straightforward paths (Build, Apply, cold-start Run with no breaks) are sufficiently covered by the matrix and §7.
+
+### `S-step-paused-off` / `S-step-paused-on` — Step from break
+
+**Sequence**
+1. User clicks Step while in RUNNING_PAUSED.
+2. Main thread arms `.after` on the relevant state — `m.state` if the current pause was a `before`-fire, `m.nextState` if it was an `after`-fire. The mutation is captured in `pendingRestore` for later un-application.
+3. `runner.resume({ step: true })` resolves the worker's pending Promise with the step intent.
+4. Worker un-applies any prior `pendingRestore`, then runs until the armed `.after` fire (or until a user-authored break interposes when `debug=on`).
+5. Worker sends `paused`; main thread enters RUNNING_PAUSED with the new break info, runs `pendingRestore` for the new arm.
+
+**Log entries**
+- `paused at state <X> after applying command for symbols: [<syms>]`
+
+**Worker calls**
+- `resume({ step: true })`
+
+**Edge cases**
+- `debug=on`: a user-authored `.before` may interpose before the armed `.after` fires. Both produce a normal `paused` response; the long-format log line distinguishes them by `before` vs `after`.
+- The halting iter's armed `.after` never fires (engine quirk). If the next iter halts the machine, the worker sends `ran` instead of a final `paused` — the run lands in HALTED. Tracked in [turing-machine-js#108](https://github.com/mellonis/turing-machine-js/issues/108).
+
+The sequence diagram below shows the complete cycle: Run (debug=on) → break → Step → re-pause → Continue → halt or further breaks.
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Main as Main thread (MachineView)
+    participant Worker
+    participant Engine as machine.run()
+
+    User->>Main: click Run [debug=on]
+    Main->>Worker: postMessage { type: 'run', debug: true }
+    Worker->>Engine: machine.run({ onDebugBreak })
+    Engine-->>Worker: yield N, state.debug.before fires
+    Worker-->>Main: { type: 'paused', state, currentSymbols, debugBreak: { before: true } }
+    Note over Worker: timer suspended
+    Note over Main: → RUNNING_PAUSED — log paused at state X before applying ...
+
+    User->>Main: click Step
+    Main->>Main: arm m.state.debug.after = true (pendingRestore captured)
+    Main->>Worker: postMessage { type: 'resume', step: true }
+    Note over Worker: timer restarted
+    Worker->>Engine: resolve onDebugBreak Promise
+    Engine-->>Worker: yield N+1, state.debug.after fires (armed)
+    Worker->>Worker: pendingRestore() — undo arm
+    Worker-->>Main: { type: 'paused', debugBreak: { after: true } }
+    Note over Worker: timer suspended
+    Note over Main: → RUNNING_PAUSED — log paused at state X after applying ...
+
+    User->>Main: click Run (Continue)
+    Main->>Worker: postMessage { type: 'resume', step: false }
+    Note over Worker: timer restarted
+    Worker->>Engine: resolve
+    alt run completes naturally
+        Engine-->>Worker: ... runs to halt
+        Worker-->>Main: { type: 'ran', tapes, commands }
+        Note over Main: → HALTED — log halted after N step(s)
+    else another debug break fires (debug=on)
+        Engine-->>Worker: yield M, state.debug.before fires
+        Worker-->>Main: { type: 'paused', state, currentSymbols, debugBreak: { before: true } }
+        Note over Main: → RUNNING_PAUSED — back to the break-cycle above
+    end
+```
+
+### Walk-through 2 — Run with breakpoints (multi-paused cycle)
+
+A Run with `debug=on` and user-authored `state.debug` triggers a sequence of paused / resume cycles. Each `paused` includes the current state, current symbols, and the `debugBreak` shape (`{ before: true }` or `{ after: true }`).
+
+**Per-segment timer.** The worker's per-segment `WORKER_TIMEOUT_MS` (5 s) suspends on every `paused` and restarts on every `resume`-send. A user inspecting a paused state for minutes does not trigger the timeout; only worker-side execution time counts.
+
+**Log replay.** Each `paused` carries a `commands` array — the per-step commands buffered between this `paused` and the previous one. The main thread appends them to the log in order, so the trace is preserved across pauses without the worker re-sending the full history.
+
+**Edge case — Stop while paused.** Worker is terminated; `runner.run()` rejects; `failHalted` is suppressed via `stopRequested`. Mode → HALTED with a `stopped` log entry. See walk-through 4.
+
+### Walk-through 3 — Continue from break (`S-continue-paused-{off,on}`)
+
+**Sequence (debug=off).**
+1. User clicks Run while in RUNNING_PAUSED. The button reads "Continue".
+2. Main thread sends `resume({ step: false })`.
+3. Worker resolves the pending Promise. `debugEnabled = false` so `onDebugBreak` returns immediately on subsequent breaks.
+4. Run continues to halt; worker sends `ran` → HALTED.
+
+**Sequence (debug=on).**
+1. Same start.
+2. Worker resolves; `debugEnabled = true` so subsequent breaks pause normally.
+3. Run continues until next break (→ another `paused` → RUNNING_PAUSED again), Stop, or halt (→ HALTED).
+
+**Log entries**
+- (debug=off, halt) `halted after N step(s)`
+- (debug=on, next break) — same long-format line as walk-through 1's log: `paused at state <X> {before|after} applying command for symbols: [<syms>]`
+
+**Worker calls**
+- `resume({ step: false })`
