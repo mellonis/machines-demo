@@ -149,6 +149,11 @@ let runStartStep = 0;
 // so the user can flip the checkbox without restarting.
 let debugEnabled = false;
 
+// User clicked Step: the next break must pause regardless of debugEnabled
+// (Step semantically means "advance one iteration and pause", so it shouldn't
+// be suppressed by an off debug toggle). Consumed on first break.
+let stepRequested = false;
+
 function reset(): void {
   phase = { kind: 'idle' };
   machine = null;
@@ -163,6 +168,7 @@ function reset(): void {
   runCommandBuffer = [];
   runStartStep = 0;
   debugEnabled = false;
+  stepRequested = false;
 }
 
 function expectPhase(...allowed: WorkerPhase['kind'][]): void {
@@ -315,17 +321,15 @@ async function run(maxSteps: number, debug: boolean): Promise<{ truncated: boole
   runCommandBuffer = [];
   phase = { kind: 'running' };
   debugEnabled = debug;
-  // eslint-disable-next-line no-console
-  console.log('[worker] run start', { debug, debugEnabled });
+  stepRequested = false;
 
   let truncated = false;
 
   // Always provide the hook so the runtime-toggle (setDebug) can flip behavior
   // mid-run. The hook self-gates on `debugEnabled` and resolves immediately
-  // when off — engine continues without pausing.
+  // when off — engine continues without pausing — UNLESS the user just
+  // clicked Step, in which case the next break always pauses.
   const onDebugBreakFn = async (m: DebugBreakPayload) => {
-        // eslint-disable-next-line no-console
-        console.log('[worker] onDebugBreak fired', { debugEnabled, pendingRestore: !!pendingRestore, debugBreak: m.debugBreak, state: m.state.name });
         // Restore the synthesized one-shot before the user observes the break.
         // (Done unconditionally — clean up even when debug is currently off,
         // so a Step-armed mutation doesn't leak past a debug toggle.)
@@ -333,11 +337,9 @@ async function run(maxSteps: number, debug: boolean): Promise<{ truncated: boole
           pendingRestore();
           pendingRestore = null;
         }
-        if (!debugEnabled) {
-          // eslint-disable-next-line no-console
-          console.log('[worker] onDebugBreak early-return: debugEnabled=false');
-          return;
-        }
+        const isStep = stepRequested;
+        stepRequested = false;
+        if (!debugEnabled && !isStep) return;
         const commandsBatch = runCommandBuffer;
         runCommandBuffer = [];
         phase = { kind: 'paused' };
@@ -358,6 +360,7 @@ async function run(maxSteps: number, debug: boolean): Promise<{ truncated: boole
         });
         phase = { kind: 'running' };
         if (action.step) {
+          stepRequested = true;
           if (m.debugBreak?.before) {
             // m IS the current iteration — arm directly.
             // onStep deferral path: when an `after` break fires, the engine
@@ -499,8 +502,6 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
     }
 
     if (req.type === 'setDebug') {
-      // eslint-disable-next-line no-console
-      console.log('[worker] setDebug', req.on);
       // Side-channel mutation; allowed in any phase (no expectPhase). When the
       // worker is currently paused at a break, this changes how *future*
       // breaks are handled — the user still has to Continue past the current
