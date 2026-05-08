@@ -8,7 +8,7 @@
   import { MachineRunner, WorkerError } from '../lib/machineRunner.ts';
   import * as turing from '@turing-machine-js/machine';
   import { VIEWPORT_WIDTH } from '../lib/caps.ts';
-  import { type Alphabets, type Command, type Engine, type TapeSnapshot } from '../lib/types.ts';
+  import { type Alphabets, type Command, type Engine, type PausedResponse, type TapeSnapshot } from '../lib/types.ts';
   import { startDemoLoop } from '../lib/demoLoop.ts';
   import { startAutoStep, parseInterval } from '../lib/autoStep.ts';
   import { commandsEntry, tapesEntry } from '../lib/format.ts';
@@ -26,6 +26,8 @@
     saveSnippet,
     deleteSnippet,
     renameSnippet,
+    loadDebugMode,
+    saveDebugMode,
     type Snippets,
   } from '../lib/persist.ts';
   import { icons } from '../lib/icons.ts';
@@ -52,6 +54,7 @@
     | 'RUNNING_STEP'
     | 'RUNNING_AUTO'
     | 'RUNNING_CONTINUOUS'
+    | 'RUNNING_PAUSED_AT_BREAK'
     | 'HALTED';
 
   /* ───── state ───── */
@@ -68,7 +71,22 @@
   let mirrorMachine: turing.TuringMachine | null = null;
   let mirrorTapeBlock: turing.TapeBlock | null = null;
   let codeChangedWarned = false;
+  let stopRequested = $state(false);
   let withPause = $state(false);
+  let debugMode = $state<boolean>(untrack(() => loadDebugMode(engine)));
+
+  $effect(() => {
+    saveDebugMode(engine, debugMode);
+  });
+
+  // Push the checkbox state to the worker whenever it changes (or after a
+  // fresh build sets workerLive). Lets the user toggle debug mid-run — the
+  // worker re-checks debugEnabled at every break instead of capturing the
+  // value at run-start.
+  $effect(() => {
+    if (workerLive) runner.setDebug(debugMode);
+  });
+
   let intervalText = $state('1s');
   let workerLive = $state(false);
   // engine is fixed for a MachineView instance (parent remounts on engine change
@@ -139,9 +157,14 @@
     executionMode === 'DEMO' || executionMode === 'MANUAL',
   );
   const takeControlVisible = $derived(
-    executionMode !== 'MANUAL' && executionMode !== 'RUNNING_CONTINUOUS',
+    executionMode !== 'MANUAL' &&
+    executionMode !== 'RUNNING_CONTINUOUS' &&
+    executionMode !== 'RUNNING_PAUSED_AT_BREAK',
   );
-  const beltTransitionsOn = $derived(executionMode !== 'RUNNING_CONTINUOUS');
+  const beltTransitionsOn = $derived(
+    executionMode !== 'RUNNING_CONTINUOUS' &&
+    executionMode !== 'RUNNING_PAUSED_AT_BREAK',
+  );
 
   // The code Reset would restore to: the loaded snippet's saved code, or the
   // selected bundled example's code, or null when the loaded snippet was
@@ -158,11 +181,13 @@
       : 'Reset to selected example',
   );
 
-  const loadDisabled = $derived(pendingOp !== null);
+  const loadDisabled = $derived(
+    pendingOp !== null && executionMode !== 'RUNNING_PAUSED_AT_BREAK',
+  );
   // Step/Run stay enabled in HALTED — they reload-from-code on entry, which
   // also clears `halted`. Disabling would just force an extra Build click.
   const stepDisabled = $derived(
-    pendingOp !== null ||
+    (pendingOp !== null && executionMode !== 'RUNNING_PAUSED_AT_BREAK') ||
       !workerLive ||
       executionMode === 'RUNNING_CONTINUOUS',
   );
@@ -170,7 +195,7 @@
   // is fast (~ms), and we don't want the user to see flicker on rapid clicks.
   // Soft-debounced inside doStep() instead.
   const runDisabled = $derived(
-    pendingOp !== null ||
+    (pendingOp !== null && executionMode !== 'RUNNING_PAUSED_AT_BREAK') ||
       !workerLive ||
       executionMode === 'RUNNING_AUTO' ||
       executionMode === 'RUNNING_CONTINUOUS' ||
@@ -207,6 +232,10 @@
   /* ───── side-effect handlers (one source of truth on error) ───── */
 
   function failHalted(err: unknown): void {
+    if (stopRequested) {
+      stopRequested = false;
+      return;
+    }
     const msg = err instanceof Error ? err.message : String(err);
     // Worker errored mid-step / mid-run. If it shipped a partial tape state,
     // sync the mirror + display to it so the user sees where execution stuck
@@ -241,7 +270,7 @@
     mirrorMachine = new turing.TuringMachine({ tapeBlock: mirrorTapeBlock });
   }
 
-  function _runMirrorStep(commands: Command[]): void {
+  async function _runMirrorStep(commands: Command[]): Promise<void> {
     if (!mirrorMachine || !mirrorTapeBlock) return;
     const oneStep = new turing.State({
       [turing.ifOtherSymbol]: {
@@ -255,7 +284,7 @@
         nextState: turing.haltState,
       },
     });
-    mirrorMachine.run({ initialState: oneStep });
+    await mirrorMachine.run({ initialState: oneStep });
   }
 
   // Push the current mirror tapes into the visible <Tape> instances. Used
@@ -272,9 +301,9 @@
   // (except RUNNING_CONTINUOUS, which rebuilds in one shot). Advances the
   // mirror with `commands`, then has each <Tape> read its updated mirror
   // tape's `.viewport` and play the slide animation if requested.
-  function renderFromMirror(commands: Command[], animate: boolean): void {
+  async function renderFromMirror(commands: Command[], animate: boolean): Promise<void> {
     if (!mirrorTapeBlock) return;
-    _runMirrorStep(commands);
+    await _runMirrorStep(commands);
     mirrorTapeBlock.tapes.forEach((tape, i) => {
       const command = commands[i];
       const delta = (command?.movement === 'L' ? -1 : command?.movement === 'R' ? 1 : 0) as -1 | 0 | 1;
@@ -314,6 +343,14 @@
   }
 
   function stopMachine(): void {
+    if (executionMode === 'RUNNING_PAUSED_AT_BREAK') {
+      // Pending run Promise will reject when we terminate; failHalted in the
+      // caller's catch is suppressed via stopRequested. We don't clear
+      // workerLive — Run/Step from HALTED reload-from-code (same as halt-via-
+      // completion), so the UI gate stays open and the next click respawns.
+      stopRequested = true;
+      runner.terminate();
+    }
     executionMode = 'HALTED';
     report('stopped', 'warn');
   }
@@ -352,60 +389,148 @@
   }
 
   async function doStep(): Promise<void> {
+    // RUNNING_PAUSED_AT_BREAK → Step click means "advance one iteration in the
+    // run, then re-pause". Send resume with step flag; worker arms next
+    // state's debug.after.
+    if (executionMode === 'RUNNING_PAUSED_AT_BREAK') {
+      runner.resume(true);
+      // Phase will be set by the next `paused` (or `ran` if the synthesized
+      // step happens to land on halt).
+      return;
+    }
+
     // Step button doubles as "Pause" while RUNNING_AUTO.
     if (executionMode === 'RUNNING_AUTO') {
       executionMode = 'RUNNING_STEP';
       report('paused');
       return;
     }
-    // Soft-debounce: drop rapid clicks while a worker step is in flight. The
-    // belt animation does NOT block — the user can click again as soon as the
-    // worker returns (~ms), even mid-slide.
-    if (stepInFlight) return;
 
-    // First step from any non-RUNNING_STEP mode (DEMO / MANUAL / HALTED):
-    // reload so mirrorMachine and worker start from the current code (user
-    // may have edited it; HALTED entry effectively restarts the machine).
-    if (executionMode !== 'RUNNING_STEP') {
-      reportSeparator();
-      report('loading…');
-      const ok = await reloadWorker();
-      if (!ok) {
-        executionMode = userTookControl ? 'MANUAL' : 'DEMO';
+    // RUNNING_STEP (auto-step paused) keeps the legacy `runner.step()` path —
+    // each Step click advances one iteration with no run-mode pause cycle.
+    // The full Step+pause experience lives on the cold-start path below.
+    // (RUNNING_AUTO → run-mode is tracked in #43.)
+    if (executionMode === 'RUNNING_STEP') {
+      if (stepInFlight) return;
+      stepInFlight = true;
+      let res;
+      try {
+        res = await runner.step();
+      } catch (err) {
+        failHalted(err);
         return;
+      } finally {
+        stepInFlight = false;
       }
-      executionMode = 'RUNNING_STEP';
-      codeChangedWarned = false;
-      reflectNeutral();
+      halted = res.halted;
+      if (res.commands) {
+        // Always log the iter's command — even on the halting iter — so the
+        // legacy step path matches the run-mode Step path. The halt entry
+        // follows separately when applicable.
+        report(commandsEntry(res.commands, { stepNumber: res.stepsApplied }, CARET_COLORS));
+      }
+      if (res.halted) {
+        report(`halted after ${res.stepsApplied} step(s)`, 'ok');
+        executionMode = 'HALTED';
+      }
+      if (res.commands) {
+        await renderFromMirror(res.commands, true);
+        if (res.nextCommands) reflectToActivePanel(res.nextCommands);
+        else reflectNeutral();
+      }
+      return;
     }
 
-    stepInFlight = true;
-    let res;
+    // Cold-start Step (DEMO / MANUAL / HALTED): reload + run-mode with step:true.
+    // Worker arms the initial state's debug.after so iter 1's after-fire is
+    // the step boundary; user-authored state.debug.before still fires naturally.
+    // onPausedHandler takes over; subsequent Step clicks resume(step: true).
+    if (stepInFlight) return;
+    reportSeparator();
+    report('loading…');
+    const ok = await reloadWorker();
+    if (!ok) {
+      executionMode = userTookControl ? 'MANUAL' : 'DEMO';
+      return;
+    }
+    if (halted) {
+      report('halted immediately', 'ok');
+      executionMode = 'HALTED';
+      return;
+    }
+    codeChangedWarned = false;
+    reflectNeutral();
+    report('running step by step…');
+
+    pendingOp = 'run';
     try {
-      res = await runner.step();
+      const res = await runner.run({
+        maxSteps: undefined,
+        debug: debugMode,
+        step: true,
+        onPaused: onPausedHandler,
+      });
+      // Reached only when the run halts without pausing — e.g. Continue from
+      // a paused state, or the armed break never fires before halt. Mirror
+      // the doRun completion path.
+      lastSnapshots = res.tapes;
+      _buildMirrorMachine(res.tapes, alphabets);
+      setAllFromMirror();
+      halted = true;
+      reflectNeutral();
+      if (!res.truncated && res.commands.length > 0) {
+        appendBatch(
+          res.commands.map((commands, i) =>
+            commandsEntry(commands, { stepNumber: res.startStep + i + 1 }, CARET_COLORS),
+          ),
+        );
+      }
+      if (res.truncated) {
+        report(`truncated at ${res.stepsApplied} steps (limit hit)`, 'warn');
+      } else {
+        report(`halted after ${res.stepsApplied} step(s)`, 'ok');
+      }
+      executionMode = 'HALTED';
     } catch (err) {
       failHalted(err);
-      return;
     } finally {
-      stepInFlight = false;
-    }
-    halted = res.halted;
-    if (res.halted) {
-      report(`halted after ${res.stepsApplied} step(s)`, 'ok');
-      executionMode = 'HALTED';
-    } else {
-      report(commandsEntry(res.commands, { stepNumber: res.stepsApplied }, CARET_COLORS));
-    }
-    if (res.commands) {
-      renderFromMirror(res.commands, true);
-      // Show what's queued for the *next* click, not what just applied.
-      // Keeps panel state consistent under rapid clicks.
-      if (res.nextCommands) reflectToActivePanel(res.nextCommands);
-      else reflectNeutral();
+      pendingOp = null;
     }
   }
 
+  function onPausedHandler(paused: PausedResponse): void {
+    // Replay buffered per-step commands so the trace leading to the break is visible.
+    if (paused.commands.length > 0) {
+      const startStep = paused.stepsApplied - paused.commands.length;
+      appendBatch(
+        paused.commands.map((commands, i) =>
+          commandsEntry(commands, { stepNumber: startStep + i + 1 }, CARET_COLORS),
+        ),
+      );
+    }
+    // Snap mirror to break-time tapes (no animation).
+    lastSnapshots = paused.tapes;
+    _buildMirrorMachine(paused.tapes, alphabets);
+    setAllFromMirror();
+    // Always log the full break-state description. Reads as "we made a step,
+    // here's the result": after-arming means iter K just ran, and the pause
+    // surfaces iter K's state and just-executed symbols. (debug toggle gates
+    // whether user-authored breaks fire, not how pauses are logged.)
+    const when = paused.debugBreak.before ? 'before' : 'after';
+    const symbols = paused.currentSymbols.map((s) => `'${s}'`).join(', ');
+    const stateRef = paused.state ? `state ${paused.state}` : 'unnamed state';
+    report(`paused at ${stateRef} ${when} applying command for symbols: [${symbols}]`, 'ok');
+    executionMode = 'RUNNING_PAUSED_AT_BREAK';
+  }
+
   async function doRun(): Promise<void> {
+    // RUNNING_PAUSED_AT_BREAK → treat Run click as Continue.
+    if (executionMode === 'RUNNING_PAUSED_AT_BREAK') {
+      runner.resume(false);
+      executionMode = 'RUNNING_CONTINUOUS';
+      return;
+    }
+
     if (withPause) {
       // Resume auto-stepping from current RUNNING_STEP position without reload.
       if (executionMode !== 'RUNNING_STEP') {
@@ -419,7 +544,7 @@
       }
       executionMode = 'RUNNING_AUTO';
       codeChangedWarned = false;
-      report(`auto-stepping every ${intervalMs}ms`);
+      report(`running, auto-stepping every ${intervalMs}ms`);
       // Auto-step loop is started by the $effect that watches executionMode.
       return;
     }
@@ -436,13 +561,20 @@
     report('running…');
     pendingOp = 'run';
     try {
-      const res = await runner.run();
+      const res = await runner.run({
+        maxSteps: undefined,
+        debug: debugMode,
+        onPaused: onPausedHandler,
+      });
       lastSnapshots = res.tapes;
       _buildMirrorMachine(res.tapes, alphabets);
       setAllFromMirror();
       halted = true;
       reflectNeutral();
-      if (res.commands.length > 0) {
+      // Skip the per-step trace dump on truncated runs — at MAX_STEPS the
+      // payload is 100k entries and Svelte's reactive list freezes the page.
+      // Band-aid for #45 (proper log throttle/buffer split tracked there).
+      if (!res.truncated && res.commands.length > 0) {
         appendBatch(
           res.commands.map((commands, i) =>
             commandsEntry(commands, { stepNumber: res.startStep + i + 1 }, CARET_COLORS),
@@ -463,13 +595,14 @@
   }
 
   function takeControl(): void {
+    report('user took control', 'ok');
     userTookControl = true;
     executionMode = 'MANUAL';
     reflectNeutral();
   }
 
-  function onApply(commands: Command[]): void {
-    renderFromMirror(commands, true);
+  async function onApply(commands: Command[]): Promise<void> {
+    await renderFromMirror(commands, true);
     report(commandsEntry(commands, 'applied', CARET_COLORS));
   }
 
@@ -553,7 +686,7 @@
       reflect: (commands) => panelRef?.reflect(commands),
       apply: (commands) => {
         panelRef?.flashApply();
-        renderFromMirror(commands, true);
+        void renderFromMirror(commands, true);
       },
       getAlphabets: () => alphabets,
     });
@@ -568,13 +701,13 @@
           if (executionMode !== 'RUNNING_AUTO') return;
           if (res.commands) {
             reflectToActivePanel(res.commands);
-            renderFromMirror(res.commands, true);
+            await renderFromMirror(res.commands, true);
+            // Always log the iter's command (incl. halting iter), then halt.
+            report(commandsEntry(res.commands, { stepNumber: res.stepsApplied }, CARET_COLORS));
           }
           if (res.halted) {
             report(`halted after ${res.stepsApplied} step(s)`, 'ok');
             executionMode = 'HALTED';
-          } else {
-            report(commandsEntry(res.commands, { stepNumber: res.stepsApplied }, CARET_COLORS));
           }
         } catch (err) {
           failHalted(err);
@@ -590,7 +723,7 @@
   $effect(() => {
     void code;  // subscribe; value unused (read happens via untrack below)
     untrack(() => {
-      if (executionMode === 'RUNNING_STEP' || executionMode === 'RUNNING_AUTO') {
+      if (executionMode === 'RUNNING_STEP' || executionMode === 'RUNNING_AUTO' || executionMode === 'RUNNING_PAUSED_AT_BREAK') {
         if (!codeChangedWarned) {
           codeChangedWarned = true;
           report('code changed — current execution continues from loaded state', 'warn');
@@ -647,6 +780,7 @@
       examples={engineExamples}
       {selectedExampleId}
       bind:withPause
+      bind:debugMode
       bind:intervalText
       onBuild={() => doLoad({ userInitiated: true })}
       onStep={doStep}

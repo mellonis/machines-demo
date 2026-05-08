@@ -48,7 +48,9 @@ export type TapeSnapshot = {
 export type WorkerRequest =
   | { type: 'build'; engine: Engine; code: string }
   | { type: 'step' }
-  | { type: 'run'; maxSteps?: number };
+  | { type: 'run'; maxSteps?: number; debug?: boolean; step?: boolean } // step?: true → arm initial state's debug.after so iter 1 pauses at the step-boundary (preserves user-authored debug.before)
+  | { type: 'resume'; step?: boolean } // step?: true → advance one iteration, then re-pause
+  | { type: 'setDebug'; on: boolean }; // runtime-toggle debug-break pausing during a run
 
 /* Multi-tape: every shape is per-tape arrays. N=1 for single-tape machines,
  * N=K for K-tape machines (TapeBlock.fromTapes([...K])). */
@@ -84,6 +86,33 @@ export type RanResponse = {
   stepsApplied: number;
 };
 
+/**
+ * Sent by the worker when `machine.run({ debug: true, ... })` hit a break
+ * point (state.debug or haltState.debug). The main thread responds with a
+ * `resume` request (optionally `step: true`) to continue, or terminates the
+ * worker via the runner to stop. The worker's `run()` Promise stays pending
+ * across paused/resume cycles; only `ran` / `error` complete it.
+ */
+export type PausedResponse = {
+  type: 'paused';
+  tapes: TapeSnapshot[];
+  /**
+   * Per-step commands buffered since the previous `paused` (or since the
+   * `run` request started). The main thread replays these in the Log so the
+   * user sees the trace leading up to the break; tape state is restored
+   * from `tapes` (snap, no animation), same path as `ran`.
+   */
+  commands: Command[][];
+  stepsApplied: number;
+  /** `m.state.name` — the user's State instance does not cross the boundary. */
+  state: string;
+  /** Symbol currently under each tape head — per-tape array, length = tape count. */
+  currentSymbols: string[];
+  /** At least one of `before` / `after` is `true`. Field shape mirrors the
+   * upstream `m.debugBreak` type (omitted-key = false, never `undefined`). */
+  debugBreak: { before?: true; after?: true };
+};
+
 export type ErrorResponse = {
   type: 'error';
   message: string;
@@ -101,4 +130,5 @@ export type WorkerResponse =
   | BuiltResponse
   | SteppedResponse
   | RanResponse
+  | PausedResponse
   | ErrorResponse;

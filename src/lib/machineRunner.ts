@@ -3,6 +3,7 @@ import { MAX_STEPS, WORKER_TIMEOUT_MS } from './caps.ts';
 import {
   type BuiltResponse,
   type Engine,
+  type PausedResponse,
   type RanResponse,
   type SteppedResponse,
   type TapeSnapshot,
@@ -26,34 +27,44 @@ export class WorkerError extends Error {
   }
 }
 
-type Pending = {
+type SimplePending = {
   resolve: (data: WorkerResponse) => void;
   reject: (err: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
+  timeoutId: ReturnType<typeof setTimeout>;
+};
+
+type RunPending = {
+  resolveRan: (data: RanResponse) => void;
+  reject: (err: Error) => void;
+  timeoutId: ReturnType<typeof setTimeout> | null;
+  onPaused: ((data: PausedResponse) => void) | null;
 };
 
 export class MachineRunner {
   readonly engine: Engine;
   private worker: Worker | null = null;
-  private pending: Pending | null = null;
+  private simplePending: SimplePending | null = null;
+  private runPending: RunPending | null = null;
 
   constructor(engine: Engine) {
     this.engine = engine;
   }
 
-  private rejectPending(err: Error): void {
-    if (!this.pending) return;
-    clearTimeout(this.pending.timer);
-    this.pending.reject(err);
-    this.pending = null;
+  private rejectAll(err: Error): void {
+    if (this.simplePending) {
+      clearTimeout(this.simplePending.timeoutId);
+      this.simplePending.reject(err);
+      this.simplePending = null;
+    }
+    if (this.runPending) {
+      if (this.runPending.timeoutId) clearTimeout(this.runPending.timeoutId);
+      this.runPending.reject(err);
+      this.runPending = null;
+    }
   }
 
   private spawnWorker(): void {
-    // Reject any in-flight request before tearing down the worker. Without
-    // this, the pending request's timeout would survive the worker swap and
-    // fire later — clearing `this.pending` and rejecting whatever new request
-    // had taken its slot.
-    this.rejectPending(new Error('superseded by new worker'));
+    this.rejectAll(new Error('superseded by new worker'));
     if (this.worker) {
       this.worker.terminate();
       this.worker = null;
@@ -63,65 +74,160 @@ export class MachineRunner {
     this.worker.onerror = (e) => this.onWorkerError(e);
   }
 
+  private startRunTimer(): void {
+    if (!this.runPending) return;
+    if (this.runPending.timeoutId) clearTimeout(this.runPending.timeoutId);
+    this.runPending.timeoutId = setTimeout(() => {
+      const p = this.runPending;
+      this.runPending = null;
+      if (this.worker) {
+        this.worker.terminate();
+        this.worker = null;
+      }
+      p?.reject(new Error(`timeout after ${WORKER_TIMEOUT_MS}ms — worker terminated (likely infinite loop)`));
+    }, WORKER_TIMEOUT_MS);
+  }
+
+  private stopRunTimer(): void {
+    if (!this.runPending) return;
+    if (this.runPending.timeoutId) {
+      clearTimeout(this.runPending.timeoutId);
+      this.runPending.timeoutId = null;
+    }
+  }
+
   private onMessage(data: WorkerResponse): void {
-    if (!this.pending) return;
-    const p = this.pending;
-    this.pending = null;
-    clearTimeout(p.timer);
+    // `paused` is the only response that doesn't complete a Promise.
+    if (data.type === 'paused') {
+      if (!this.runPending) return;
+      this.stopRunTimer();
+      this.runPending.onPaused?.(data);
+      return;
+    }
+    // ran / error complete the run; stepped / built complete a simple request.
+    if (data.type === 'ran') {
+      const p = this.runPending;
+      this.runPending = null;
+      if (!p) return;
+      if (p.timeoutId) clearTimeout(p.timeoutId);
+      p.resolveRan(data);
+      return;
+    }
     if (data.type === 'error') {
-      p.reject(new WorkerError(data.message, data.tapes ?? null));
-    } else {
+      const err = new WorkerError(data.message, data.tapes ?? null);
+      if (this.runPending) {
+        const p = this.runPending;
+        this.runPending = null;
+        if (p.timeoutId) clearTimeout(p.timeoutId);
+        p.reject(err);
+        return;
+      }
+      if (this.simplePending) {
+        const p = this.simplePending;
+        this.simplePending = null;
+        clearTimeout(p.timeoutId);
+        p.reject(err);
+        return;
+      }
+      return;
+    }
+    // built / stepped
+    if (this.simplePending) {
+      const p = this.simplePending;
+      this.simplePending = null;
+      clearTimeout(p.timeoutId);
       p.resolve(data);
     }
   }
 
   private onWorkerError(e: ErrorEvent): void {
-    if (!this.pending) return;
-    const p = this.pending;
-    this.pending = null;
-    clearTimeout(p.timer);
-    p.reject(new Error(`worker error: ${e.message ?? 'unknown'}`));
+    this.rejectAll(new Error(`worker error: ${e.message ?? 'unknown'}`));
   }
 
-  private send(msg: WorkerRequest, timeoutMs: number = WORKER_TIMEOUT_MS): Promise<WorkerResponse> {
+  private sendSimple(msg: WorkerRequest): Promise<WorkerResponse> {
     if (!this.worker) throw new Error('worker not spawned — call build() first');
-    if (this.pending) throw new Error('previous request still pending');
+    if (this.simplePending || this.runPending) throw new Error('previous request still pending');
 
     return new Promise<WorkerResponse>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending = null;
+      const timeoutId = setTimeout(() => {
+        this.simplePending = null;
         if (this.worker) {
           this.worker.terminate();
           this.worker = null;
         }
-        reject(new Error(`timeout after ${timeoutMs}ms — worker terminated (likely infinite loop)`));
-      }, timeoutMs);
-      this.pending = { resolve, reject, timer };
+        reject(new Error(`timeout after ${WORKER_TIMEOUT_MS}ms — worker terminated (likely infinite loop)`));
+      }, WORKER_TIMEOUT_MS);
+      this.simplePending = { resolve, reject, timeoutId };
       this.worker!.postMessage(msg);
     });
   }
 
   async build(code: string): Promise<BuiltResponse> {
     this.spawnWorker();
-    const r = await this.send({ type: 'build', engine: this.engine, code });
+    const r = await this.sendSimple({ type: 'build', engine: this.engine, code });
     if (r.type !== 'built') throw new Error(`unexpected response: ${r.type}`);
     return r;
   }
 
   async step(): Promise<SteppedResponse> {
-    const r = await this.send({ type: 'step' });
+    const r = await this.sendSimple({ type: 'step' });
     if (r.type !== 'stepped') throw new Error(`unexpected response: ${r.type}`);
     return r;
   }
 
-  async run(maxSteps: number = MAX_STEPS): Promise<RanResponse> {
-    const r = await this.send({ type: 'run', maxSteps });
-    if (r.type !== 'ran') throw new Error(`unexpected response: ${r.type}`);
-    return r;
+  /**
+   * Async run with optional break-pause support. Returns when the worker
+   * sends `ran` (halt or stepsLimit). If `debug` is true and a break fires,
+   * `onPaused` is called; the consumer must call `resume()` to continue.
+   * The Promise stays pending across paused/resume cycles.
+   */
+  run(opts: {
+    maxSteps?: number;
+    debug?: boolean;
+    /** When true the worker arms the initial state's `debug.after` so the run
+     * pauses at iter 1's step-boundary — the cold-start path used by Step. */
+    step?: boolean;
+    onPaused?: (data: PausedResponse) => void;
+  } = {}): Promise<RanResponse> {
+    if (!this.worker) throw new Error('worker not spawned — call build() first');
+    if (this.simplePending || this.runPending) throw new Error('previous request still pending');
+
+    return new Promise<RanResponse>((resolveRan, reject) => {
+      this.runPending = {
+        resolveRan,
+        reject,
+        timeoutId: null,
+        onPaused: opts.onPaused ?? null,
+      };
+      this.startRunTimer();
+      this.worker!.postMessage({
+        type: 'run',
+        maxSteps: opts.maxSteps ?? MAX_STEPS,
+        debug: opts.debug ?? false,
+        step: opts.step ?? false,
+      });
+    });
+  }
+
+  /** Send a `resume` to a paused worker. Reactivates the round-trip timer. */
+  resume(step: boolean = false): void {
+    if (!this.runPending) throw new Error('resume: no pending run');
+    if (!this.worker) throw new Error('resume: worker terminated');
+    this.startRunTimer();
+    this.worker.postMessage({ type: 'resume', step });
+  }
+
+  /**
+   * Flip the worker's debug-pause gate. Fire-and-forget. No-op if the worker
+   * isn't spawned yet (the next `run()` will pass `debug` through the request).
+   */
+  setDebug(on: boolean): void {
+    if (!this.worker) return;
+    this.worker.postMessage({ type: 'setDebug', on });
   }
 
   terminate(): void {
-    this.rejectPending(new Error('runner terminated'));
+    this.rejectAll(new Error('runner terminated'));
     if (this.worker) {
       this.worker.terminate();
       this.worker = null;

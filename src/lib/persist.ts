@@ -61,6 +61,22 @@ export function saveExampleId(engine: Engine, id: string): void {
   }
 }
 
+export function loadDebugMode(engine: Engine): boolean {
+  try {
+    return localStorage.getItem(engineKey(engine, 'debugMode')) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export function saveDebugMode(engine: Engine, on: boolean): void {
+  try {
+    localStorage.setItem(engineKey(engine, 'debugMode'), on ? 'true' : 'false');
+  } catch {
+    /* quota or private mode — ignore */
+  }
+}
+
 export function loadSnippets(engine: Engine): Snippets {
   try {
     const v = localStorage.getItem(engineKey(engine, 'snippets'));

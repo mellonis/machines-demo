@@ -1,11 +1,14 @@
 /// <reference lib="webworker" />
 
 /**
- * Worker that drives the upstream `runStepByStep` generator.
+ * Worker that drives the upstream machine via async `machine.run(...)`.
  *
- * The generator's first yield is the command queued to be applied by the next
- * call to `step()`. Each subsequent `next()` applies the previously-yielded
- * command and yields the next one. We track that as `pendingCommand`.
+ * Phase machine:
+ *   idle → (build) → built → (run) → running → (paused) → paused → (resume) → running
+ *                          → (step) → built (same, halted advances)
+ *
+ * A `paused` response is sent when `onDebugBreak` fires; the worker's `run()`
+ * Promise stays pending until a `resume` request resolves the internal Promise.
  */
 
 import * as turing from '@turing-machine-js/machine';
@@ -30,8 +33,23 @@ import {
  * The strong types live at the worker postMessage boundary instead.
  */
 
+// onDebugBreak payload subset we read. Engine's full type carries more.
+type DebugBreakPayload = {
+  state: { name?: string };
+  currentSymbols: string[];
+  nextState: { debug: { before?: true; after?: true } | null };
+  debugBreak?: { before?: true; after?: true };
+};
+
 type AnyMachine = {
   runStepByStep: (opts: { initialState: unknown }) => Generator<MachineYield, void, void>;
+  run: (opts: {
+    initialState?: unknown;
+    stepsLimit?: number;
+    onStep?: (m: MachineYield) => void;
+    onDebugBreak?: (m: DebugBreakPayload) => void | Promise<void>;
+    __onDebugBreak?: (m: DebugBreakPayload) => void | Promise<void>;
+  }) => Promise<void>;
   initialState?: unknown;
   tape?: AnyTape;
   tapeBlock?: { tapes?: AnyTape[] };
@@ -95,22 +113,69 @@ for (const name of SANDBOX_BLOCKED_GLOBALS) {
 
 /* ───── runtime state ───── */
 
+type WorkerPhase =
+  | { kind: 'idle' }
+  | { kind: 'built'; halted: boolean }
+  | { kind: 'running' }
+  | { kind: 'paused' };
+
+let phase: WorkerPhase = { kind: 'idle' };
 let machine: AnyMachine | null = null;
 let initialState: unknown = null;
 let tapes: AnyTape[] = [];
 let generator: Generator<MachineYield, void, void> | null = null;
-let halted = false;
 let stepsApplied = 0;
 let pendingCommand: MachineYield | null = null;
 
+// Holds the resolver of the Promise awaited inside onDebugBreak. Set when
+// the worker is paused at a break; cleared on `resume`. Concurrent `run`
+// requests are rejected by the phase machine before they reach this slot.
+let resumeResolve: ((action: { step: boolean }) => void) | null = null;
+
+// Step trick: when the user clicks Step, arm the iteration-we're-stepping-
+// through's state.debug.after = true so the engine fires an after-break in
+// the next iteration's body and we pause there. pendingRestore undoes the
+// mutation before the user observes the new break.
+let pendingRestore: (() => void) | null = null;
+
+// Per-run buffer of commands captured by onStep. Drained on `paused` (sent
+// in the response) and on `ran` (sent in the response).
+let runCommandBuffer: Command[][] = [];
+let runStartStep = 0;
+
+// Runtime-mutable gate consulted inside onDebugBreak. Initialized from the
+// `run` request's `debug` flag; toggled mid-run via the `setDebug` message
+// so the user can flip the checkbox without restarting.
+let debugEnabled = false;
+
+// Step semantics: with debug off, Step pauses at the next "after" break
+// event (= one iteration's command applied), matching the legacy step-by-
+// step mental model. Before-fires are skipped. With debug on, Step pauses
+// at every break (debug toggle dominates).
+let stepPending = false;
+
 function reset(): void {
+  phase = { kind: 'idle' };
   machine = null;
   initialState = null;
   tapes = [];
   generator = null;
-  halted = false;
   stepsApplied = 0;
   pendingCommand = null;
+  resumeResolve = null;
+  pendingRestore = null;
+  runCommandBuffer = [];
+  runStartStep = 0;
+  debugEnabled = false;
+  stepPending = false;
+}
+
+function expectPhase(...allowed: WorkerPhase['kind'][]): void {
+  if (!allowed.includes(phase.kind)) {
+    throw new Error(
+      `worker phase ${phase.kind}, expected ${allowed.join('|')}`,
+    );
+  }
 }
 
 function movementCode(m: symbol): Movement {
@@ -205,48 +270,184 @@ function build(engine: Engine, code: string): void {
   generator = machine.runStepByStep({ initialState });
   const first = generator.next();
   if (first.done) {
-    halted = true;
+    phase = { kind: 'built', halted: true };
     pendingCommand = null;
   } else {
+    phase = { kind: 'built', halted: false };
     pendingCommand = first.value;
   }
 }
 
-function step(): { commands: Command[] | null; nextCommands: Command[] | null } {
-  if (halted || !pendingCommand || !generator) {
-    return { commands: null, nextCommands: null };
+function step(): { commands: Command[] | null; nextCommands: Command[] | null; halted: boolean } {
+  expectPhase('built');
+  const built = phase as Extract<WorkerPhase, { kind: 'built' }>;
+  if (built.halted || !pendingCommand || !generator) {
+    return { commands: null, nextCommands: null, halted: true };
   }
   const commands = commandsFromYield(pendingCommand);
   const r = generator.next();
   stepsApplied += 1;
+  let halted: boolean;
   if (r.done) {
     halted = true;
     pendingCommand = null;
   } else {
+    halted = false;
     pendingCommand = r.value;
   }
+  phase = { kind: 'built', halted };
   const nextCommands = pendingCommand ? commandsFromYield(pendingCommand) : null;
-  return { commands, nextCommands };
+  return { commands, nextCommands, halted };
 }
 
-function runToEnd(maxSteps: number): { commands: Command[][]; truncated: boolean; startStep: number } {
-  if (!generator) throw new Error('not built');
-  const startStep = stepsApplied;
-  const commands: Command[][] = [];
-  let extra = 0;
-  while (!halted && pendingCommand && extra < maxSteps) {
-    commands.push(commandsFromYield(pendingCommand));
-    const r = generator.next();
-    stepsApplied += 1;
-    extra += 1;
-    if (r.done) {
-      halted = true;
-      pendingCommand = null;
-      break;
-    }
-    pendingCommand = r.value;
+async function run(
+  maxSteps: number,
+  debug: boolean,
+  step: boolean,
+): Promise<{ truncated: boolean; startStep: number }> {
+  expectPhase('built');
+  const built = phase as Extract<WorkerPhase, { kind: 'built' }>;
+  if (built.halted || !machine) throw new Error('cannot run: halted or not built');
+
+  // Initial-yield handling: build() always primes pendingCommand. We discard
+  // the engine's runStepByStep generator and start a fresh `run()` from the
+  // current initial state — the engine handles its own iteration internally.
+  // .return() triggers the generator's `finally` so it unlocks the tapeBlock;
+  // without it, the new run()'s internal generator hits "Lock check failed".
+  if (generator) {
+    generator.return();
+    generator = null;
   }
-  return { commands, truncated: !halted && extra >= maxSteps, startStep };
+  pendingCommand = null;
+
+  runStartStep = stepsApplied;
+  runCommandBuffer = [];
+  phase = { kind: 'running' };
+  debugEnabled = debug;
+  stepPending = false;
+
+  // Cold-start Step: arm the initial state's .after = true so iter 1's
+  // after-fire pauses (the legacy step-by-step boundary — pause once iter
+  // 1's command has been applied). Always .after, regardless of debug
+  // toggle: the toggle gates whether user-authored breaks pause, not where
+  // the Step boundary lands. We preserve the user's .before (read via the
+  // DebugConfig getter — spread skips it) so a user-authored before-break
+  // still fires naturally on iter 1; we never inject one ourselves, since
+  // that would surface as an unauthored pre-iter pause.
+  if (step && initialState) {
+    const target = initialState as { debug: { before?: unknown; after?: unknown } | null };
+    const original = target.debug;
+    const newDebug: { before?: unknown; after?: unknown } = { after: true };
+    if (original?.before !== undefined) newDebug.before = original.before;
+    target.debug = newDebug;
+    pendingRestore = () => { target.debug = original; };
+    stepPending = true;
+  }
+
+  let truncated = false;
+
+  // Always provide the hook so the runtime-toggle (setDebug) can flip behavior
+  // mid-run. The hook self-gates on `debugEnabled` and resolves immediately
+  // when off — engine continues without pausing — UNLESS the user just
+  // clicked Step, in which case the next break always pauses.
+  const onDebugBreakFn = async (m: DebugBreakPayload) => {
+        // Restore the synthesized one-shot before the user observes the break.
+        // (Done unconditionally — clean up even when debug is currently off,
+        // so a Step-armed mutation doesn't leak past a debug toggle.)
+        if (pendingRestore) {
+          pendingRestore();
+          pendingRestore = null;
+        }
+        if (debugEnabled) {
+          // Debug on: pause at every break.
+          stepPending = false;
+        } else {
+          // Debug off: Step pauses only at after-fires (= one iteration's
+          // command applied). Before-fires are skipped — they signal the
+          // start of an iteration, not its result.
+          if (!stepPending || !m.debugBreak?.after) return;
+          stepPending = false;
+        }
+        const commandsBatch = runCommandBuffer;
+        runCommandBuffer = [];
+        phase = { kind: 'paused' };
+        send({
+          type: 'paused',
+          tapes: snapshotTapes(),
+          commands: commandsBatch,
+          stepsApplied,
+          state: m.state.name ?? '',
+          currentSymbols: [...m.currentSymbols],
+          debugBreak: { ...m.debugBreak },
+        });
+        const action = await new Promise<{ step: boolean }>((resolve) => {
+          resumeResolve = (a) => {
+            resumeResolve = null;
+            resolve(a);
+          };
+        });
+        phase = { kind: 'running' };
+        if (action.step) {
+          stepPending = true;
+          // Arm the iteration-we're-stepping-through's state.debug.after = true
+          // so its after-fire fires (in the next iteration's body) and we can
+          // pause there. For a `before` break: m IS that iteration (m.state).
+          // For an `after` break (m substituted to prevYield): the next iter's
+          // state lives at m.nextState. Preserve any original `before` filter.
+          // Read .before via the getter (DebugConfig accessor — spread skips it).
+          const target = (
+            m.debugBreak?.before ? m.state : m.nextState
+          ) as { debug: { before?: unknown; after?: unknown } | null };
+          const original = target.debug;
+          const preservedBefore = original?.before;
+          const newDebug: { before?: unknown; after?: unknown } = { after: true };
+          if (preservedBefore !== undefined) newDebug.before = preservedBefore;
+          target.debug = newDebug;
+          pendingRestore = () => { target.debug = original; };
+        }
+      };
+
+  // PostMachine.run() uses `__onDebugBreak` and does not accept `initialState`
+  // (uses its own #initialState). TuringMachine.run() uses `onDebugBreak` and
+  // requires `initialState`. Branch on the presence of `__onDebugBreak` in the
+  // machine's `run` signature to route correctly.
+  const runOpts: Parameters<AnyMachine['run']>[0] = {
+    stepsLimit: maxSteps,
+    onStep: (m: MachineYield) => {
+      runCommandBuffer.push(commandsFromYield(m));
+      stepsApplied += 1;
+    },
+  };
+
+  if (machine instanceof post.PostMachine) {
+    // PostMachine.run() uses `__onDebugBreak` and ignores `initialState`
+    // (it carries its own #initialState internally).
+    runOpts.__onDebugBreak = onDebugBreakFn;
+  } else {
+    // TuringMachine.run() uses `onDebugBreak` and requires `initialState`.
+    runOpts.initialState = initialState;
+    runOpts.onDebugBreak = onDebugBreakFn;
+  }
+
+  try {
+    await machine.run(runOpts);
+  } catch (err) {
+    // The engine throws 'Long execution' when stepsLimit is reached. Check the
+    // step counter at catch time — more reliable than a flag set in onStep
+    // (engine may throw before the flag-setting iteration's onStep runs).
+    if (stepsApplied - runStartStep >= maxSteps) {
+      truncated = true;
+      // fall through, send `ran` with truncated: true
+    } else {
+      // Reset phase before rethrow so the catch in handleRequest sees a known
+      // state. tapes still hold partial state (existing error path).
+      phase = { kind: 'built', halted: false };
+      throw err;
+    }
+  }
+
+  phase = { kind: 'built', halted: true };
+  return { truncated, startStep: stepsApplied - runCommandBuffer.length };
 }
 
 function send(msg: WorkerResponse): void {
@@ -261,21 +462,25 @@ self.onmessage = (e: MessageEvent<unknown>) => {
   }
 
   const req = msg as WorkerRequest;
+  void handleRequest(req);
+};
+
+async function handleRequest(req: WorkerRequest): Promise<void> {
   try {
     if (req.type === 'build') {
       build(req.engine, req.code);
+      const built = phase as Extract<WorkerPhase, { kind: 'built' }>;
       send({
         type: 'built',
         tapes: snapshotTapes(),
         alphabets: snapshotAlphabets(),
-        halted,
+        halted: built.halted,
       });
       return;
     }
 
     if (req.type === 'step') {
-      if (!machine) throw new Error('not built');
-      const { commands, nextCommands } = step();
+      const { commands, nextCommands, halted } = step();
       send({
         type: 'stepped',
         halted,
@@ -287,16 +492,37 @@ self.onmessage = (e: MessageEvent<unknown>) => {
     }
 
     if (req.type === 'run') {
-      if (!machine) throw new Error('not built');
-      const { commands, truncated, startStep } = runToEnd(req.maxSteps ?? MAX_STEPS);
+      const { truncated, startStep } = await run(
+        req.maxSteps ?? MAX_STEPS,
+        req.debug ?? false,
+        req.step ?? false,
+      );
       send({
         type: 'ran',
         tapes: snapshotTapes(),
         truncated,
-        commands,
+        commands: runCommandBuffer,
         startStep,
         stepsApplied,
       });
+      runCommandBuffer = [];
+      return;
+    }
+
+    if (req.type === 'resume') {
+      expectPhase('paused');
+      const r = resumeResolve;
+      if (!r) throw new Error('resume: no pending Promise');
+      r({ step: req.step ?? false });
+      return;
+    }
+
+    if (req.type === 'setDebug') {
+      // Side-channel mutation; allowed in any phase (no expectPhase). When the
+      // worker is currently paused at a break, this changes how *future*
+      // breaks are handled — the user still has to Continue past the current
+      // pause manually.
+      debugEnabled = req.on;
       return;
     }
 
@@ -312,4 +538,4 @@ self.onmessage = (e: MessageEvent<unknown>) => {
       tapes: tapes.length > 0 ? snapshotTapes() : undefined,
     });
   }
-};
+}

@@ -8,6 +8,7 @@
   type Mode =
     | 'DEMO' | 'MANUAL'
     | 'RUNNING_STEP' | 'RUNNING_AUTO' | 'RUNNING_CONTINUOUS'
+    | 'RUNNING_PAUSED_AT_BREAK'
     | 'HALTED';
 
   type Props = {
@@ -19,6 +20,7 @@
     examples: readonly Example[];
     selectedExampleId: string;
     withPause: boolean;
+    debugMode: boolean;
     intervalText: string;
     snippets: Snippets;
     loadedSnippetId: string | null;
@@ -44,6 +46,7 @@
     examples,
     selectedExampleId,
     withPause = $bindable(),
+    debugMode = $bindable(),
     intervalText = $bindable(),
     snippets,
     loadedSnippetId,
@@ -222,7 +225,12 @@
     executionMode !== 'RUNNING_AUTO' && executionMode !== 'RUNNING_CONTINUOUS',
   );
   const stopVisible = $derived(
-    executionMode === 'RUNNING_STEP' || executionMode === 'RUNNING_AUTO',
+    executionMode === 'RUNNING_STEP' ||
+      executionMode === 'RUNNING_AUTO' ||
+      executionMode === 'RUNNING_PAUSED_AT_BREAK',
+  );
+  const runLabel = $derived(
+    executionMode === 'RUNNING_PAUSED_AT_BREAK' ? 'Continue' : 'Run',
   );
 </script>
 
@@ -406,12 +414,16 @@
     <span class="btn-label">{executionMode === 'RUNNING_AUTO' ? 'Pause' : 'Step'}</span>
   </button>
   <button type="button" disabled={runDisabled} onclick={onRun}>
-    {@html icons.run}<span class="btn-label">Run</span>
+    {@html icons.run}<span class="btn-label">{runLabel}</span>
   </button>
   {#if configVisible}
     <label class="checkbox">
       <input type="checkbox" bind:checked={withPause} disabled={runDisabled} />
       <span>with pause</span>
+    </label>
+    <label class="checkbox" title="When on, breaks set via state.debug pause execution at a Continue/Step prompt.">
+      <input type="checkbox" bind:checked={debugMode} disabled={runDisabled} />
+      <span>debug</span>
     </label>
     {#if withPause}
       <input
