@@ -71,6 +71,7 @@
   let mirrorMachine: turing.TuringMachine | null = null;
   let mirrorTapeBlock: turing.TapeBlock | null = null;
   let codeChangedWarned = false;
+  let stopRequested = $state(false);
   let withPause = $state(false);
   let debugMode = $state<boolean>(untrack(() => loadDebugMode(engine)));
 
@@ -172,11 +173,13 @@
       : 'Reset to selected example',
   );
 
-  const loadDisabled = $derived(pendingOp !== null);
+  const loadDisabled = $derived(
+    pendingOp !== null && executionMode !== 'RUNNING_PAUSED_AT_BREAK',
+  );
   // Step/Run stay enabled in HALTED — they reload-from-code on entry, which
   // also clears `halted`. Disabling would just force an extra Build click.
   const stepDisabled = $derived(
-    pendingOp !== null ||
+    (pendingOp !== null && executionMode !== 'RUNNING_PAUSED_AT_BREAK') ||
       !workerLive ||
       executionMode === 'RUNNING_CONTINUOUS',
   );
@@ -184,7 +187,7 @@
   // is fast (~ms), and we don't want the user to see flicker on rapid clicks.
   // Soft-debounced inside doStep() instead.
   const runDisabled = $derived(
-    pendingOp !== null ||
+    (pendingOp !== null && executionMode !== 'RUNNING_PAUSED_AT_BREAK') ||
       !workerLive ||
       executionMode === 'RUNNING_AUTO' ||
       executionMode === 'RUNNING_CONTINUOUS' ||
@@ -221,6 +224,10 @@
   /* ───── side-effect handlers (one source of truth on error) ───── */
 
   function failHalted(err: unknown): void {
+    if (stopRequested) {
+      stopRequested = false;
+      return;
+    }
     const msg = err instanceof Error ? err.message : String(err);
     // Worker errored mid-step / mid-run. If it shipped a partial tape state,
     // sync the mirror + display to it so the user sees where execution stuck
@@ -331,6 +338,7 @@
     if (executionMode === 'RUNNING_PAUSED_AT_BREAK') {
       // Pending run Promise will reject when we terminate; failHalted in the
       // caller's catch sets the rest. We pre-empt the message here.
+      stopRequested = true;
       runner.terminate();
       workerLive = false;
     }
@@ -654,7 +662,7 @@
   $effect(() => {
     void code;  // subscribe; value unused (read happens via untrack below)
     untrack(() => {
-      if (executionMode === 'RUNNING_STEP' || executionMode === 'RUNNING_AUTO') {
+      if (executionMode === 'RUNNING_STEP' || executionMode === 'RUNNING_AUTO' || executionMode === 'RUNNING_PAUSED_AT_BREAK') {
         if (!codeChangedWarned) {
           codeChangedWarned = true;
           report('code changed — current execution continues from loaded state', 'warn');

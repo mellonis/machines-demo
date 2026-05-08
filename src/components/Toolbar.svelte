@@ -225,7 +225,12 @@
     executionMode !== 'RUNNING_AUTO' && executionMode !== 'RUNNING_CONTINUOUS',
   );
   const stopVisible = $derived(
-    executionMode === 'RUNNING_STEP' || executionMode === 'RUNNING_AUTO',
+    executionMode === 'RUNNING_STEP' ||
+      executionMode === 'RUNNING_AUTO' ||
+      executionMode === 'RUNNING_PAUSED_AT_BREAK',
+  );
+  const runLabel = $derived(
+    executionMode === 'RUNNING_PAUSED_AT_BREAK' ? 'Continue' : 'Run',
   );
 </script>
 
@@ -409,7 +414,7 @@
     <span class="btn-label">{executionMode === 'RUNNING_AUTO' ? 'Pause' : 'Step'}</span>
   </button>
   <button type="button" disabled={runDisabled} onclick={onRun}>
-    {@html icons.run}<span class="btn-label">Run</span>
+    {@html icons.run}<span class="btn-label">{runLabel}</span>
   </button>
   {#if configVisible}
     <label class="checkbox">
