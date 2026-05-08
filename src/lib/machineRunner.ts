@@ -213,6 +213,15 @@ export class MachineRunner {
     this.worker.postMessage({ type: 'resume', step });
   }
 
+  /**
+   * Flip the worker's debug-pause gate. Fire-and-forget. No-op if the worker
+   * isn't spawned yet (the next `run()` will pass `debug` through the request).
+   */
+  setDebug(on: boolean): void {
+    if (!this.worker) return;
+    this.worker.postMessage({ type: 'setDebug', on });
+  }
+
   terminate(): void {
     this.rejectAll(new Error('runner terminated'));
     if (this.worker) {

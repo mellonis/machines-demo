@@ -79,6 +79,14 @@
     saveDebugMode(engine, debugMode);
   });
 
+  // Push the checkbox state to the worker whenever it changes (or after a
+  // fresh build sets workerLive). Lets the user toggle debug mid-run — the
+  // worker re-checks debugEnabled at every break instead of capturing the
+  // value at run-start.
+  $effect(() => {
+    if (workerLive) runner.setDebug(debugMode);
+  });
+
   let intervalText = $state('1s');
   let workerLive = $state(false);
   // engine is fixed for a MachineView instance (parent remounts on engine change

@@ -49,7 +49,8 @@ export type WorkerRequest =
   | { type: 'build'; engine: Engine; code: string }
   | { type: 'step' }
   | { type: 'run'; maxSteps?: number; debug?: boolean }
-  | { type: 'resume'; step?: boolean }; // step?: true → advance one iteration, then re-pause
+  | { type: 'resume'; step?: boolean } // step?: true → advance one iteration, then re-pause
+  | { type: 'setDebug'; on: boolean }; // runtime-toggle debug-break pausing during a run
 
 /* Multi-tape: every shape is per-tape arrays. N=1 for single-tape machines,
  * N=K for K-tape machines (TapeBlock.fromTapes([...K])). */

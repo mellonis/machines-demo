@@ -144,6 +144,11 @@ let pendingRestore: (() => void) | null = null;
 let runCommandBuffer: Command[][] = [];
 let runStartStep = 0;
 
+// Runtime-mutable gate consulted inside onDebugBreak. Initialized from the
+// `run` request's `debug` flag; toggled mid-run via the `setDebug` message
+// so the user can flip the checkbox without restarting.
+let debugEnabled = false;
+
 function reset(): void {
   phase = { kind: 'idle' };
   machine = null;
@@ -157,6 +162,7 @@ function reset(): void {
   pendingRestore = null;
   runCommandBuffer = [];
   runStartStep = 0;
+  debugEnabled = false;
 }
 
 function expectPhase(...allowed: WorkerPhase['kind'][]): void {
@@ -308,16 +314,22 @@ async function run(maxSteps: number, debug: boolean): Promise<{ truncated: boole
   runStartStep = stepsApplied;
   runCommandBuffer = [];
   phase = { kind: 'running' };
+  debugEnabled = debug;
 
   let truncated = false;
 
-  const onDebugBreakFn = debug
-    ? async (m: DebugBreakPayload) => {
+  // Always provide the hook so the runtime-toggle (setDebug) can flip behavior
+  // mid-run. The hook self-gates on `debugEnabled` and resolves immediately
+  // when off — engine continues without pausing.
+  const onDebugBreakFn = async (m: DebugBreakPayload) => {
         // Restore the synthesized one-shot before the user observes the break.
+        // (Done unconditionally — clean up even when debug is currently off,
+        // so a Step-armed mutation doesn't leak past a debug toggle.)
         if (pendingRestore) {
           pendingRestore();
           pendingRestore = null;
         }
+        if (!debugEnabled) return;
         const commandsBatch = runCommandBuffer;
         runCommandBuffer = [];
         phase = { kind: 'paused' };
@@ -359,8 +371,7 @@ async function run(maxSteps: number, debug: boolean): Promise<{ truncated: boole
             pendingStepNext = true;
           }
         }
-      }
-    : undefined;
+      };
 
   // PostMachine.run() uses `__onDebugBreak` and does not accept `initialState`
   // (uses its own #initialState). TuringMachine.run() uses `onDebugBreak` and
@@ -476,6 +487,15 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
       const r = resumeResolve;
       if (!r) throw new Error('resume: no pending Promise');
       r({ step: req.step ?? false });
+      return;
+    }
+
+    if (req.type === 'setDebug') {
+      // Side-channel mutation; allowed in any phase (no expectPhase). When the
+      // worker is currently paused at a break, this changes how *future*
+      // breaks are handled — the user still has to Continue past the current
+      // pause manually.
+      debugEnabled = req.on;
       return;
     }
 
