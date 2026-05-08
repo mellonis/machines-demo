@@ -19,6 +19,7 @@
     examples: readonly Example[];
     selectedExampleId: string;
     withPause: boolean;
+    debugMode: boolean;
     intervalText: string;
     snippets: Snippets;
     loadedSnippetId: string | null;
@@ -44,6 +45,7 @@
     examples,
     selectedExampleId,
     withPause = $bindable(),
+    debugMode = $bindable(false),
     intervalText = $bindable(),
     snippets,
     loadedSnippetId,
@@ -412,6 +414,10 @@
     <label class="checkbox">
       <input type="checkbox" bind:checked={withPause} disabled={runDisabled} />
       <span>with pause</span>
+    </label>
+    <label class="checkbox" title="When on, breaks set via state.debug pause execution at a Continue/Step prompt.">
+      <input type="checkbox" bind:checked={debugMode} disabled={runDisabled} />
+      <span>debug</span>
     </label>
     {#if withPause}
       <input
