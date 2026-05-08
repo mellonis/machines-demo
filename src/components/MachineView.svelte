@@ -514,7 +514,10 @@
       setAllFromMirror();
       halted = true;
       reflectNeutral();
-      if (res.commands.length > 0) {
+      // Skip the per-step trace dump on truncated runs — at MAX_STEPS the
+      // payload is 100k entries and Svelte's reactive list freezes the page.
+      // Band-aid for #45 (proper log throttle/buffer split tracked there).
+      if (!res.truncated && res.commands.length > 0) {
         appendBatch(
           res.commands.map((commands, i) =>
             commandsEntry(commands, { stepNumber: res.startStep + i + 1 }, CARET_COLORS),
