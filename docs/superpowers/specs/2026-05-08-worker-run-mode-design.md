@@ -19,13 +19,16 @@ Extend `run` with an optional `debug` flag. Add `resume` request and `paused` re
 
 | Direction | Type | Payload |
 |---|---|---|
-| → | `run` | `{ maxSteps?, debug? }` |
+| → | `run` | `{ maxSteps?, debug?, step? }` |
 | → | `resume` | `{ step? }` |
-| ← | `paused` | `{ tapes, commands, stepsApplied, state, currentSymbols, debugBreak }` |
+| → | `setDebug` | `{ on }` |
+| ← | `paused` | `{ tapes, commands, stepsApplied, state, currentSymbols, debugBreak, stepInduced }` |
 
-`debug: boolean` defaults to `false` — no surprise pauses if user code has leftover `state.debug` assignments. When `true`, the worker's `onDebugBreak` posts `paused` and awaits `resume`. When `false`, `onDebugBreak` returns immediately (pauses short-circuited at the wrapper level).
+`debug: boolean` defaults to `false` — no surprise pauses if user code has leftover `state.debug` assignments. The worker's `onDebugBreak` is **always** wired and self-gates on a module-scoped `debugEnabled` flag, so a `setDebug` request from the main thread can flip behavior mid-run (the user toggling the checkbox without restarting). When `debugEnabled` is off, the hook returns immediately unless the user just clicked Step (see Step semantics below).
 
-Field shapes:
+`step: boolean` defaults to `false`. When `true`, the worker arms the initial state's `debug.after = true` so iter 1's after-fire is the step boundary (preserving any user-authored `state.debug.before`). Used by the cold-start Step path so the run pauses at the first iter without firing user-unauthored before-pauses.
+
+Field shapes (paused):
 
 - `tapes: TapeSnapshot[]` — full snapshot at break time (same producer as `built` / `ran` / `error`).
 - `commands: Command[][]` — per-step commands buffered since the previous `paused` (or since `run` started). Mirror replays them in the Log; tape state is restored from `tapes`.
@@ -33,27 +36,49 @@ Field shapes:
 - `state: string` — `m.state.name`. The user's `State` instance does not cross the boundary.
 - `currentSymbols: string[]` — the symbols under each head at break time.
 - `debugBreak: { before?: true; after?: true }` — copied from `m.debugBreak` (omitted shape = field absent, never `undefined`).
+- `stepInduced: boolean` — `true` when the pause exists only because the worker temporarily armed `state.debug[when]` for Step semantics, `false` when the user's own `state.debug` would have fired the break regardless. Computed by reading `m.state.debug[when]` AFTER `pendingRestore` runs (so we see the user's authored value, not our arm). Drives main-thread log format: full break-state info when `debug && !stepInduced`, generic `paused` otherwise.
 
 Inside the worker, `run` now calls:
 
 ```ts
-const debug = req.debug ?? false;
+debugEnabled = req.debug ?? false;
+stepPending = false;
+
+if (req.step && initialState) {
+  // Cold-start arm: always .after, preserve user-authored .before.
+  const target = initialState as { debug: ... };
+  const original = target.debug;
+  target.debug = {
+    after: true,
+    ...(original?.before !== undefined ? { before: original.before } : {}),
+  };
+  pendingRestore = () => { target.debug = original; };
+  stepPending = true;
+}
+
 await machine.run({
   initialState,
   stepsLimit: req.maxSteps ?? MAX_STEPS,
   onStep: (m) => { /* buffer per-step commands */ },
-  onDebugBreak: debug
-    ? async (m) => {
-        send({ type: 'paused', ... });
-        await new Promise<void>((resolve) => { resumeResolve = resolve });
-      }
-    : undefined,
+  onDebugBreak: async (m) => {
+    if (pendingRestore) { pendingRestore(); pendingRestore = null; }
+    if (debugEnabled) {
+      stepPending = false; // pause at every break
+    } else if (!stepPending || !m.debugBreak?.after) {
+      return; // debug=off + non-Step-armed → no pause
+    } else {
+      stepPending = false;
+    }
+    send({ type: 'paused', ..., stepInduced: /* computed */ });
+    await new Promise<{ step: boolean }>((resolve) => { resumeResolve = resolve });
+    // on resume: if action.step, arm next pause via state.debug.after (see below)
+  },
 });
 ```
 
-When `debug` is `false`, `onDebugBreak` is omitted entirely — upstream's `run()` then skips break-handling without our wrapper paying any per-step cost. Once [turing-machine-js#106](https://github.com/mellonis/turing-machine-js/issues/106) lands, we can pass `debug` straight through to upstream and drop this conditional.
+When `debugEnabled` is `false` AND no Step is pending, `onDebugBreak` returns immediately (upstream's `run()` continues without us paying any per-step cost beyond a flag check). Once [turing-machine-js#106](https://github.com/mellonis/turing-machine-js/issues/106) lands, we can pass `debug` straight through to upstream — the runtime-toggle still requires our wrapper, but the off-path flag check goes away.
 
-A module-scoped `resumeResolve: (() => void) | null` holds the pending Promise. The `resume` request handler resolves it and clears the slot. `run` and `resume` are the only message types that touch this slot; concurrent `run` is rejected by the phase machine (see below).
+A module-scoped `resumeResolve: ((action: { step: boolean }) => void) | null` holds the pending Promise. The `resume` request handler resolves it with the action and clears the slot. `run` and `resume` are the only message types that touch this slot; concurrent `run` is rejected by the phase machine (see below).
 
 After `run()` resolves (halt or stepsLimit), the worker sends the existing `ran` response. Errors thrown from inside `run()` (e.g. no edge for current symbol) flow through the existing catch and produce `error` with partial tape state.
 
@@ -79,6 +104,7 @@ Allowed transitions:
 | `step` | `built { halted: false }` | `built { halted: <post-step> }` |
 | `run` | `built { halted: false }` | `running` → `paused` or `built { halted: true }` |
 | `resume` | `paused` | `running` → `paused` or `built { halted: true }` |
+| `setDebug` | any | unchanged (side-channel mutation of `debugEnabled`) |
 
 A request from a disallowed phase throws `worker phase <current>, expected <allowed>`, which the existing catch converts into an `error` response. Main thread logs it as a bug via `report('...', 'error')` — this is supposed to be unreachable, so a loud surfacing helps catch UI-side regressions early.
 
@@ -108,57 +134,74 @@ Build from `RUNNING_PAUSED_AT_BREAK` is allowed and follows the existing pattern
 
 `runDisabled` / `stepDisabled` / etc. derived flags pick up `RUNNING_PAUSED_AT_BREAK` so existing UI gating composes.
 
-### Step from `RUNNING_PAUSED_AT_BREAK`
+### Step semantics (cold-start and from paused)
 
-Step advances exactly one engine iteration and re-pauses, by mutating `nextState.debug = { before: true }` so the next iteration breaks regardless of the user's `state.debug` config. Stash the original `debug` value; restore on entry to the synthesized break before pausing again.
+Step is the unified entry point for advancing one engine iteration with a pause boundary. Three cases:
 
-Two paths depending on which kind of break we're paused at:
+1. **Cold-start Step (DEMO / MANUAL / HALTED → click Step)** — `MachineView.doStep` calls `runner.run({ debug, step: true, onPaused: onPausedHandler })`. The worker arms `initialState.debug.after = true` (preserving user-authored `.before`) so iter 1's after-fire is the step boundary. `stepPending = true`. After iter 1's command applies, the after-fire pauses; main thread enters `RUNNING_PAUSED_AT_BREAK`.
 
-- **`before` break.** `m` is the current `machineState`; `m.nextState` is the actual next iteration's state. Apply the trick directly inside `onDebugBreak`.
-- **`after` break.** `m` is `prevYield` (the engine substitutes for context). The un-substituted `machineState` isn't reachable here. Set a `pendingStepNext` flag and defer the trick to the *next* `onStep` call, which fires with the un-substituted yield. (Once [turing-machine-js#107](https://github.com/mellonis/turing-machine-js/issues/107) lands — escape hatch for the un-substituted snapshot — this defer can collapse back into `onDebugBreak`.)
+2. **Step from `RUNNING_PAUSED_AT_BREAK`** — `runner.resume({ step: true })`. Inside `onDebugBreak` (during the resume flow), the worker arms `target.debug.after = true` and sets `pendingRestore` to undo the mutation before the user observes the next break. The target depends on which kind of break we're paused at:
+   - **`before` break.** `m.state` is the current iteration's state. Arm `m.state.debug.after`. Iter K's command applies, then iter K's after-fire fires (deferred to iter K+1's start, with `prevYield` substituted).
+   - **`after` break.** `m.state` is already `prevYield` (the engine substitutes for context). Arm `m.nextState.debug.after`. Iter K+1 starts with `state.debug.after` set, fires its own after-fire at iter K+2's start.
+
+3. **`RUNNING_STEP` (auto-step paused) + Step click** — keeps the legacy `runner.step()` path for one-iteration advancement. Auto-step refactor to run-mode is tracked in [#43](https://github.com/mellonis/machines-demo/issues/43); until that lands, this path doesn't pause at breakpoints.
+
+The unified rule: Step always arms `.after` (never `.before`). Step boundaries are at the *end* of an iteration, not the start, matching the legacy step-by-step mental model — Step click → "I've now seen the result of one more iteration".
 
 ```ts
-let pendingStepNext = false;
-let pendingRestore: (() => void) | null = null;
-let resumeAction: 'continue' | 'step' = 'continue';
-
-await machine.run({
-  initialState,
-  stepsLimit: req.maxSteps ?? MAX_STEPS,
-  onStep: (m) => {
-    if (pendingStepNext) {
-      const ns = m.nextState;
-      const original = ns.debug;
-      ns.debug = { before: true };
-      pendingRestore = () => { ns.debug = original; };
-      pendingStepNext = false;
-    }
-    // existing per-step buffering
-  },
-  onDebugBreak: async (m) => {
-    if (pendingRestore) { pendingRestore(); pendingRestore = null; }
-    // post `paused`, await `resume` — sets resumeAction = 'continue' | 'step'
-    if (resumeAction === 'step') {
-      if (m.debugBreak?.before) {
-        const ns = m.nextState;
-        const original = ns.debug;
-        ns.debug = { before: true };
-        pendingRestore = () => { ns.debug = original; };
-      } else {
-        pendingStepNext = true;
-      }
-    }
-  },
-});
+// Inside onDebugBreak, on resume(step: true):
+if (action.step) {
+  stepPending = true;
+  const target = (
+    m.debugBreak?.before ? m.state : m.nextState
+  ) as { debug: { before?: unknown; after?: unknown } | null };
+  const original = target.debug;
+  // Preserve user-authored .before (read via getter — DebugConfig accessor; spread skips it).
+  target.debug = {
+    after: true,
+    ...(original?.before !== undefined ? { before: original.before } : {}),
+  };
+  pendingRestore = () => { target.debug = original; };
+}
 ```
 
-`nextState.debug` mutation is shared across `withOverrodeHaltState` wrappers (per upstream docs); the stash-and-restore covers this — whatever the user had on the underlying state is preserved.
+### `stepInduced`
+
+The user's mental model: "full break-state info should appear only when *I* authored a breakpoint". Worker-armed Step boundaries shouldn't surface state identity in the log — that would suggest the user set something they didn't.
+
+Worker computes `stepInduced` per pause by reading `m.state.debug[when]` AFTER `pendingRestore` runs:
+
+```ts
+const stepInduced = m.debugBreak?.before
+  ? !m.state.debug?.before
+  : !m.state.debug?.after;
+```
+
+After `pendingRestore`, `m.state.debug` reflects the user's authored value, not our temporary arm. If the relevant flag is unset, the pause exists only because we armed it → `stepInduced = true`. Main-thread `onPausedHandler` logs full break-state info only when `debugMode && !stepInduced`, otherwise generic `paused`.
+
+### Halt-iter quirks (engine-side)
+
+Two halt-related quirks visible in the trace, neither caused by our code:
+
+- **Halting iter's `after`-fire never fires.** The engine fires after-fire at iter K+1's start using `prevYield`. When iter K transitions to `haltState`, the `while (!state.isHalt)` loop exits — no iter K+1 — `prevYield`'s after-fire is silently lost.
+- **`haltState.debug.after` has no anchor.** Halt is terminal; there's no "iteration after halt" for an after-fire to attach to. The engine silently ignores it. (`haltState.debug.before` IS honored — fires on the iter that transitions to halt, OR'd into that iter's `beforeMatch`.)
+
+Both filed upstream in [turing-machine-js#108](https://github.com/mellonis/turing-machine-js/issues/108) — proposed fix: drain `pendingAfterFromPrev` after the loop, and warn-then-throw on `haltState.debug.after` assignment.
+
+### Halt-iter step entry (uniform)
+
+Cold-start Step (run-mode) reports the halting iter's command via `ran.commands`. `runner.step()` legacy path also reports the halting iter's `res.commands` before logging halt. No path absorbs the halting iter's step entry into the halt log line.
 
 ## "Debug mode" UI
 
 A checkbox lives in `Toolbar.svelte` next to `with pause`. State name `debugMode`, owned by `MachineView.svelte`, persisted to `localStorage` under `machines-demo:<engine>:debugMode` (mirroring the existing `withPause` pattern). Default off.
 
-The checkbox is purely a request-payload gate: every `run` request includes `debug: debugMode`. The UI never disables `withPause` when `debugMode` is on (or vice versa) — they target different execution modes:
+The checkbox feeds two paths:
+
+1. **Run-time**: every `run` request includes `debug: debugMode` so the worker initializes `debugEnabled` correctly at run start.
+2. **Mid-run**: a `$effect` in `MachineView.svelte` watches `debugMode` and fires `runner.setDebug(debugMode)` whenever it changes (gated on `workerLive`). The worker's `setDebug` handler updates `debugEnabled` without restarting — flipping the checkbox during a paused break changes how *future* breaks are handled.
+
+The UI never disables `withPause` when `debugMode` is on (or vice versa) — they target different execution modes:
 
 | `withPause` | `debugMode` | Run button → | Breakpoints fire? |
 |---|---|---|---|
@@ -175,12 +218,14 @@ On `paused`:
 
 1. Rebuild `mirrorMachine` from the snapshot tapes (snap, no animation) — same path as `ran`.
 2. Replay the buffered `commands: Command[][]` to the Log via `report` + `commandsEntry` — user sees the trace that led to the break.
-3. Append a single `ok`-styled log entry: `paused at <state.name> [before|after]: <symbols-under-heads>`.
+3. Append a single `ok`-styled log entry. Format depends on `debugMode && !paused.stepInduced`:
+   - **`true`** (debug on AND user-authored break): `paused at state <name> [before|after] applying command for symbols: [<syms>]`.
+   - **`false`** (debug off, OR worker-armed Step boundary): generic `paused`.
 4. Update `lastSnapshots`, set `executionMode = 'RUNNING_PAUSED_AT_BREAK'`.
 
 On `resume` (Continue clicked): nothing changes locally — wait for the next worker response (`paused`, `ran`, or `error`).
 
-On the final `ran`: existing flow — render final tapes, batch-log buffered commands, mode → `HALTED`.
+On the final `ran`: existing flow — render final tapes, batch-log buffered commands, mode → `HALTED`. Both run-mode Step (cold-start path) and the legacy `runner.step()` path log the halting iter's command before the halt entry.
 
 ## Default snippets: don't run the machine
 
@@ -225,5 +270,6 @@ Make `_runMirrorStep` async and `await mirrorMachine.run(...)`. Propagate to its
 
 ## Future simplifications when upstream lands
 
-- [turing-machine-js#106](https://github.com/mellonis/turing-machine-js/issues/106) — `debug: boolean` parameter on `run()`. The worker can pass it straight through and drop the conditional `onDebugBreak` wrapper.
-- [turing-machine-js#107](https://github.com/mellonis/turing-machine-js/issues/107) — escape hatch on the substituted `m` for `after`-break consumers. The Step path's `onStep`-deferral collapses back into `onDebugBreak`.
+- [turing-machine-js#106](https://github.com/mellonis/turing-machine-js/issues/106) — `debug: boolean` parameter on `run()`. The worker can pass it straight through; the off-path flag-check inside `onDebugBreak` goes away (the runtime-toggle still requires our wrapper).
+- [turing-machine-js#108](https://github.com/mellonis/turing-machine-js/issues/108) — drain `pendingAfterFromPrev` after the engine's main loop so the halting iter's `after`-fire actually fires; warn-then-throw on `haltState.debug.after` assignment. The "halt-iter quirks" subsection in Step semantics goes away when this lands.
+- [turing-machine-js#107](https://github.com/mellonis/turing-machine-js/issues/107) — un-substituted snapshot for `after`-break consumers. **No longer needed for our Step path** — we arm `.after` (not `.before`) on the next iteration, and `m.state` for an after-fire payload is already `prevYield` (the just-executed state), which is exactly what we need to read for `stepInduced`. Filed before the `.after`-arming approach was settled; can stay open for other consumers.
