@@ -423,11 +423,15 @@
         stepInFlight = false;
       }
       halted = res.halted;
+      if (res.commands) {
+        // Always log the iter's command — even on the halting iter — so the
+        // legacy step path matches the run-mode Step path. The halt entry
+        // follows separately when applicable.
+        report(commandsEntry(res.commands, { stepNumber: res.stepsApplied }, CARET_COLORS));
+      }
       if (res.halted) {
         report(`halted after ${res.stepsApplied} step(s)`, 'ok');
         executionMode = 'HALTED';
-      } else {
-        report(commandsEntry(res.commands, { stepNumber: res.stepsApplied }, CARET_COLORS));
       }
       if (res.commands) {
         await renderFromMirror(res.commands, true);
@@ -704,12 +708,12 @@
           if (res.commands) {
             reflectToActivePanel(res.commands);
             await renderFromMirror(res.commands, true);
+            // Always log the iter's command (incl. halting iter), then halt.
+            report(commandsEntry(res.commands, { stepNumber: res.stepsApplied }, CARET_COLORS));
           }
           if (res.halted) {
             report(`halted after ${res.stepsApplied} step(s)`, 'ok');
             executionMode = 'HALTED';
-          } else {
-            report(commandsEntry(res.commands, { stepNumber: res.stepsApplied }, CARET_COLORS));
           }
         } catch (err) {
           failHalted(err);
