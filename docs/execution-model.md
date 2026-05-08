@@ -123,3 +123,21 @@ The loop is entirely a main-thread effect; the worker doesn't see DEMO. The mirr
 - `S-takectl-demo` — `userTookControl = true`, → MANUAL.
 
 DEMO is entered only on initial page load. After any of the exits above, the user never returns to DEMO.
+
+## 5. IDLE mode
+
+IDLE is the post-interaction, pre-Take-Control resting state. The user has clicked Build / Step / Run (from DEMO or after a previous run) but hasn't committed to the manual track. The auto-loop is dead; the worker is built; the panel mirrors the worker's state but is read-only.
+
+IDLE differs from MANUAL only by the `userTookControl` latch — once Take Control fires, IDLE → MANUAL and never returns.
+
+**Exits.** Build (→ IDLE, reload — same code, fresh worker); Step / Run (→ RUNNING_*; cold-start path); Take Control (→ MANUAL, latch flips). Errors during cold-start lead → HALTED via the cold-start error branch.
+
+**Visible controls.** Build, Step, Run, Take Control. Apply is hidden (Apply is MANUAL-only). Stop is hidden (no run in flight).
+
+**Scenario IDs.**
+- `S-build-idle` — reload, → IDLE.
+- `S-step-idle-{off,on}` — cold-start Step. Per §7.
+- `S-run-idle-{off,on}-{auto,cont}` — cold-start Run. Per §7.
+- `S-takectl-idle` — `userTookControl = true`, → MANUAL.
+
+A user who has run a machine to completion without ever clicking Take Control returns to IDLE — the spec preserves the IDLE track until the user explicitly opts in to MANUAL.
