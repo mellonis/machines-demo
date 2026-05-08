@@ -207,3 +207,14 @@ flowchart TD
 **DEMO origin.** Build / Step / Run from DEMO uses the same cold-start path; the click signals intent (kills the auto-loop) but doesn't flip `userTookControl`, so post-RUNNING_* completion and Build resolution land IDLE. Scenario IDs `S-build-demo`, `S-step-demo-{off,on}`, `S-run-demo-{off,on}-{auto,cont}` mirror the IDLE entries.
 
 **Post-RUNNING_* completion** — when a run reaches halt naturally (or via Stop), the resolution is HALTED. The next Build / Step / Run from HALTED then resolves to IDLE or MANUAL by `userTookControl`. The track is preserved across the run.
+
+### Resume from PAUSED
+
+The Run / Continue button (Run while in RUNNING_PAUSED) doesn't reload — it sends `runner.resume({ step: false })` and the worker continues inside the same in-flight `machine.run()` invocation. Two outcomes by `debug`:
+
+- `S-continue-paused-off` — `runner.resume({ step: false })`. Debug breaks are not honored (worker-side `debugEnabled = false`), so the run continues to halt → HALTED on completion. Stop / error / timeout still terminate the worker normally.
+- `S-continue-paused-on` — `runner.resume({ step: false })`. Debug breaks fire as encountered → next RUNNING_PAUSED. The user can click Continue again, repeating across multiple paused / resume cycles until halt or Stop.
+
+The button's label changes by mode: "Run" in non-PAUSED modes (cold-start), "Continue" in RUNNING_PAUSED. Same underlying action class; the label just clarifies intent.
+
+Walk-through 3 expands these scenarios with per-segment timer behavior, log replay, and edge cases.
