@@ -49,7 +49,7 @@ export type WorkerRequest =
   | { type: 'build'; engine: Engine; code: string }
   | { type: 'step' }
   | { type: 'run'; maxSteps?: number; debug?: boolean }
-  | { type: 'resume'; step?: boolean };
+  | { type: 'resume'; step?: boolean }; // step?: true → advance one iteration, then re-pause
 
 /* Multi-tape: every shape is per-tape arrays. N=1 for single-tape machines,
  * N=K for K-tape machines (TapeBlock.fromTapes([...K])). */
@@ -105,6 +105,7 @@ export type PausedResponse = {
   stepsApplied: number;
   /** `m.state.name` — the user's State instance does not cross the boundary. */
   state: string;
+  /** Symbol currently under each tape head — per-tape array, length = tape count. */
   currentSymbols: string[];
   /** At least one of `before` / `after` is `true`. Field shape mirrors the
    * upstream `m.debugBreak` type (omitted-key = false, never `undefined`). */
