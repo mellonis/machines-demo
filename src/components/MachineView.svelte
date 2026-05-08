@@ -460,6 +460,7 @@
     }
     codeChangedWarned = false;
     reflectNeutral();
+    report('running step by step…');
 
     pendingOp = 'run';
     try {
@@ -550,7 +551,7 @@
       }
       executionMode = 'RUNNING_AUTO';
       codeChangedWarned = false;
-      report(`auto-stepping every ${intervalMs}ms`);
+      report(`running, auto-stepping every ${intervalMs}ms`);
       // Auto-step loop is started by the $effect that watches executionMode.
       return;
     }
