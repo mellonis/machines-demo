@@ -1141,15 +1141,11 @@ function onPausedHandler(paused: import('../lib/types.ts').PausedResponse): void
   lastSnapshots = paused.tapes;
   _buildMirrorMachine(paused.tapes, alphabets);
   setAllFromMirror();
-  // Format the break log entry.
-  const phase =
-    paused.debugBreak.before && paused.debugBreak.after
-      ? 'before+after'
-      : paused.debugBreak.before
-        ? 'before'
-        : 'after';
+  // Format the break log entry. Engine's run() dispatches onDebugBreak
+  // separately for before/after — exactly one is true at the wire.
+  const kind = paused.debugBreak.before ? 'before' : 'after';
   const symbols = paused.currentSymbols.join(' ');
-  report(`paused at ${paused.state || '(unnamed)'} [${phase}]: ${symbols}`, 'ok');
+  report(`paused at ${paused.state || '(unnamed)'} [${kind}]: ${symbols}`, 'ok');
   executionMode = 'RUNNING_PAUSED_AT_BREAK';
 }
 ```
