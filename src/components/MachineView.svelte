@@ -525,6 +525,7 @@
   }
 
   function takeControl(): void {
+    report('user took control', 'ok');
     userTookControl = true;
     executionMode = 'MANUAL';
     reflectNeutral();
