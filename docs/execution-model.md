@@ -141,3 +141,23 @@ IDLE differs from MANUAL only by the `userTookControl` latch — once Take Contr
 - `S-takectl-idle` — `userTookControl = true`, → MANUAL.
 
 A user who has run a machine to completion without ever clicking Take Control returns to IDLE — the spec preserves the IDLE track until the user explicitly opts in to MANUAL.
+
+## 6. MANUAL mode
+
+MANUAL is the committed resting state. `userTookControl = true`; the user is driving the machine via Apply. The panel is enabled and the user composes a `Command` (movement + symbol) which writes to the mirror via the same `ifOtherSymbol` one-step state used internally by Step.
+
+Once entered, MANUAL is sticky: subsequent Build / Step / Run / completion all return to MANUAL.
+
+**Exits.** Build (→ MANUAL, reload); Step / Run (→ RUNNING_*; cold-start); Apply (stays MANUAL, in-place mirror write). Errors during cold-start lead → HALTED.
+
+**Visible controls.** Build, Step, Run, Apply. Take Control is hidden (already taken). Stop is hidden (no run in flight).
+
+**Apply scenario.**
+- `S-apply-manual` — main thread applies the user-composed `Command` to `mirrorMachine` via the `ifOtherSymbol` one-step state. No worker round-trip; the worker stays idle. Mode stays MANUAL. The log gets a single command entry per Apply.
+
+The Apply button is **hidden** in DEMO, IDLE, and HALTED — it's MANUAL-only. Earlier code variants displayed a flashing "next random command" Apply button in DEMO; the spec drops that affordance and lets the DEMO loop render its commands inline on the panel.
+
+**Cold-start scenarios from MANUAL.** See §7.
+- `S-build-manual` — reload, → MANUAL.
+- `S-step-manual-{off,on}` — cold-start Step.
+- `S-run-manual-{off,on}-{auto,cont}` — cold-start Run.
