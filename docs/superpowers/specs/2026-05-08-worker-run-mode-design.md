@@ -88,7 +88,7 @@ Step advances exactly one engine iteration and re-pauses, by mutating `nextState
 Two paths depending on which kind of break we're paused at:
 
 - **`before` break.** `m` is the current `machineState`; `m.nextState` is the actual next iteration's state. Apply the trick directly inside `onDebugBreak`.
-- **`after` break.** `m` is `prevYield` (the engine substitutes for context). The un-substituted `machineState` isn't reachable here. Set a `pendingStepNext` flag and defer the trick to the *next* `onStep` call, which fires with the un-substituted yield.
+- **`after` break.** `m` is `prevYield` (the engine substitutes for context). The un-substituted `machineState` isn't reachable here. Set a `pendingStepNext` flag and defer the trick to the *next* `onStep` call, which fires with the un-substituted yield. (Once [turing-machine-js#107](https://github.com/mellonis/turing-machine-js/issues/107) lands — escape hatch for the un-substituted snapshot — this defer can collapse back into `onDebugBreak`.)
 
 ```ts
 let pendingStepNext = false;
