@@ -507,12 +507,14 @@
     lastSnapshots = paused.tapes;
     _buildMirrorMachine(paused.tapes, alphabets);
     setAllFromMirror();
-    // Log format depends on debug mode:
-    // - debug=on: full "paused at state X before/after applying command for symbols: [...]"
-    //   (the user wants this for any real break — user-set or Step-armed).
-    // - debug=off: generic "paused" (Step-induced pauses are explicit boundary
-    //   markers without state info).
-    if (debugMode) {
+    // Log format depends on whether the pause is at a user-authored breakpoint:
+    // - debug=on AND !stepInduced: full "paused at state X before/after applying
+    //   command for symbols: [...]" (the engine paused because the user set
+    //   state.debug — surface state identity).
+    // - everything else (debug=off, or debug=on with worker-armed Step pause):
+    //   generic "paused" — explicit pause marker without state info, so users
+    //   without authored breakpoints don't see misleading state references.
+    if (debugMode && !paused.stepInduced) {
       const when = paused.debugBreak.before ? 'before' : 'after';
       const symbols = paused.currentSymbols.map((s) => `'${s}'`).join(', ');
       const stateRef = paused.state ? `state ${paused.state}` : 'unnamed state';
