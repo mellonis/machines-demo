@@ -132,6 +132,13 @@ let pendingCommand: MachineYield | null = null;
 // requests are rejected by the phase machine before they reach this slot.
 let resumeResolve: ((action: { step: boolean }) => void) | null = null;
 
+// Step-from-break trick: when the user resumes with step:true, arm the next
+// iteration's nextState with a one-shot before-break so the machine pauses
+// exactly one step later. pendingRestore undoes the mutation before the user
+// observes the new break (so the state graph is clean for subsequent runs).
+let pendingStepNext = false;
+let pendingRestore: (() => void) | null = null;
+
 // Per-run buffer of commands captured by onStep. Drained on `paused` (sent
 // in the response) and on `ran` (sent in the response).
 let runCommandBuffer: Command[][] = [];
@@ -146,6 +153,8 @@ function reset(): void {
   stepsApplied = 0;
   pendingCommand = null;
   resumeResolve = null;
+  pendingStepNext = false;
+  pendingRestore = null;
   runCommandBuffer = [];
   runStartStep = 0;
 }
@@ -299,7 +308,11 @@ async function run(maxSteps: number, debug: boolean): Promise<{ truncated: boole
 
   const onDebugBreakFn = debug
     ? async (m: DebugBreakPayload) => {
-        // Send the buffered run-segment so far, then wait for resume.
+        // Restore the synthesized one-shot before the user observes the break.
+        if (pendingRestore) {
+          pendingRestore();
+          pendingRestore = null;
+        }
         const commandsBatch = runCommandBuffer;
         runCommandBuffer = [];
         phase = { kind: 'paused' };
@@ -312,14 +325,29 @@ async function run(maxSteps: number, debug: boolean): Promise<{ truncated: boole
           currentSymbols: [...m.currentSymbols],
           debugBreak: { ...m.debugBreak },
         });
-        await new Promise<void>((resolve) => {
-          // step flag: wired to the call site but consumed in Task 4 (nextState.debug trick)
-          resumeResolve = (_action) => {
+        const action = await new Promise<{ step: boolean }>((resolve) => {
+          resumeResolve = (a) => {
             resumeResolve = null;
-            resolve();
+            resolve(a);
           };
         });
         phase = { kind: 'running' };
+        if (action.step) {
+          if (m.debugBreak?.before) {
+            // m IS the current iteration — arm directly.
+            // onStep deferral path: when an `after` break fires, the engine
+            // substitutes m to prevYield in onDebugBreak, so the un-substituted
+            // machineState reaches us only via the next onStep call. If
+            // turing-machine-js#107 lands (escape hatch for un-substituted
+            // snapshot), this branch and pendingStepNext can collapse.
+            const ns = m.nextState as { debug: { before?: true } | null };
+            const original = ns.debug;
+            ns.debug = { before: true };
+            pendingRestore = () => { ns.debug = original; };
+          } else {
+            pendingStepNext = true;
+          }
+        }
       }
     : undefined;
 
@@ -329,7 +357,14 @@ async function run(maxSteps: number, debug: boolean): Promise<{ truncated: boole
   // machine's `run` signature to route correctly.
   const runOpts: Parameters<AnyMachine['run']>[0] = {
     stepsLimit: maxSteps,
-    onStep: (m: MachineYield) => {
+    onStep: (m: MachineYield & { nextState?: { debug: { before?: true } | null } }) => {
+      if (pendingStepNext && m.nextState) {
+        const ns = m.nextState as { debug: { before?: true } | null };
+        const original = ns.debug;
+        ns.debug = { before: true };
+        pendingRestore = () => { ns.debug = original; };
+        pendingStepNext = false;
+      }
       runCommandBuffer.push(commandsFromYield(m));
       stepsApplied += 1;
     },
