@@ -110,7 +110,7 @@ The `demoEnabled` flag from earlier versions of the code is dropped — the DEMO
 
 DEMO is the page-load entry state — a teaser that shows the machine reacting to inputs without requiring the user to do anything. The demo loop fires on a timer (~1 Hz) and applies one randomly chosen command per tick, drawn from the current tape's alphabet (40 % chance the head stays put with no write; otherwise pick a random symbol and a random direction).
 
-The loop is entirely a main-thread effect; the worker doesn't see DEMO. The mirror machine receives commands directly via the same `ifOtherSymbol` one-step path used by Apply.
+The loop is entirely a main-thread effect; the worker doesn't see DEMO. The mirror machine receives commands directly via the same `ifOtherSymbol` one-step write path that §6 MANUAL exposes through Apply.
 
 **Exits.** DEMO → IDLE on Build / Step / Run (cold-start path; the click signals intent and kills the loop); DEMO → MANUAL on Take Control (the user commits to the manual track). Errors during cold-start lead → HALTED via the cold-start error branch.
 
@@ -193,9 +193,6 @@ flowchart TD
     RunAuto --> AutoOut[→ RUNNING_AUTO]
     WithPause -->|false| RunCont[runner.run debug=debugMode, no throttle]
     RunCont --> ContOut[→ RUNNING_CONTINUOUS]
-    AutoOut -. user-authored break .-> PauseOut
-    ContOut -. user-authored break .-> PauseOut
-    RunStep -. user-authored .before fires before iter 1 after .-> PauseOut
 ```
 
 **Cold-start scenario IDs.** Each origin (IDLE / MANUAL / HALTED) gets the same set:
@@ -428,7 +425,7 @@ A run that doesn't halt naturally hits `MAX_STEPS = 100_000` inside the worker's
 **Log entries**
 - `timeout after 5000ms — worker terminated (likely infinite loop)`
 
-**Edge case.** A user code that uses `setTimeout` / async patterns inside `state.debug.before` / `state.debug.after` callbacks (if any) could ostensibly stall a segment indefinitely; the per-segment cap protects the demo from such cases.
+**Edge case.** Today's API doesn't expose any callback hook to user code — `state.debug.before` / `state.debug.after` are filter values (`true | string[] | null`), not user-supplied functions, and the worker's `onStep` / `onDebugBreak` wrap the run on the demo side. So a "stall via async user callback" isn't reachable in the current surface. The per-segment cap defends against the cases that *are* reachable: infinite loops in user code, hung worker-side Promises, and any future API surface that might let user-supplied async logic interpose.
 
 ## 11. Current divergences from spec
 
