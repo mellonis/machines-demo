@@ -215,7 +215,7 @@ Make `_runMirrorStep` async and `await mirrorMachine.run(...)`. Propagate to its
 - Click-to-toggle UI for breakpoints ([#37](https://github.com/mellonis/machines-demo/issues/37)).
 - Public `onDebugBreak` parameter on `PostMachine.run()` — closed as not planned ([post-machine-js#62](https://github.com/mellonis/post-machine-js/issues/62)). The worker calls the underscored hook directly when running a `PostMachine`.
 - Public state-by-instruction-label lookup on `PostMachine` ([post-machine-js#63](https://github.com/mellonis/post-machine-js/issues/63)).
-- Breakpoints in `RUNNING_AUTO` (engine constraint — documented in the #38 example).
+- Breakpoints in `RUNNING_AUTO` (today: engine `runStepByStep` has no `onDebugBreak`). Tracked as a follow-up in [#43](https://github.com/mellonis/machines-demo/issues/43): switch `RUNNING_AUTO` to `run()` with a throttled `onStep`. Until that lands, the constraint is documented in the #38 example.
 
 ## Future simplifications when upstream lands
 
