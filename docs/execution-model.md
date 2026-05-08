@@ -429,3 +429,31 @@ A run that doesn't halt naturally hits `MAX_STEPS = 100_000` inside the worker's
 - `timeout after 5000ms — worker terminated (likely infinite loop)`
 
 **Edge case.** A user code that uses `setTimeout` / async patterns inside `state.debug.before` / `state.debug.after` callbacks (if any) could ostensibly stall a segment indefinitely; the per-segment cap protects the demo from such cases.
+
+## 11. Current divergences from spec
+
+A punchlist of where today's code differs from the spec, each with a tracking-issue link. Acts as a TODO list for follow-up PRs; #47 cites scenario IDs and `it.skip` divergent ones until they close.
+
+- **IDLE mode does not exist.** Today's code encodes the post-Build, pre-Take-Control resting state via `(executionMode = DEMO, demoEnabled = false)`. Affects all `S-*-idle-*` IDs — they're served by `S-*-demo-*` paths today. Step from DEMO completes back to a still-running auto-loop that overwrites the result. Implementation tracked alongside [#46](https://github.com/mellonis/machines-demo/issues/46) (this spec); follow-up PR introduces IDLE and drops `demoEnabled`.
+- **RUNNING_STEP exists as a separate paused state.** Affects `S-step-auto-{off,on}` (today: → RUNNING_STEP, not PAUSED) and any `S-step-step-*` / `S-run-step-*` IDs that exist only as legacy citations. Tracked in [#43](https://github.com/mellonis/machines-demo/issues/43).
+- **Today's code names the paused-mode `RUNNING_PAUSED_AT_BREAK`.** The spec uses the shorter `RUNNING_PAUSED` (consistent with `RUNNING_AUTO` / `RUNNING_CONTINUOUS`). Cosmetic rename folded into the same alignment work as the RUNNING_STEP collapse ([#43](https://github.com/mellonis/machines-demo/issues/43)).
+- **Auto-step path uses `runner.step()`, not `run()`.** Affects all `S-step-auto-*`, `S-debug-toggle-auto` (today: flag only, no `setDebug()` call). Tracked in [#43](https://github.com/mellonis/machines-demo/issues/43).
+- **Step (debug=on) on auto-step path doesn't honor breaks.** Affects `S-step-auto-on`. Tracked in [#43](https://github.com/mellonis/machines-demo/issues/43).
+- **Halting iter's `state.debug.after` never fires.** Affects walk-through 1 edge case. Tracked in [turing-machine-js#108](https://github.com/mellonis/turing-machine-js/issues/108).
+- **`haltState.debug.after` silently ignored; `haltState.debug.before` IS honored.** Tracked in [turing-machine-js#108](https://github.com/mellonis/turing-machine-js/issues/108).
+
+## 12. Engine quirks
+
+Upstream behaviors the spec encodes (won't change without a major upstream version, so the spec works around them):
+
+- `onDebugBreak` after-fire payload substitutes `m` to `prevYield` — the un-substituted `machineState` is not exposed. Affects step-over-from-after implementations. Cross-ref [turing-machine-js#107](https://github.com/mellonis/turing-machine-js/issues/107).
+- `onStep` and `onDebugBreak` after-fire payloads carry semantically identical `MachineState`. Both hooks are documented; the demo wires both for orthogonal reasons (per-step buffer vs. pause cycle). Cross-ref [turing-machine-js#109](https://github.com/mellonis/turing-machine-js/issues/109).
+
+§11 vs §12: §11 lists demo-side gaps to be closed; §12 lists engine semantics that won't change. Items can move from §12 to §11 if the upstream issue lands and a corresponding demo-side simplification becomes possible.
+
+## 13. Cross-references
+
+- [`CLAUDE.md`](../CLAUDE.md) — working conventions, file structure, build commands. Runtime-behavior content moved here.
+- [`docs/superpowers/specs/2026-05-08-worker-run-mode-design.md`](superpowers/specs/2026-05-08-worker-run-mode-design.md) — the [#40](https://github.com/mellonis/machines-demo/issues/40) design; gives the *why* behind RUNNING_PAUSED and the worker contract.
+- [#47](https://github.com/mellonis/machines-demo/issues/47) — test infrastructure that consumes the scenario IDs defined in this doc.
+- [#46](https://github.com/mellonis/machines-demo/issues/46) — issue this spec resolves.
