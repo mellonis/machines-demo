@@ -585,13 +585,13 @@ Replace the `Pending` type and the `MachineRunner` class body (everything from l
 type SimplePending = {
   resolve: (data: WorkerResponse) => void;
   reject: (err: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
+  timeoutId: ReturnType<typeof setTimeout>;
 };
 
 type RunPending = {
   resolveRan: (data: RanResponse) => void;
   reject: (err: Error) => void;
-  timer: ReturnType<typeof setTimeout> | null;
+  timeoutId: ReturnType<typeof setTimeout> | null;
   onPaused: ((data: PausedResponse) => void) | null;
 };
 
@@ -607,12 +607,12 @@ export class MachineRunner {
 
   private rejectAll(err: Error): void {
     if (this.simplePending) {
-      clearTimeout(this.simplePending.timer);
+      clearTimeout(this.simplePending.timeoutId);
       this.simplePending.reject(err);
       this.simplePending = null;
     }
     if (this.runPending) {
-      if (this.runPending.timer) clearTimeout(this.runPending.timer);
+      if (this.runPending.timeoutId) clearTimeout(this.runPending.timeoutId);
       this.runPending.reject(err);
       this.runPending = null;
     }
@@ -631,8 +631,8 @@ export class MachineRunner {
 
   private startRunTimer(): void {
     if (!this.runPending) return;
-    if (this.runPending.timer) clearTimeout(this.runPending.timer);
-    this.runPending.timer = setTimeout(() => {
+    if (this.runPending.timeoutId) clearTimeout(this.runPending.timeoutId);
+    this.runPending.timeoutId = setTimeout(() => {
       const p = this.runPending;
       this.runPending = null;
       if (this.worker) {
@@ -645,9 +645,9 @@ export class MachineRunner {
 
   private stopRunTimer(): void {
     if (!this.runPending) return;
-    if (this.runPending.timer) {
-      clearTimeout(this.runPending.timer);
-      this.runPending.timer = null;
+    if (this.runPending.timeoutId) {
+      clearTimeout(this.runPending.timeoutId);
+      this.runPending.timeoutId = null;
     }
   }
 
@@ -680,7 +680,7 @@ export class MachineRunner {
       if (this.simplePending) {
         const p = this.simplePending;
         this.simplePending = null;
-        clearTimeout(p.timer);
+        clearTimeout(p.timeoutId);
         p.reject(err);
         return;
       }
@@ -690,7 +690,7 @@ export class MachineRunner {
     if (this.simplePending) {
       const p = this.simplePending;
       this.simplePending = null;
-      clearTimeout(p.timer);
+      clearTimeout(p.timeoutId);
       p.resolve(data);
     }
   }
@@ -704,7 +704,7 @@ export class MachineRunner {
     if (this.simplePending || this.runPending) throw new Error('previous request still pending');
 
     return new Promise<WorkerResponse>((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const timeoutId = setTimeout(() => {
         this.simplePending = null;
         if (this.worker) {
           this.worker.terminate();
@@ -712,7 +712,7 @@ export class MachineRunner {
         }
         reject(new Error(`timeout after ${WORKER_TIMEOUT_MS}ms — worker terminated (likely infinite loop)`));
       }, WORKER_TIMEOUT_MS);
-      this.simplePending = { resolve, reject, timer };
+      this.simplePending = { resolve, reject, timeoutId };
       this.worker!.postMessage(msg);
     });
   }
@@ -748,7 +748,7 @@ export class MachineRunner {
       this.runPending = {
         resolveRan,
         reject,
-        timer: null,
+        timeoutId: null,
         onPaused: opts.onPaused ?? null,
       };
       this.startRunTimer();
