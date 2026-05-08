@@ -3,6 +3,13 @@ name: CD
 on:
   push:
     branches: [master]
+    paths-ignore:
+      - 'docs/**'
+      - 'CLAUDE.md'
+      - 'README.md'
+      - 'LICENSE'
+      - '.gitignore'
+      - '.editorconfig'
   workflow_dispatch:
 
 env:
