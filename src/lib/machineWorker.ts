@@ -149,10 +149,16 @@ let runStartStep = 0;
 // so the user can flip the checkbox without restarting.
 let debugEnabled = false;
 
-// User clicked Step: the next break must pause regardless of debugEnabled
-// (Step semantically means "advance one iteration and pause", so it shouldn't
-// be suppressed by an off debug toggle). Consumed on first break.
-let stepRequested = false;
+// Step semantics: with debug off, Step is "advance exactly one engine
+// iteration, then pause" (like the legacy runStepByStep mode). With debug on,
+// Step pauses at every break — the debug toggle dominates.
+//
+// `stepPending` is true between a Step click and its consuming pause.
+// `stepCountdown` decrements in onStep; pause-with-debug-off only fires
+// when both stepPending=true and stepCountdown=0 (one iteration boundary
+// crossed since the click).
+let stepPending = false;
+let stepCountdown = 0;
 
 function reset(): void {
   phase = { kind: 'idle' };
@@ -168,7 +174,8 @@ function reset(): void {
   runCommandBuffer = [];
   runStartStep = 0;
   debugEnabled = false;
-  stepRequested = false;
+  stepPending = false;
+  stepCountdown = 0;
 }
 
 function expectPhase(...allowed: WorkerPhase['kind'][]): void {
@@ -321,7 +328,8 @@ async function run(maxSteps: number, debug: boolean): Promise<{ truncated: boole
   runCommandBuffer = [];
   phase = { kind: 'running' };
   debugEnabled = debug;
-  stepRequested = false;
+  stepPending = false;
+  stepCountdown = 0;
 
   let truncated = false;
 
@@ -337,9 +345,17 @@ async function run(maxSteps: number, debug: boolean): Promise<{ truncated: boole
           pendingRestore();
           pendingRestore = null;
         }
-        const isStep = stepRequested;
-        stepRequested = false;
-        if (!debugEnabled && !isStep) return;
+        if (debugEnabled) {
+          // Debug on: pause at every break. Step still consumes its pending
+          // flag so a later debug-off click doesn't carry an old step over.
+          stepPending = false;
+          stepCountdown = 0;
+        } else {
+          // Debug off: only pause if we're stepping AND one iteration has
+          // already elapsed (countdown reached 0 via onStep).
+          if (!stepPending || stepCountdown > 0) return;
+          stepPending = false;
+        }
         const commandsBatch = runCommandBuffer;
         runCommandBuffer = [];
         phase = { kind: 'paused' };
@@ -360,7 +376,8 @@ async function run(maxSteps: number, debug: boolean): Promise<{ truncated: boole
         });
         phase = { kind: 'running' };
         if (action.step) {
-          stepRequested = true;
+          stepPending = true;
+          stepCountdown = 1;
           if (m.debugBreak?.before) {
             // m IS the current iteration — arm directly.
             // onStep deferral path: when an `after` break fires, the engine
@@ -402,6 +419,9 @@ async function run(maxSteps: number, debug: boolean): Promise<{ truncated: boole
         pendingRestore = () => { ns.debug = original; };
         pendingStepNext = false;
       }
+      // Step countdown: each engine iteration boundary decrements; pause
+      // (in onDebugBreak below) only fires when stepCountdown reaches 0.
+      if (stepCountdown > 0) stepCountdown--;
       runCommandBuffer.push(commandsFromYield(m));
       stepsApplied += 1;
     },
