@@ -659,12 +659,14 @@ export class MachineRunner {
       this.runPending.onPaused?.(data);
       return;
     }
-    // ran / error complete the run; stepped / built complete a simple request.
+    // ran completes the run.
     if (data.type === 'ran') {
       const p = this.runPending;
       this.runPending = null;
       if (!p) return;
-      this.stopRunTimer();
+      // Clear timer via captured local — stopRunTimer() guards on
+      // !this.runPending and would no-op here.
+      if (p.timeoutId) clearTimeout(p.timeoutId);
       p.resolveRan(data);
       return;
     }
@@ -673,7 +675,7 @@ export class MachineRunner {
       if (this.runPending) {
         const p = this.runPending;
         this.runPending = null;
-        this.stopRunTimer();
+        if (p.timeoutId) clearTimeout(p.timeoutId);
         p.reject(err);
         return;
       }
