@@ -239,3 +239,19 @@ Notes:
 - **RUNNING_CONTINUOUS has the same control surface as RUNNING_AUTO** — Stop, Take Control, debug toggle all available. The modes differ only in throttle / animation; the control surface does not become a third axis of difference. Take Control mid-CONTINUOUS can lose the race to completion, but no race produces a broken state — terminate-or-complete are both clean exits.
 - Run / Continue is a single-column action (only meaningful from RUNNING_PAUSED). It's documented in §7 Resume from PAUSED rather than in the matrix.
 - DEMO, IDLE, MANUAL, HALTED are not matrix columns — they have their own sections (§4, §5, §6, §9).
+
+## 9. HALTED mode
+
+HALTED is the terminal state — the machine reached its halt state, was stopped, or hit an error / timeout / `MAX_STEPS` truncation. The tape is frozen at the final state; the worker is alive but idle (no run in flight). Build / Step / Run reload-from-code; Take Control flips the latch.
+
+**Exits.** Build (→ IDLE if `!userTookControl`, → MANUAL if `userTookControl`), Step / Run (→ RUNNING_* via cold-start, see §7), Take Control (→ MANUAL, only when `!userTookControl` — otherwise the button is hidden).
+
+**Visible controls.** Build, Step, Run. Take Control if `!userTookControl`. Apply hidden (Apply is MANUAL-only). Stop hidden (nothing to stop).
+
+**Scenario IDs.**
+- `S-build-halted` — reload, → IDLE / MANUAL by `userTookControl`. See §7.
+- `S-step-halted-{off,on}` — cold-start Step. See §7.
+- `S-run-halted-{off,on}-{auto,cont}` — cold-start Run. See §7.
+- `S-takectl-halted` — `userTookControl = true`, → MANUAL. Available only when `!userTookControl`.
+
+HALTED can be reached from any non-resting state. Build / Step / Run from HALTED, plus error and timeout handling, are walk-throughs in §10.
