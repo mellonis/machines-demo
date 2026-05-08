@@ -255,7 +255,7 @@
     mirrorMachine = new turing.TuringMachine({ tapeBlock: mirrorTapeBlock });
   }
 
-  function _runMirrorStep(commands: Command[]): void {
+  async function _runMirrorStep(commands: Command[]): Promise<void> {
     if (!mirrorMachine || !mirrorTapeBlock) return;
     const oneStep = new turing.State({
       [turing.ifOtherSymbol]: {
@@ -269,7 +269,7 @@
         nextState: turing.haltState,
       },
     });
-    mirrorMachine.run({ initialState: oneStep });
+    await mirrorMachine.run({ initialState: oneStep });
   }
 
   // Push the current mirror tapes into the visible <Tape> instances. Used
@@ -286,9 +286,9 @@
   // (except RUNNING_CONTINUOUS, which rebuilds in one shot). Advances the
   // mirror with `commands`, then has each <Tape> read its updated mirror
   // tape's `.viewport` and play the slide animation if requested.
-  function renderFromMirror(commands: Command[], animate: boolean): void {
+  async function renderFromMirror(commands: Command[], animate: boolean): Promise<void> {
     if (!mirrorTapeBlock) return;
-    _runMirrorStep(commands);
+    await _runMirrorStep(commands);
     mirrorTapeBlock.tapes.forEach((tape, i) => {
       const command = commands[i];
       const delta = (command?.movement === 'L' ? -1 : command?.movement === 'R' ? 1 : 0) as -1 | 0 | 1;
@@ -411,7 +411,7 @@
       report(commandsEntry(res.commands, { stepNumber: res.stepsApplied }, CARET_COLORS));
     }
     if (res.commands) {
-      renderFromMirror(res.commands, true);
+      await renderFromMirror(res.commands, true);
       // Show what's queued for the *next* click, not what just applied.
       // Keeps panel state consistent under rapid clicks.
       if (res.nextCommands) reflectToActivePanel(res.nextCommands);
@@ -482,8 +482,8 @@
     reflectNeutral();
   }
 
-  function onApply(commands: Command[]): void {
-    renderFromMirror(commands, true);
+  async function onApply(commands: Command[]): Promise<void> {
+    await renderFromMirror(commands, true);
     report(commandsEntry(commands, 'applied', CARET_COLORS));
   }
 
@@ -567,7 +567,7 @@
       reflect: (commands) => panelRef?.reflect(commands),
       apply: (commands) => {
         panelRef?.flashApply();
-        renderFromMirror(commands, true);
+        void renderFromMirror(commands, true);
       },
       getAlphabets: () => alphabets,
     });
@@ -582,7 +582,7 @@
           if (executionMode !== 'RUNNING_AUTO') return;
           if (res.commands) {
             reflectToActivePanel(res.commands);
-            renderFromMirror(res.commands, true);
+            await renderFromMirror(res.commands, true);
           }
           if (res.halted) {
             report(`halted after ${res.stepsApplied} step(s)`, 'ok');
@@ -661,6 +661,7 @@
       examples={engineExamples}
       {selectedExampleId}
       bind:withPause
+      bind:debugMode
       bind:intervalText
       onBuild={() => doLoad({ userInitiated: true })}
       onStep={doStep}
