@@ -351,3 +351,42 @@ A Run with `debug=on` and user-authored `state.debug` triggers a sequence of pau
 
 **Worker calls**
 - `resume({ step: false })`
+
+### Walk-through 4 — Stop from each running mode
+
+Stop is visible while in RUNNING_AUTO, RUNNING_CONTINUOUS, and RUNNING_PAUSED.
+
+- `S-stop-auto` / `S-stop-cont` — main thread calls `runner.terminate()`. Worker is killed; `runner.run()` rejects with `runner terminated`. `failHalted` runs: rebuild mirror from worker's last-known tape state (or zeroed state if none), → HALTED with `stopped` log entry.
+- `S-stop-paused` — same as above, but `stopRequested` is set on the runner first so `failHalted` is **suppressed** when the rejected Promise surfaces (the rejection is the expected outcome of Stop, not an error). → HALTED with `stopped` log entry only — no error log.
+
+**Log entries**
+- `stopped`
+- (state mirror snapshot in matrix view)
+
+**Edge case.** A Stop click that races with run completion: worker may have already sent `ran` when `terminate()` is called. The runner's `runPending` slot has been cleared; `terminate()` is a no-op on the runner side. The HALTED transition still happens via the normal completion path, with a `halted after N step(s)` log entry instead of `stopped`. No user-visible bug.
+
+### Walk-through 5 — debug toggle mid-run
+
+The `debugMode` UI checkbox is reactive across mode transitions. A change while in any RUNNING_* mode pushes `setDebug(on)` to the worker.
+
+- `S-debug-toggle-auto` / `S-debug-toggle-cont` — `runner.setDebug(on)` posts a fire-and-forget message. Worker flips an internal `debugEnabled` flag. Subsequent `onDebugBreak` calls honor the new value (no run restart).
+- `S-debug-toggle-paused` — same `setDebug()` send. The current paused state is unaffected; the next break (after Continue) is gated by the new flag value.
+- In DEMO / IDLE / MANUAL / HALTED — flag flip only; no worker call (the worker is idle, the flag is read at the next `run()`).
+
+**Log entries**
+- (none — toggle is silent)
+
+**Edge case.** Toggling debug=on while paused doesn't cause an immediate break — the user is already paused. After Continue, breaks fire normally.
+
+### Walk-through 6 — Take Control mid-run
+
+Take Control is visible in DEMO, IDLE (visible during cold-start RUNNING_*), HALTED (when `!userTookControl`), and any RUNNING_* mode.
+
+- `S-takectl-auto` / `S-takectl-cont` / `S-takectl-paused` — main thread calls `runner.terminate()`. Worker is killed; `runner.run()` rejects via `rejectAll`. `userTookControl = true`. `failHalted` is suppressed via the same path as `S-stop-paused`. Mode → MANUAL.
+- `S-takectl-demo` / `S-takectl-idle` — no run in flight, just latch + mode change. → MANUAL.
+- `S-takectl-halted` — `userTookControl = true`, → MANUAL. Available only when `!userTookControl`.
+
+**Log entries**
+- `took control`
+
+**Edge case.** Take Control from RUNNING_PAUSED is functionally identical to from RUNNING_AUTO / RUNNING_CONTINUOUS — the worker is paused, but `terminate()` kills it the same way. `runPending`'s onPaused callback is never called again because the runner's pending slot is cleared on terminate.
