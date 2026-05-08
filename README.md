@@ -37,6 +37,39 @@ Static bundle emitted to `dist/`. Serve with any static host. The build referenc
 - User code runs inside a Web Worker — terminate-on-timeout sandbox, with `'unsafe-eval'` only at the worker level so the worker is the actual security boundary
 - `@turing-machine-js/machine` and `@post-machine-js/machine` (peer-dependency relationship preserved)
 
+## Architecture: two lands
+
+User code and the engine live inside a Web Worker. The main thread holds the UI plus a *mirror* — a real `TuringMachine` instance whose tapes shadow the worker's state by replaying every command the worker reports. The two sides only communicate by `postMessage`, and only plain data crosses.
+
+```
+                          browser tab
+
+   ┌────────────────────────────┬────────────────────────────┐
+   │  MAIN THREAD               │  WEB WORKER                │
+   │  (Svelte UI + mirror)      │  (user code + engine)      │
+   │                            │                            │
+   │  <MachineView>             │  new Function(userCode)    │
+   │  Editor / Toolbar / Log    │     ↓                      │
+   │                            │  user-built machine        │
+   │  mirrorMachine             │   + State graph            │
+   │  mirrorTapeBlock           │   + TapeBlock / Tapes      │
+   │   rebuilt from             │   + runStepByStep gen      │
+   │   TapeSnapshots;           │                            │
+   │   replays worker           │                            │
+   │   commands one step        │                            │
+   │   at a time                │                            │
+   └────────────────────────────┴────────────────────────────┘
+
+                      ↕  postMessage
+
+        requests:   build / step / run
+        responses:  built / stepped / ran / error
+```
+
+**Crosses the boundary:** `TapeSnapshot[]` (on `built` / `ran` / `error`), per-step `Command[]` (movement + written symbol), tape alphabets — plain data only.
+
+**Never crosses:** the user's code, the `TuringMachine` / `State` / `Reference` instances it constructs, and the upstream library singletons (`haltState`, `ifOtherSymbol`, the `movements` Symbols). Identity-checked sentinels wouldn't survive `structuredClone`, and keeping user code worker-side is what justifies `'unsafe-eval'` in CSP — the worker is the actual security boundary.
+
 ## Layout
 
 ```
