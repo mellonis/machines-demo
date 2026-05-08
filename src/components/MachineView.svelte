@@ -459,9 +459,10 @@
     setAllFromMirror();
     // Format the break log entry. Engine's run() dispatches onDebugBreak
     // separately for before/after — exactly one is true at the wire.
-    const kind = paused.debugBreak.before ? 'before' : 'after';
-    const symbols = paused.currentSymbols.join(' ');
-    report(`paused at ${paused.state || '(unnamed)'} [${kind}]: ${symbols}`, 'ok');
+    const when = paused.debugBreak.before ? 'before' : 'after';
+    const symbols = paused.currentSymbols.map((s) => `'${s}'`).join(', ');
+    const stateRef = paused.state ? `state ${paused.state}` : 'unnamed state';
+    report(`paused at ${stateRef} ${when} applying command for symbols: [${symbols}]`, 'ok');
     executionMode = 'RUNNING_PAUSED_AT_BREAK';
   }
 
