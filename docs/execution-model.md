@@ -94,3 +94,14 @@ Exit: Step (arm next `.after`, → RUNNING_PAUSED via re-pause), Continue (→ R
 Terminal state. The machine reached its halt state, errored, timed out, or hit `MAX_STEPS` truncation. Tape is frozen at the final state. Build / Step / Run reload-from-code. Take Control is visible only when `!userTookControl`.
 Entry: run completion, Stop, error, timeout, or truncation from any RUNNING_*; build error from any cold-start.
 Exit: Build (→ IDLE if `!userTookControl`, → MANUAL if `userTookControl`), Step / Run (→ RUNNING_* via cold-start), Take Control (→ MANUAL, only if `!userTookControl`).
+
+## 3. Flag reference
+
+Four flags govern transitions and per-action behavior. Three are user-visible UI controls; one is a sticky latch.
+
+- **`debugMode`** — `boolean`. UI checkbox in the Toolbar, persisted to `localStorage:machines-demo:<engine>:debugMode`. Gates whether user-authored `state.debug` / `haltState.debug` breaks pause execution. Mid-run toggle pushes `setDebug(on)` to the worker (the only mode-aware effect on a flag toggle).
+- **`withPause`** — `boolean`. UI checkbox + interval input in the Toolbar. Selects RUNNING_AUTO (with throttle) vs RUNNING_CONTINUOUS (snap-to-final) on the next Run. The toggle itself (`S-withpause-toggle`) has no immediate runtime effect; it's read at Run-click time.
+- **`halted`** — `boolean`. Derived from worker `built` / `ran` / `error` responses. Drives the HALTED-mode transition.
+- **`userTookControl`** — `boolean`. Sticky latch, starts `false`, set `true` on Take Control click, never re-enables. Marks the "manual track": after RUNNING_* / HALTED, post-action mode resolution lands MANUAL when true, IDLE when false.
+
+The `demoEnabled` flag from earlier versions of the code is dropped — the DEMO ↔ IDLE mode distinction encodes "is the auto-loop alive" directly.
