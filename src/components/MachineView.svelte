@@ -479,6 +479,7 @@
       executionMode = 'RUNNING_AUTO';
       codeChangedWarned = false;
       report(`auto-stepping every ${intervalMs}ms`);
+      // Auto-step loop is started by the $effect that watches executionMode.
       return;
     }
 
@@ -497,7 +498,7 @@
       const res = await runner.run({
         maxSteps: undefined,
         debug: debugMode,
-        onPaused: (paused) => onPausedHandler(paused),
+        onPaused: onPausedHandler,
       });
       lastSnapshots = res.tapes;
       _buildMirrorMachine(res.tapes, alphabets);
