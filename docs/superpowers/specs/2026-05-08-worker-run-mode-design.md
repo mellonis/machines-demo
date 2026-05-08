@@ -182,6 +182,10 @@ On `resume` (Continue clicked): nothing changes locally — wait for the next wo
 
 On the final `ran`: existing flow — render final tapes, batch-log buffered commands, mode → `HALTED`.
 
+## Take Control: log entry
+
+`takeControl()` (`MachineView.svelte:465`) currently transitions silently from `DEMO` / `RUNNING_*` to `MANUAL`. Add `report('user took control', 'ok')` so the mode transition is captured in the log alongside the other logged transitions (Build, Step, Run, halt, paused-at-break). One-line addition; bundled here because we're already touching the log machinery for the break-pause flow.
+
 ## Timeout
 
 Per-segment 5s budget instead of per-request:
