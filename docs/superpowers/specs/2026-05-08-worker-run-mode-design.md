@@ -11,6 +11,7 @@ The worker drives execution through `runStepByStep` only (`src/lib/machineWorker
 - **Always-runWithBreaks dispatch.** The Run button always uses the new path. If user code never sets `state.debug` / `haltState.debug`, no breaks fire and behavior is identical to today's sync run. The old `run` request type is dropped — one path, no main-thread introspection of user State needed to choose.
 - **Dedicated paused-at-break mode.** A new `RUNNING_PAUSED_AT_BREAK` is introduced rather than overloading the existing `RUNNING_STEP`. The two states are conceptually different: `RUNNING_STEP` is paused between full steps and *can* single-step; `RUNNING_PAUSED_AT_BREAK` is paused inside `run()` and *cannot* (the engine's `for` loop owns the iteration).
 - **`RUNNING_AUTO` unchanged.** Auto-step uses `runStepByStep`, so breakpoints don't fire there. Documented as a known constraint in the #38 example.
+- **"Debug mode" UI gate.** A user-facing checkbox controls whether breaks pause execution at all, so `state.debug` / `haltState.debug` assignments in user code stay valid across both modes (no edit-and-comment-out churn). Demo-side emulation today (the worker's `onDebugBreak` resolves instantly when off); cross-references [turing-machine-js#106](https://github.com/mellonis/turing-machine-js/issues/106) which proposes the same gate as a `debug: boolean` parameter on upstream `run()`.
 
 ## Worker contract
 
@@ -18,9 +19,11 @@ Drop `run`. Add `runWithBreaks` and `resume`. Add `paused` response. `build` / `
 
 | Direction | Type | Payload |
 |---|---|---|
-| → | `runWithBreaks` | `{ maxSteps? }` |
+| → | `runWithBreaks` | `{ maxSteps?, debug }` |
 | → | `resume` | `{}` |
 | ← | `paused` | `{ tapes, commands, stepsApplied, state, currentSymbols, debugBreak }` |
+
+`debug: boolean` is required (no default at the wire — main thread is always explicit). When `false`, the worker's `onDebugBreak` resolves instantly without posting `paused`. When `true`, the pause/resume flow runs.
 
 Field shapes:
 
@@ -72,6 +75,21 @@ ExecutionMode = 'DEMO' | 'MANUAL' | 'RUNNING_STEP' | 'RUNNING_AUTO'
 Build from `RUNNING_PAUSED_AT_BREAK` is allowed and follows the existing pattern: terminate worker, `reloadWorker(code)`, mode → `MANUAL`. The pending Promise dies with the worker.
 
 `runDisabled` / `stepDisabled` / etc. derived flags pick up `RUNNING_PAUSED_AT_BREAK` so existing UI gating composes.
+
+## "Debug mode" UI
+
+A checkbox lives in `Toolbar.svelte` next to `with pause`. State name `debugMode`, owned by `MachineView.svelte`, persisted to `localStorage` under `machines-demo:<engine>:debugMode` (mirroring the existing `withPause` pattern). Default off.
+
+The checkbox is purely a request-payload gate: every `runWithBreaks` request includes `debug: debugMode`. The UI never disables `withPause` when `debugMode` is on (or vice versa) — they target different execution modes:
+
+| `withPause` | `debugMode` | Run button → | Breakpoints fire? |
+|---|---|---|---|
+| off | off | `RUNNING_CONTINUOUS` | no (current behavior) |
+| off | on  | `RUNNING_CONTINUOUS` | yes — pauses at breaks |
+| on  | off | `RUNNING_AUTO` | no (current behavior) |
+| on  | on  | `RUNNING_AUTO` | no — engine constraint |
+
+The bottom-right cell is the one wart: with both checked, breakpoints don't fire because `RUNNING_AUTO` uses `runStepByStep` (no `onDebugBreak`). The #38 example documents this. No UI change to flag it; the simpler matrix is worth keeping.
 
 ## Mirror behavior across breaks
 
