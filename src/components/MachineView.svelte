@@ -8,7 +8,7 @@
   import { MachineRunner, WorkerError } from '../lib/machineRunner.ts';
   import * as turing from '@turing-machine-js/machine';
   import { VIEWPORT_WIDTH } from '../lib/caps.ts';
-  import { type Alphabets, type Command, type Engine, type TapeSnapshot } from '../lib/types.ts';
+  import { type Alphabets, type Command, type Engine, type PausedResponse, type TapeSnapshot } from '../lib/types.ts';
   import { startDemoLoop } from '../lib/demoLoop.ts';
   import { startAutoStep, parseInterval } from '../lib/autoStep.ts';
   import { commandsEntry, tapesEntry } from '../lib/format.ts';
@@ -328,6 +328,12 @@
   }
 
   function stopMachine(): void {
+    if (executionMode === 'RUNNING_PAUSED_AT_BREAK') {
+      // Pending run Promise will reject when we terminate; failHalted in the
+      // caller's catch sets the rest. We pre-empt the message here.
+      runner.terminate();
+      workerLive = false;
+    }
     executionMode = 'HALTED';
     report('stopped', 'warn');
   }
@@ -366,6 +372,16 @@
   }
 
   async function doStep(): Promise<void> {
+    // RUNNING_PAUSED_AT_BREAK → Step click means "advance one iteration in the
+    // run, then re-pause". Send resume with step flag; worker will arm the
+    // nextState.debug trick.
+    if (executionMode === 'RUNNING_PAUSED_AT_BREAK') {
+      runner.resume(true);
+      // Phase will be set by the next `paused` (or `ran` if the synthesized
+      // step happens to land on halt).
+      return;
+    }
+
     // Step button doubles as "Pause" while RUNNING_AUTO.
     if (executionMode === 'RUNNING_AUTO') {
       executionMode = 'RUNNING_STEP';
@@ -419,7 +435,36 @@
     }
   }
 
+  function onPausedHandler(paused: PausedResponse): void {
+    // Replay buffered per-step commands so the trace leading to the break is visible.
+    if (paused.commands.length > 0) {
+      const startStep = paused.stepsApplied - paused.commands.length;
+      appendBatch(
+        paused.commands.map((commands, i) =>
+          commandsEntry(commands, { stepNumber: startStep + i + 1 }, CARET_COLORS),
+        ),
+      );
+    }
+    // Snap mirror to break-time tapes (no animation).
+    lastSnapshots = paused.tapes;
+    _buildMirrorMachine(paused.tapes, alphabets);
+    setAllFromMirror();
+    // Format the break log entry. Engine's run() dispatches onDebugBreak
+    // separately for before/after — exactly one is true at the wire.
+    const kind = paused.debugBreak.before ? 'before' : 'after';
+    const symbols = paused.currentSymbols.join(' ');
+    report(`paused at ${paused.state || '(unnamed)'} [${kind}]: ${symbols}`, 'ok');
+    executionMode = 'RUNNING_PAUSED_AT_BREAK';
+  }
+
   async function doRun(): Promise<void> {
+    // RUNNING_PAUSED_AT_BREAK → treat Run click as Continue.
+    if (executionMode === 'RUNNING_PAUSED_AT_BREAK') {
+      runner.resume(false);
+      executionMode = 'RUNNING_CONTINUOUS';
+      return;
+    }
+
     if (withPause) {
       // Resume auto-stepping from current RUNNING_STEP position without reload.
       if (executionMode !== 'RUNNING_STEP') {
@@ -434,7 +479,6 @@
       executionMode = 'RUNNING_AUTO';
       codeChangedWarned = false;
       report(`auto-stepping every ${intervalMs}ms`);
-      // Auto-step loop is started by the $effect that watches executionMode.
       return;
     }
 
@@ -450,7 +494,11 @@
     report('running…');
     pendingOp = 'run';
     try {
-      const res = await runner.run();
+      const res = await runner.run({
+        maxSteps: undefined,
+        debug: debugMode,
+        onPaused: (paused) => onPausedHandler(paused),
+      });
       lastSnapshots = res.tapes;
       _buildMirrorMachine(res.tapes, alphabets);
       setAllFromMirror();
