@@ -180,3 +180,8 @@ Make `_runMirrorStep` async and `await mirrorMachine.run(...)`. Propagate to its
 - Public `onDebugBreak` parameter on `PostMachine.run()` — closed as not planned ([post-machine-js#62](https://github.com/mellonis/post-machine-js/issues/62)). The worker calls the underscored hook directly when running a `PostMachine`.
 - Public state-by-instruction-label lookup on `PostMachine` ([post-machine-js#63](https://github.com/mellonis/post-machine-js/issues/63)).
 - Breakpoints in `RUNNING_AUTO` (engine constraint — documented in the #38 example).
+
+## Future simplifications when upstream lands
+
+- [turing-machine-js#106](https://github.com/mellonis/turing-machine-js/issues/106) — `debug: boolean` parameter on `run()`. The worker can pass it straight through and drop the conditional `onDebugBreak` wrapper.
+- [turing-machine-js#107](https://github.com/mellonis/turing-machine-js/issues/107) — escape hatch on the substituted `m` for `after`-break consumers. The Step path's `onStep`-deferral collapses back into `onDebugBreak`.
