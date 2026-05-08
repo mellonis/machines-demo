@@ -14,6 +14,8 @@ const TURING_REPLACE_B = `// Task: replace every 'b' on the tape with '*'.
  *   haltState, ifOtherSymbol, movements, symbolCommands, ...
  *
  * Return: { machine, initialState, tape }
+ *
+ * Note: the demo runs the machine; do not call .run() or .runStepByStep() yourself.
  */
 
 const {
@@ -51,6 +53,8 @@ const TURING_COPY_TWO_TAPES = `// Task: copy tape 0 ('abab') onto blank tape 1, 
  *   haltState, ifOtherSymbol, movements, symbolCommands, ...
  *
  * Return: { machine, initialState }
+ *
+ * Note: the demo runs the machine; do not call .run() or .runStepByStep() yourself.
  */
 
 const {
@@ -99,6 +103,8 @@ const POST_WALK_MARK = `// Task: walk right while marked; mark the first blank c
  *   call, check, erase, left, mark, noop, right, stop, ...
  *
  * Return: { machine } — initialState and tape default from the machine.
+ *
+ * Note: the demo runs the machine; do not call .run() or .runStepByStep() yourself.
  */
 
 const { PostMachine, Tape, check, mark, right, stop } = imports;
