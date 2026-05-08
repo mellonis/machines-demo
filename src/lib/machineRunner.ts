@@ -109,7 +109,7 @@ export class MachineRunner {
       const p = this.runPending;
       this.runPending = null;
       if (!p) return;
-      this.stopRunTimer();
+      if (p.timeoutId) clearTimeout(p.timeoutId);
       p.resolveRan(data);
       return;
     }
@@ -118,7 +118,7 @@ export class MachineRunner {
       if (this.runPending) {
         const p = this.runPending;
         this.runPending = null;
-        this.stopRunTimer();
+        if (p.timeoutId) clearTimeout(p.timeoutId);
         p.reject(err);
         return;
       }
