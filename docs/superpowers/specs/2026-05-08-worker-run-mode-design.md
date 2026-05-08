@@ -20,7 +20,7 @@ Extend `run` with an optional `debug` flag. Add `resume` request and `paused` re
 | Direction | Type | Payload |
 |---|---|---|
 | → | `run` | `{ maxSteps?, debug? }` |
-| → | `resume` | `{}` |
+| → | `resume` | `{ step? }` |
 | ← | `paused` | `{ tapes, commands, stepsApplied, state, currentSymbols, debugBreak }` |
 
 `debug: boolean` defaults to `false` — no surprise pauses if user code has leftover `state.debug` assignments. When `true`, the worker's `onDebugBreak` posts `paused` and awaits `resume`. When `false`, `onDebugBreak` returns immediately (pauses short-circuited at the wrapper level).
@@ -70,8 +70,8 @@ ExecutionMode = 'DEMO' | 'MANUAL' | 'RUNNING_STEP' | 'RUNNING_AUTO'
 
 | Affordance | State |
 |---|---|
-| Run button | label "Continue", icon retained, sends `resume` |
-| Step button | hidden |
+| Run button | label "Continue", icon retained, sends `resume` (no step flag) |
+| Step button | visible — sends `resume { step: true }`, advances one iteration, re-pauses |
 | Stop button | visible (terminates worker, → `HALTED`) |
 | Take Control | hidden (consistent with other RUNNING_* modes) |
 | Editor | read-only-effective (Build remains available, see below) |
@@ -80,6 +80,47 @@ ExecutionMode = 'DEMO' | 'MANUAL' | 'RUNNING_STEP' | 'RUNNING_AUTO'
 Build from `RUNNING_PAUSED_AT_BREAK` is allowed and follows the existing pattern: terminate worker, `reloadWorker(code)`, mode → `MANUAL`. The pending Promise dies with the worker.
 
 `runDisabled` / `stepDisabled` / etc. derived flags pick up `RUNNING_PAUSED_AT_BREAK` so existing UI gating composes.
+
+### Step from `RUNNING_PAUSED_AT_BREAK`
+
+Step advances exactly one engine iteration and re-pauses, by mutating `nextState.debug = { before: true }` so the next iteration breaks regardless of the user's `state.debug` config. Stash the original `debug` value; restore on entry to the synthesized break before pausing again.
+
+Two paths depending on which kind of break we're paused at:
+
+- **`before` break.** `m` is the current `machineState`; `m.nextState` is the actual next iteration's state. Apply the trick directly inside `onDebugBreak`.
+- **`after` break.** `m` is `prevYield` (the engine substitutes for context). The un-substituted `machineState` isn't reachable here. Set a `pendingStepNext` flag and defer the trick to the *next* `onStep` call, which fires with the un-substituted yield.
+
+```ts
+let pendingStepNext = false;
+let pendingRestore: (() => void) | null = null;
+
+onStep: (m) => {
+  if (pendingStepNext) {
+    const ns = m.nextState;
+    const original = ns.debug;
+    ns.debug = { before: true };
+    pendingRestore = () => { ns.debug = original; };
+    pendingStepNext = false;
+  }
+  // existing per-step buffering
+},
+onDebugBreak: async (m) => {
+  if (pendingRestore) { pendingRestore(); pendingRestore = null; }
+  // post `paused`, await `resume` (sets resumeAction = 'continue' | 'step')
+  if (resumeAction === 'step') {
+    if (m.debugBreak?.before) {
+      const ns = m.nextState;
+      const original = ns.debug;
+      ns.debug = { before: true };
+      pendingRestore = () => { ns.debug = original; };
+    } else {
+      pendingStepNext = true;
+    }
+  }
+}
+```
+
+`nextState.debug` mutation is shared across `withOverrodeHaltState` wrappers (per upstream docs); the stash-and-restore covers this — whatever the user had on the underlying state is preserved.
 
 ## "Debug mode" UI
 
