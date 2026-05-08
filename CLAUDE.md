@@ -56,35 +56,7 @@ src/
 - `$effect`s for the demo loop, auto-step loop, belt-transitions toggle, and a code-changed warning (debounced via `codeChangedWarned` flag — fires once per running session)
 - `runner = new MachineRunner(engine)` and the `doLoad` / `doStep` / `doRun` / `takeControl` / `stopMachine` / `resetCodeToSelected` handlers; `reloadWorker(source?)` is the shared "build worker + rebuild mirrorMachine" helper, taking optional source code (defaults to current `code`) so DEMO can run the canonical `selectedExample.code` regardless of editor state
 
-## Execution modes
-
-`ExecutionMode = 'DEMO' | 'MANUAL' | 'RUNNING_STEP' | 'RUNNING_AUTO' | 'RUNNING_CONTINUOUS' | 'RUNNING_PAUSED_AT_BREAK' | 'HALTED'`
-
-| Mode | Panel | Apply visible | Take control | Belt behavior |
-|---|---|---|---|---|
-| `DEMO` | disabled mirror | yes (flashes) | yes | timer-driven random commands generated per tick from each tape's alphabet (40% keep, otherwise uniform). Loads `selectedExample.code` (canonical), not the editor's `code`. Auto-stops on first user-clicked Build (`demoEnabled = false`). |
-| `MANUAL` | enabled | yes | hidden | user-driven via Apply (writes to `mirrorMachine` via the same `ifOtherSymbol` one-step path used by Step) |
-| `RUNNING_STEP` | disabled mirror | hidden | yes | legacy step path — **only** entered as the paused state for `RUNNING_AUTO`. Cold-start Step now goes through run-mode → `RUNNING_PAUSED_AT_BREAK` instead. |
-| `RUNNING_AUTO` | disabled mirror | hidden | yes | timer-driven worker steps via `runner.step()`; Step button shows pause icon + "Pause" label; click → `RUNNING_STEP`. Doesn't pause at debug breakpoints (no `onDebugBreak` plumbing on this path; tracked in #43). |
-| `RUNNING_CONTINUOUS` | neutral cmd shown | hidden | hidden | snap-to-final, transitions off; per-step commands batch-logged after the worker returns |
-| `RUNNING_PAUSED_AT_BREAK` | disabled mirror | hidden | hidden | worker is paused inside `machine.run({ ... })` at an `onDebugBreak` fire (user-authored or Step-armed). Run button labels "Continue"; Step sends `resume(step: true)`; Stop terminates the worker. |
-| `HALTED` | disabled mirror | hidden | yes | frozen at final state. Build/Step/Run remain enabled — Step/Run reload-from-code on entry (the same path as MANUAL/DEMO), effectively restarting the machine without an explicit Build click. |
-
-Take control is the only entry into `MANUAL`. Once the user takes control, demo never restarts. From `MANUAL` (or `DEMO`/`HALTED`), Step and Run both call `reloadWorker(code)` first — the user's manual `Apply`s and code edits are reconciled by always rebuilding the worker + `mirrorMachine` from the current editor `code`. **Cold-start Step then enters run-mode via `runner.run({ step: true, debug, onPaused })`** — the worker arms `initialState.debug.after = true` so iter 1's after-fire is the step boundary, then transitions to `RUNNING_PAUSED_AT_BREAK`.
-
-A `Stop` button is shown next to Run while `RUNNING_STEP` / `RUNNING_AUTO` / `RUNNING_PAUSED_AT_BREAK` (`stopVisible`); clicking it sets `executionMode = 'HALTED'` and reports `'stopped'`. From `RUNNING_PAUSED_AT_BREAK` it also terminates the worker (the `runner.run()` Promise rejects; `failHalted` is suppressed via `stopRequested`). The auto-step `$effect` cleans itself up when mode leaves `RUNNING_AUTO`.
-
-## Debugger UX (debug mode + breakpoints)
-
-A `debug` checkbox in the Toolbar controls whether user-authored `state.debug` / `haltState.debug` breakpoints pause execution. State `debugMode` is owned by `MachineView.svelte`, persisted to `localStorage` under `machines-demo:<engine>:debugMode`. Mid-run toggle works via `runner.setDebug(on)` — a `$effect` watches `debugMode` and pushes the change to the worker, which flips an internal `debugEnabled` flag without restarting.
-
-Step (cold-start and from break) always uses run-mode and arms `state.debug.after = true` on the relevant state to fire one boundary pause:
-- **Cold-start**: arms `initialState.debug.after = true` before invoking `machine.run(...)` (preserves any user-authored `state.debug.before`).
-- **From `RUNNING_PAUSED_AT_BREAK`**: `resume(step: true)` arms `m.state.debug.after` (when paused at before) or `m.nextState.debug.after` (when paused at after). `pendingRestore` undoes the mutation before the user observes the next break.
-
-`MachineView#onPausedHandler` always logs `paused at state X <when> applying command for symbols: [...]`. Reads as "we made a step, look at the result": `.after`-arming means iter K just ran when we pause, and the log surfaces iter K's state + just-executed symbols. The `debug` toggle gates whether user-authored breaks fire, not how pauses are logged.
-
-**Engine quirks at halt** (filed upstream as [`turing-machine-js#108`](https://github.com/mellonis/turing-machine-js/issues/108)): the halting iter's `after`-fire never fires (the engine's `prevYield`-deferred after pattern needs an iter K+1 that doesn't exist when iter K transitions to halt); `haltState.debug.after` is silently ignored (no halt-pause anchor). `haltState.debug.before` IS honored — fires on the iter that transitions to halt, OR'd into that iter's `beforeMatch`.
+**Execution model and debugger semantics:** see [`docs/execution-model.md`](docs/execution-model.md).
 
 ## Worker contract
 
