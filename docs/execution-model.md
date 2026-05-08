@@ -390,3 +390,42 @@ Take Control is visible in DEMO, IDLE (visible during cold-start RUNNING_*), HAL
 - `took control`
 
 **Edge case.** Take Control from RUNNING_PAUSED is functionally identical to from RUNNING_AUTO / RUNNING_CONTINUOUS — the worker is paused, but `terminate()` kills it the same way. `runPending`'s onPaused callback is never called again because the runner's pending slot is cleared on terminate.
+
+### Walk-through 7 — Error mid-run (and cold-start build error)
+
+Errors come from two sources:
+
+1. **Build error** — the worker's user-code build (cold-start) throws (parse error, runtime exception during initial setup). Worker sends `error` with no `tapes`. → HALTED with error log.
+2. **Mid-run error** — the worker's `machine.run()` throws (typically: no edge in the state graph for the current symbol). Worker sends `error` with partial `tapes` (the snapshot at throw-time). → HALTED with error log.
+
+Both surface as `WorkerError` in the runner; main thread's `failHalted` rebuilds the mirror from the partial `tapes` (when present) so the user sees the state where execution actually stuck — not the loaded tape with no record of the steps that ran.
+
+- `S-error-{auto,cont,paused}` — mid-run error from each running mode. Same flow.
+
+**Log entries**
+- `error: <message>`
+
+**Edge case.** Cold-start build errors don't have running-mode-specific scenario IDs in the matrix because they happen before any RUNNING_* mode is entered. Tested against from each cold-start origin (IDLE / MANUAL / HALTED / DEMO) — see §7's flowchart error branch.
+
+### Walk-through 8 — Truncation (`S-truncate-{auto,cont}`)
+
+A run that doesn't halt naturally hits `MAX_STEPS = 100_000` inside the worker's `runToEnd` cap. Worker sends `ran` with `truncated: true`.
+
+- `S-truncate-auto` / `S-truncate-cont` — main thread receives `ran`. → HALTED with `truncated: did not halt within MAX_STEPS steps` log entry. Per-step entries are **suppressed** when `truncated: true` (band-aid until [#45](https://github.com/mellonis/machines-demo/issues/45) lands; rendering 100k log entries freezes the main thread for seconds).
+
+**Log entries**
+- `truncated: did not halt within MAX_STEPS steps`
+
+**Edge case.** A debug-paused run that's then continued without `debug=off` won't truncate at the same point — the per-segment cap accrues across resume cycles, so a long-paused-then-resumed run could still hit MAX_STEPS in a later segment.
+
+### Walk-through 9 — Worker timeout per segment (`S-timeout-{auto,cont,paused}`)
+
+`WORKER_TIMEOUT_MS = 5_000` caps wall-clock time on each worker request **segment**. For `build` / `step` / `run`-without-pause it's a round-trip cap; for `run` with paused / resume cycles it's per-segment (suspends on `paused`, restarts on `resume`-send).
+
+- `S-timeout-auto` / `S-timeout-cont` — segment exceeds 5 s. Runner kills the worker (terminate) and rejects with `timeout after 5000ms — worker terminated (likely infinite loop)`. → HALTED with timeout log.
+- `S-timeout-paused` — only fires if the user clicks Continue or Step and the **resumed** segment exceeds 5 s. A paused state is not subject to timeout.
+
+**Log entries**
+- `timeout after 5000ms — worker terminated (likely infinite loop)`
+
+**Edge case.** A user code that uses `setTimeout` / async patterns inside `state.debug.before` / `state.debug.after` callbacks (if any) could ostensibly stall a segment indefinitely; the per-segment cap protects the demo from such cases.
