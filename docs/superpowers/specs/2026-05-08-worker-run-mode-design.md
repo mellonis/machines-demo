@@ -182,6 +182,12 @@ On `resume` (Continue clicked): nothing changes locally — wait for the next wo
 
 On the final `ran`: existing flow — render final tapes, batch-log buffered commands, mode → `HALTED`.
 
+## Default snippets: don't run the machine
+
+User code runs synchronously inside `new Function()`. If they call `machine.run(...)` or iterate `machine.runStepByStep(...)` themselves before returning, the tape is post-execution by the time the worker snapshots it — confusing initial state, no error.
+
+No code-side defense (prototype-patching breaks the "test a different machine alongside" pattern; tape mutation is indistinguishable from legitimate setup). Document the contract instead: add one line to each bundled example header — "The demo runs the machine; don't call `.run()` or `.runStepByStep()` yourself." Three snippets in `src/lib/defaultCode.ts` (Turing single-tape, Turing multi-tape, Post).
+
 ## Take Control: log entry
 
 `takeControl()` (`MachineView.svelte:465`) currently transitions silently from `DEMO` / `RUNNING_*` to `MANUAL`. Add `report('user took control', 'ok')` so the mode transition is captured in the log alongside the other logged transitions (Build, Step, Run, halt, paused-at-break). One-line addition; bundled here because we're already touching the log machinery for the break-pause flow.
