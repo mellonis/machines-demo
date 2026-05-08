@@ -337,10 +337,11 @@
   function stopMachine(): void {
     if (executionMode === 'RUNNING_PAUSED_AT_BREAK') {
       // Pending run Promise will reject when we terminate; failHalted in the
-      // caller's catch sets the rest. We pre-empt the message here.
+      // caller's catch is suppressed via stopRequested. We don't clear
+      // workerLive — Run/Step from HALTED reload-from-code (same as halt-via-
+      // completion), so the UI gate stays open and the next click respawns.
       stopRequested = true;
       runner.terminate();
-      workerLive = false;
     }
     executionMode = 'HALTED';
     report('stopped', 'warn');
