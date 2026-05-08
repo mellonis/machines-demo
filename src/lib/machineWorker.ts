@@ -310,9 +310,10 @@ async function run(maxSteps: number, debug: boolean): Promise<{ truncated: boole
           stepsApplied,
           state: m.state.name ?? '',
           currentSymbols: [...m.currentSymbols],
-          debugBreak: { ...m.debugBreak } as { before?: true; after?: true },
+          debugBreak: { ...m.debugBreak },
         });
         await new Promise<void>((resolve) => {
+          // step flag: wired to the call site but consumed in Task 4 (nextState.debug trick)
           resumeResolve = (_action) => {
             resumeResolve = null;
             resolve();
@@ -362,7 +363,7 @@ async function run(maxSteps: number, debug: boolean): Promise<{ truncated: boole
   }
 
   phase = { kind: 'built', halted: true };
-  return { truncated, startStep: runStartStep };
+  return { truncated, startStep: stepsApplied - runCommandBuffer.length };
 }
 
 function send(msg: WorkerResponse): void {
