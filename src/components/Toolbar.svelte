@@ -46,7 +46,7 @@
     examples,
     selectedExampleId,
     withPause = $bindable(),
-    debugMode = $bindable(false),
+    debugMode = $bindable(),
     intervalText = $bindable(),
     snippets,
     loadedSnippetId,
