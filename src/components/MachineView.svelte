@@ -390,8 +390,8 @@
 
   async function doStep(): Promise<void> {
     // RUNNING_PAUSED_AT_BREAK → Step click means "advance one iteration in the
-    // run, then re-pause". Send resume with step flag; worker will arm the
-    // nextState.debug trick.
+    // run, then re-pause". Send resume with step flag; worker arms next
+    // state's debug.after.
     if (executionMode === 'RUNNING_PAUSED_AT_BREAK') {
       runner.resume(true);
       // Phase will be set by the next `paused` (or `ran` if the synthesized
@@ -405,50 +405,91 @@
       report('paused');
       return;
     }
-    // Soft-debounce: drop rapid clicks while a worker step is in flight. The
-    // belt animation does NOT block — the user can click again as soon as the
-    // worker returns (~ms), even mid-slide.
-    if (stepInFlight) return;
 
-    // First step from any non-RUNNING_STEP mode (DEMO / MANUAL / HALTED):
-    // reload so mirrorMachine and worker start from the current code (user
-    // may have edited it; HALTED entry effectively restarts the machine).
-    if (executionMode !== 'RUNNING_STEP') {
-      reportSeparator();
-      report('loading…');
-      const ok = await reloadWorker();
-      if (!ok) {
-        executionMode = userTookControl ? 'MANUAL' : 'DEMO';
+    // RUNNING_STEP (auto-step paused) keeps the legacy `runner.step()` path —
+    // each Step click advances one iteration with no run-mode pause cycle.
+    // The full Step+pause experience lives on the cold-start path below.
+    // (RUNNING_AUTO → run-mode is tracked in #43.)
+    if (executionMode === 'RUNNING_STEP') {
+      if (stepInFlight) return;
+      stepInFlight = true;
+      let res;
+      try {
+        res = await runner.step();
+      } catch (err) {
+        failHalted(err);
         return;
+      } finally {
+        stepInFlight = false;
       }
-      executionMode = 'RUNNING_STEP';
-      codeChangedWarned = false;
-      reflectNeutral();
+      halted = res.halted;
+      if (res.halted) {
+        report(`halted after ${res.stepsApplied} step(s)`, 'ok');
+        executionMode = 'HALTED';
+      } else {
+        report(commandsEntry(res.commands, { stepNumber: res.stepsApplied }, CARET_COLORS));
+      }
+      if (res.commands) {
+        await renderFromMirror(res.commands, true);
+        if (res.nextCommands) reflectToActivePanel(res.nextCommands);
+        else reflectNeutral();
+      }
+      return;
     }
 
-    stepInFlight = true;
-    let res;
+    // Cold-start Step (DEMO / MANUAL / HALTED): reload + run-mode with step:true.
+    // Worker arms the initial state's debug.after so iter 1's after-fire is
+    // the step boundary; user-authored state.debug.before still fires naturally.
+    // onPausedHandler takes over; subsequent Step clicks resume(step: true).
+    if (stepInFlight) return;
+    reportSeparator();
+    report('loading…');
+    const ok = await reloadWorker();
+    if (!ok) {
+      executionMode = userTookControl ? 'MANUAL' : 'DEMO';
+      return;
+    }
+    if (halted) {
+      report('halted immediately', 'ok');
+      executionMode = 'HALTED';
+      return;
+    }
+    codeChangedWarned = false;
+    reflectNeutral();
+
+    pendingOp = 'run';
     try {
-      res = await runner.step();
+      const res = await runner.run({
+        maxSteps: undefined,
+        debug: debugMode,
+        step: true,
+        onPaused: onPausedHandler,
+      });
+      // Reached only when the run halts without pausing — e.g. Continue from
+      // a paused state, or the armed break never fires before halt. Mirror
+      // the doRun completion path.
+      lastSnapshots = res.tapes;
+      _buildMirrorMachine(res.tapes, alphabets);
+      setAllFromMirror();
+      halted = true;
+      reflectNeutral();
+      if (!res.truncated && res.commands.length > 0) {
+        appendBatch(
+          res.commands.map((commands, i) =>
+            commandsEntry(commands, { stepNumber: res.startStep + i + 1 }, CARET_COLORS),
+          ),
+        );
+      }
+      if (res.truncated) {
+        report(`truncated at ${res.stepsApplied} steps (limit hit)`, 'warn');
+      } else {
+        report(`halted after ${res.stepsApplied} step(s)`, 'ok');
+      }
+      executionMode = 'HALTED';
     } catch (err) {
       failHalted(err);
-      return;
     } finally {
-      stepInFlight = false;
-    }
-    halted = res.halted;
-    if (res.halted) {
-      report(`halted after ${res.stepsApplied} step(s)`, 'ok');
-      executionMode = 'HALTED';
-    } else {
-      report(commandsEntry(res.commands, { stepNumber: res.stepsApplied }, CARET_COLORS));
-    }
-    if (res.commands) {
-      await renderFromMirror(res.commands, true);
-      // Show what's queued for the *next* click, not what just applied.
-      // Keeps panel state consistent under rapid clicks.
-      if (res.nextCommands) reflectToActivePanel(res.nextCommands);
-      else reflectNeutral();
+      pendingOp = null;
     }
   }
 
@@ -466,12 +507,19 @@
     lastSnapshots = paused.tapes;
     _buildMirrorMachine(paused.tapes, alphabets);
     setAllFromMirror();
-    // Format the break log entry. Engine's run() dispatches onDebugBreak
-    // separately for before/after — exactly one is true at the wire.
-    const when = paused.debugBreak.before ? 'before' : 'after';
-    const symbols = paused.currentSymbols.map((s) => `'${s}'`).join(', ');
-    const stateRef = paused.state ? `state ${paused.state}` : 'unnamed state';
-    report(`paused at ${stateRef} ${when} applying command for symbols: [${symbols}]`, 'ok');
+    // Log format depends on debug mode:
+    // - debug=on: full "paused at state X before/after applying command for symbols: [...]"
+    //   (the user wants this for any real break — user-set or Step-armed).
+    // - debug=off: generic "paused" (Step-induced pauses are explicit boundary
+    //   markers without state info).
+    if (debugMode) {
+      const when = paused.debugBreak.before ? 'before' : 'after';
+      const symbols = paused.currentSymbols.map((s) => `'${s}'`).join(', ');
+      const stateRef = paused.state ? `state ${paused.state}` : 'unnamed state';
+      report(`paused at ${stateRef} ${when} applying command for symbols: [${symbols}]`, 'ok');
+    } else {
+      report('paused', 'ok');
+    }
     executionMode = 'RUNNING_PAUSED_AT_BREAK';
   }
 

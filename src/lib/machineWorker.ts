@@ -300,7 +300,11 @@ function step(): { commands: Command[] | null; nextCommands: Command[] | null; h
   return { commands, nextCommands, halted };
 }
 
-async function run(maxSteps: number, debug: boolean): Promise<{ truncated: boolean; startStep: number }> {
+async function run(
+  maxSteps: number,
+  debug: boolean,
+  step: boolean,
+): Promise<{ truncated: boolean; startStep: number }> {
   expectPhase('built');
   const built = phase as Extract<WorkerPhase, { kind: 'built' }>;
   if (built.halted || !machine) throw new Error('cannot run: halted or not built');
@@ -321,6 +325,24 @@ async function run(maxSteps: number, debug: boolean): Promise<{ truncated: boole
   phase = { kind: 'running' };
   debugEnabled = debug;
   stepPending = false;
+
+  // Cold-start Step: arm the initial state's .after = true so iter 1's
+  // after-fire pauses (the legacy step-by-step boundary — pause once iter
+  // 1's command has been applied). Always .after, regardless of debug
+  // toggle: the toggle gates whether user-authored breaks pause, not where
+  // the Step boundary lands. We preserve the user's .before (read via the
+  // DebugConfig getter — spread skips it) so a user-authored before-break
+  // still fires naturally on iter 1; we never inject one ourselves, since
+  // that would surface as an unauthored pre-iter pause.
+  if (step && initialState) {
+    const target = initialState as { debug: { before?: unknown; after?: unknown } | null };
+    const original = target.debug;
+    const newDebug: { before?: unknown; after?: unknown } = { after: true };
+    if (original?.before !== undefined) newDebug.before = original.before;
+    target.debug = newDebug;
+    pendingRestore = () => { target.debug = original; };
+    stepPending = true;
+  }
 
   let truncated = false;
 
@@ -470,7 +492,11 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
     }
 
     if (req.type === 'run') {
-      const { truncated, startStep } = await run(req.maxSteps ?? MAX_STEPS, req.debug ?? false);
+      const { truncated, startStep } = await run(
+        req.maxSteps ?? MAX_STEPS,
+        req.debug ?? false,
+        req.step ?? false,
+      );
       send({
         type: 'ran',
         tapes: snapshotTapes(),

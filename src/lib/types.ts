@@ -48,7 +48,7 @@ export type TapeSnapshot = {
 export type WorkerRequest =
   | { type: 'build'; engine: Engine; code: string }
   | { type: 'step' }
-  | { type: 'run'; maxSteps?: number; debug?: boolean }
+  | { type: 'run'; maxSteps?: number; debug?: boolean; step?: boolean } // step?: true → arm initial state's debug.after so iter 1 pauses at the step-boundary (preserves user-authored debug.before)
   | { type: 'resume'; step?: boolean } // step?: true → advance one iteration, then re-pause
   | { type: 'setDebug'; on: boolean }; // runtime-toggle debug-break pausing during a run
 

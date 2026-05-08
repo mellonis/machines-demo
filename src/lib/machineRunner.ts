@@ -184,6 +184,9 @@ export class MachineRunner {
   run(opts: {
     maxSteps?: number;
     debug?: boolean;
+    /** When true the worker arms the initial state's `debug.after` so the run
+     * pauses at iter 1's step-boundary — the cold-start path used by Step. */
+    step?: boolean;
     onPaused?: (data: PausedResponse) => void;
   } = {}): Promise<RanResponse> {
     if (!this.worker) throw new Error('worker not spawned — call build() first');
@@ -201,6 +204,7 @@ export class MachineRunner {
         type: 'run',
         maxSteps: opts.maxSteps ?? MAX_STEPS,
         debug: opts.debug ?? false,
+        step: opts.step ?? false,
       });
     });
   }
