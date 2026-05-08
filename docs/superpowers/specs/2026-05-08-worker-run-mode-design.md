@@ -53,9 +53,36 @@ await machine.run({
 
 When `debug` is `false`, `onDebugBreak` is omitted entirely — upstream's `run()` then skips break-handling without our wrapper paying any per-step cost. Once [turing-machine-js#106](https://github.com/mellonis/turing-machine-js/issues/106) lands, we can pass `debug` straight through to upstream and drop this conditional.
 
-A module-scoped `resumeResolve: (() => void) | null` holds the pending Promise. The `resume` request handler resolves it and clears the slot. `run` and `resume` are the only message types that touch this slot; concurrent `run` is rejected (existing `not built` / state-error pattern).
+A module-scoped `resumeResolve: (() => void) | null` holds the pending Promise. The `resume` request handler resolves it and clears the slot. `run` and `resume` are the only message types that touch this slot; concurrent `run` is rejected by the phase machine (see below).
 
 After `run()` resolves (halt or stepsLimit), the worker sends the existing `ran` response. Errors thrown from inside `run()` (e.g. no edge for current symbol) flow through the existing catch and produce `error` with partial tape state.
+
+### Worker phases
+
+Defense in depth against bad requests from the main thread. The mode machine on the main side gates buttons, but a future refactor could let an invalid request through; without worker-side validation, that becomes a silent hang (e.g. `resume` with no pending Promise = no-op, paused forever).
+
+```ts
+type WorkerPhase =
+  | { kind: 'idle' }
+  | { kind: 'built'; halted: boolean }
+  | { kind: 'running' }
+  | { kind: 'paused' };
+
+let phase: WorkerPhase = { kind: 'idle' };
+```
+
+Allowed transitions:
+
+| Request | Allowed from | New phase |
+|---|---|---|
+| `build` | any | `built { halted: <first-yield-done> }` |
+| `step` | `built { halted: false }` | `built { halted: <post-step> }` |
+| `run` | `built { halted: false }` | `running` → `paused` or `built { halted: true }` |
+| `resume` | `paused` | `running` → `paused` or `built { halted: true }` |
+
+A request from a disallowed phase throws `worker phase <current>, expected <allowed>`, which the existing catch converts into an `error` response. Main thread logs it as a bug via `report('...', 'error')` — this is supposed to be unreachable, so a loud surfacing helps catch UI-side regressions early.
+
+`build` from any phase is intentional: the existing UI allows Build at any time (terminate worker is implicit in the runner; from the worker's POV the request is fresh), and we want to keep that.
 
 ## Main-thread modes
 
@@ -93,31 +120,36 @@ Two paths depending on which kind of break we're paused at:
 ```ts
 let pendingStepNext = false;
 let pendingRestore: (() => void) | null = null;
+let resumeAction: 'continue' | 'step' = 'continue';
 
-onStep: (m) => {
-  if (pendingStepNext) {
-    const ns = m.nextState;
-    const original = ns.debug;
-    ns.debug = { before: true };
-    pendingRestore = () => { ns.debug = original; };
-    pendingStepNext = false;
-  }
-  // existing per-step buffering
-},
-onDebugBreak: async (m) => {
-  if (pendingRestore) { pendingRestore(); pendingRestore = null; }
-  // post `paused`, await `resume` (sets resumeAction = 'continue' | 'step')
-  if (resumeAction === 'step') {
-    if (m.debugBreak?.before) {
+await machine.run({
+  initialState,
+  stepsLimit: req.maxSteps ?? MAX_STEPS,
+  onStep: (m) => {
+    if (pendingStepNext) {
       const ns = m.nextState;
       const original = ns.debug;
       ns.debug = { before: true };
       pendingRestore = () => { ns.debug = original; };
-    } else {
-      pendingStepNext = true;
+      pendingStepNext = false;
     }
-  }
-}
+    // existing per-step buffering
+  },
+  onDebugBreak: async (m) => {
+    if (pendingRestore) { pendingRestore(); pendingRestore = null; }
+    // post `paused`, await `resume` — sets resumeAction = 'continue' | 'step'
+    if (resumeAction === 'step') {
+      if (m.debugBreak?.before) {
+        const ns = m.nextState;
+        const original = ns.debug;
+        ns.debug = { before: true };
+        pendingRestore = () => { ns.debug = original; };
+      } else {
+        pendingStepNext = true;
+      }
+    }
+  },
+});
 ```
 
 `nextState.debug` mutation is shared across `withOverrodeHaltState` wrappers (per upstream docs); the stash-and-restore covers this — whatever the user had on the underlying state is preserved.
