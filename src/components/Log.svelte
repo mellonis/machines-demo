@@ -18,7 +18,7 @@
   });
 </script>
 
-<div class="log-panel">
+<div class="log-panel" data-testid="log">
   {#if entries.length > 0}
     <IconButton icon="eraser" title="Clear log" onClick={onClear} />
   {/if}
@@ -27,7 +27,14 @@
       {#if entry.separator}
         <hr class="sep" />
       {:else}
-        <div class="line" class:error={entry.kind === 'error'} class:warn={entry.kind === 'warn'} class:ok={entry.kind === 'ok'}>
+        <div
+          class="line"
+          class:error={entry.kind === 'error'}
+          class:warn={entry.kind === 'warn'}
+          class:ok={entry.kind === 'ok'}
+          data-testid="log-line"
+          data-kind={entry.kind ?? ''}
+        >
           <div
             class="head"
             style={entry.color && !entry.kind ? `color: ${entry.color};` : undefined}

@@ -47,7 +47,7 @@
   }
 </script>
 
-<div class="tapes-stack">
+<div class="tapes-stack" data-testid="tapes-stack">
   <div class="head-thread" style:background={headThreadBackground}></div>
   {#each Array(tapeCount) as _, i}
     <Tape
