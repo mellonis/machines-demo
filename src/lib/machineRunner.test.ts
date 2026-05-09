@@ -248,5 +248,33 @@ describe('MachineRunner', () => {
 
       await expect(runPromise).resolves.toEqual(ranPayload);
     });
+
+    it('S-step-paused-off / R-protocol-step-arming: run({step:true}) posts step=true', async () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const buildPromise = runner.build('// user code');
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      await buildPromise;
+
+      const runPromise = runner.run({ step: true, debug: false });
+
+      expect(current().last).toMatchObject({
+        type: 'run',
+        step: true,
+        debug: false,
+      });
+
+      // Wrap up cleanly so the pending run doesn't leak between tests.
+      current().respond({
+        type: 'ran',
+        tapes: [],
+        truncated: false,
+        commands: [],
+        startStep: 0,
+        stepsApplied: 0,
+      });
+      await runPromise;
+    });
   });
 });
