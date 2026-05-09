@@ -1,284 +1,71 @@
+# Test infrastructure PR2 — Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Land the remaining `machineRunner` test categories — timer behavior, pending-slot model, and error wrapping — as 16 new tests across three sibling `describe` blocks in `src/lib/machineRunner.test.ts`. PR2 of [#47](https://github.com/mellonis/machines-demo/issues/47).
+
+**Architecture:** No production code changes. Append three new `describe` blocks (`timer`, `pending`, `error`) inside the existing outer `describe('MachineRunner')`. Timer block uses `vi.useFakeTimers()` per-test (via `beforeEach` / `afterEach`); pending and error blocks use real timers. Same `FakeWorker` + `makeFakeFactory()` harness from PR1.
+
+**Tech Stack:** Vitest 4.x (`vi.useFakeTimers`, `vi.advanceTimersByTimeAsync`), TypeScript 5.x.
+
+**Spec:** `docs/superpowers/specs/2026-05-09-test-infra-pr2-design.md`
+
+---
+
+## File map
+
+| File | Change |
+|---|---|
+| `src/lib/machineRunner.test.ts` | **Modify** — extend imports (add `vi`, `beforeEach`, `afterEach`, `WORKER_TIMEOUT_MS`, `WorkerError`); append three sibling `describe` blocks. |
+
+No other files modified. No new dependencies.
+
+---
+
+## Verification model
+
+After each task:
+
+1. `npm test` — Vitest one-shot. Total test count grows by the number added in the task (T1: +6 → 15 total; T2: +5 → 20; T3: +5 → 25).
+2. `npm run check` — exits 0.
+3. `npm run lint` — exits 0.
+
+Final task (T4) re-runs all four checks plus `npm run build` and `npm run test:coverage`.
+
+---
+
+## Task 1: Append `describe('timer')` block
+
+**Files:**
+- Modify: `src/lib/machineRunner.test.ts`
+
+- [ ] **Step 1: Update imports**
+
+Replace the current import block at the top of `src/lib/machineRunner.test.ts`:
+
+```ts
+import { describe, it, expect } from 'vitest';
+import { MAX_STEPS } from './caps';
+import { MachineRunner } from './machineRunner';
+import { makeFakeFactory } from './testUtils';
+```
+
+with:
+
+```ts
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { MAX_STEPS, WORKER_TIMEOUT_MS } from './caps';
 import { MachineRunner, WorkerError } from './machineRunner';
-import { type PausedResponse } from './types';
 import { makeFakeFactory } from './testUtils';
+```
 
-describe('MachineRunner', () => {
-  describe('protocol shape', () => {
-    it('R-protocol-build: posts {type:"build",engine,code} and resolves with BuiltResponse', async () => {
-      const { factory, current } = makeFakeFactory();
-      const runner = new MachineRunner('turing', factory);
+(Adds `vi`, `beforeEach`, `afterEach` from vitest; `WORKER_TIMEOUT_MS` from caps; `WorkerError` from machineRunner.)
 
-      const buildPromise = runner.build('// user code');
+- [ ] **Step 2: Append `describe('timer')` block**
 
-      expect(current().last).toEqual({
-        type: 'build',
-        engine: 'turing',
-        code: '// user code',
-      });
+After the closing `});` of the existing `describe('protocol shape', ...)` block (still inside the outer `describe('MachineRunner', ...)`), append:
 
-      const builtPayload = {
-        type: 'built' as const,
-        tapes: [],
-        alphabets: [],
-        halted: false,
-      };
-      current().respond(builtPayload);
-
-      await expect(buildPromise).resolves.toEqual(builtPayload);
-    });
-
-    it('R-protocol-step: posts {type:"step"} and resolves with SteppedResponse', async () => {
-      const { factory, current } = makeFakeFactory();
-      const runner = new MachineRunner('turing', factory);
-
-      // Build first to spawn the worker.
-      const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
-      await buildPromise;
-
-      const stepPromise = runner.step();
-
-      expect(current().last).toEqual({ type: 'step' });
-
-      const steppedPayload = {
-        type: 'stepped' as const,
-        halted: false,
-        commands: null,
-        nextCommands: null,
-        stepsApplied: 1,
-      };
-      current().respond(steppedPayload);
-
-      await expect(stepPromise).resolves.toEqual(steppedPayload);
-    });
-
-    it('R-protocol-run: posts {type:"run",maxSteps,debug,step} and resolves with RanResponse', async () => {
-      const { factory, current } = makeFakeFactory();
-      const runner = new MachineRunner('turing', factory);
-
-      // Build first.
-      const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
-      await buildPromise;
-
-      // Custom-arg run.
-      const runPromise = runner.run({ maxSteps: 100, debug: true, step: false });
-
-      expect(current().last).toEqual({
-        type: 'run',
-        maxSteps: 100,
-        debug: true,
-        step: false,
-      });
-
-      const ranPayload = {
-        type: 'ran' as const,
-        tapes: [],
-        truncated: false,
-        commands: [],
-        startStep: 0,
-        stepsApplied: 5,
-      };
-      current().respond(ranPayload);
-
-      await expect(runPromise).resolves.toEqual(ranPayload);
-    });
-
-    it('R-protocol-run-defaults: posts MAX_STEPS, debug=false, step=false on bare run()', async () => {
-      const { factory, current } = makeFakeFactory();
-      const runner = new MachineRunner('turing', factory);
-
-      const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
-      await buildPromise;
-
-      const runPromise = runner.run();
-
-      expect(current().last).toEqual({
-        type: 'run',
-        maxSteps: MAX_STEPS,
-        debug: false,
-        step: false,
-      });
-
-      current().respond({
-        type: 'ran',
-        tapes: [],
-        truncated: false,
-        commands: [],
-        startStep: 0,
-        stepsApplied: 0,
-      });
-
-      await runPromise;
-    });
-
-    it('R-protocol-resume: posts {type:"resume",step} and does not resolve the run promise', async () => {
-      const { factory, current } = makeFakeFactory();
-      const runner = new MachineRunner('turing', factory);
-
-      // Build, then start a run with onPaused.
-      const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
-      await buildPromise;
-
-      let pausedSeen = false;
-      const runPromise = runner.run({
-        onPaused: () => {
-          pausedSeen = true;
-        },
-      });
-
-      // Worker pauses.
-      current().respond({
-        type: 'paused',
-        tapes: [],
-        commands: [],
-        stepsApplied: 1,
-        state: 'q1',
-        currentSymbols: ['a'],
-        debugBreak: { before: true as const },
-      });
-      expect(pausedSeen).toBe(true);
-
-      // Now resume(step=true).
-      runner.resume(true);
-
-      expect(current().last).toEqual({ type: 'resume', step: true });
-
-      // Run promise still pending — resolves only on `ran`/`error`.
-      // Sanity check: settle a microtask, ensure no resolution yet.
-      let runResolved = false;
-      void runPromise.then(() => {
-        runResolved = true;
-      });
-      await Promise.resolve();
-      expect(runResolved).toBe(false);
-
-      // Default resume() posts step:false.
-      runner.resume();
-      expect(current().last).toEqual({ type: 'resume', step: false });
-
-      // Cleanly settle the pending run by responding with `ran`.
-      current().respond({
-        type: 'ran',
-        tapes: [],
-        truncated: false,
-        commands: [],
-        startStep: 0,
-        stepsApplied: 1,
-      });
-      await runPromise;
-    });
-
-    it('R-protocol-set-debug: posts {type:"setDebug",on}', async () => {
-      const { factory, current } = makeFakeFactory();
-      const runner = new MachineRunner('turing', factory);
-
-      // Build first to spawn the worker (setDebug is a no-op without one).
-      const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
-      await buildPromise;
-
-      runner.setDebug(true);
-      expect(current().last).toEqual({ type: 'setDebug', on: true });
-
-      runner.setDebug(false);
-      expect(current().last).toEqual({ type: 'setDebug', on: false });
-    });
-
-    it('R-protocol-set-debug-no-worker: setDebug before build is a silent no-op', () => {
-      const { factory } = makeFakeFactory();
-      const runner = new MachineRunner('turing', factory);
-
-      // No build yet, so no worker. setDebug must not throw.
-      expect(() => runner.setDebug(true)).not.toThrow();
-    });
-
-    it('R-protocol-paused-then-ran: run() invokes onPaused on paused, resolves on ran', async () => {
-      const { factory, current } = makeFakeFactory();
-      const runner = new MachineRunner('turing', factory);
-
-      const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
-      await buildPromise;
-
-      const pausedPayloads: PausedResponse[] = [];
-      const runPromise = runner.run({
-        debug: true,
-        onPaused: (p) => {
-          pausedPayloads.push(p);
-        },
-      });
-
-      const pausedPayload = {
-        type: 'paused' as const,
-        tapes: [],
-        commands: [],
-        stepsApplied: 1,
-        state: 'q1',
-        currentSymbols: ['a'],
-        debugBreak: { before: true as const },
-      };
-      current().respond(pausedPayload);
-
-      // onPaused fired with the payload.
-      expect(pausedPayloads).toHaveLength(1);
-      expect(pausedPayloads[0]).toEqual(pausedPayload);
-
-      // Run still pending.
-      let runSettled = false;
-      void runPromise.then(() => {
-        runSettled = true;
-      });
-      await Promise.resolve();
-      expect(runSettled).toBe(false);
-
-      // Now finish the run.
-      const ranPayload = {
-        type: 'ran' as const,
-        tapes: [],
-        truncated: false,
-        commands: [],
-        startStep: 0,
-        stepsApplied: 5,
-      };
-      current().respond(ranPayload);
-
-      await expect(runPromise).resolves.toEqual(ranPayload);
-    });
-
-    it('S-step-paused-off / R-protocol-step-arming: run({step:true}) posts step=true', async () => {
-      const { factory, current } = makeFakeFactory();
-      const runner = new MachineRunner('turing', factory);
-
-      const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
-      await buildPromise;
-
-      const runPromise = runner.run({ step: true, debug: false });
-
-      expect(current().last).toMatchObject({
-        type: 'run',
-        step: true,
-        debug: false,
-      });
-
-      // Wrap up cleanly so the pending run doesn't leak between tests.
-      current().respond({
-        type: 'ran',
-        tapes: [],
-        truncated: false,
-        commands: [],
-        startStep: 0,
-        stepsApplied: 0,
-      });
-      await runPromise;
-    });
-  });
-
+```ts
   describe('timer', () => {
     beforeEach(() => {
       vi.useFakeTimers();
@@ -293,13 +80,11 @@ describe('MachineRunner', () => {
       const runner = new MachineRunner('turing', factory);
 
       const buildPromise = runner.build('// user code');
-      // Attach assertion before advancing the clock so the rejection is
-      // handled the moment setTimeout fires (avoids PromiseRejectionHandledWarning).
-      const assertion = expect(buildPromise).rejects.toThrow(
+      await vi.advanceTimersByTimeAsync(WORKER_TIMEOUT_MS);
+
+      await expect(buildPromise).rejects.toThrow(
         `timeout after ${WORKER_TIMEOUT_MS}ms — worker terminated (likely infinite loop)`,
       );
-      await vi.advanceTimersByTimeAsync(WORKER_TIMEOUT_MS);
-      await assertion;
       expect(current().terminated).toBe(true);
     });
 
@@ -312,10 +97,9 @@ describe('MachineRunner', () => {
       await buildPromise;
 
       const stepPromise = runner.step();
-      // Attach assertion before advancing the clock so the rejection is handled immediately.
-      const assertion = expect(stepPromise).rejects.toThrow(/timeout after/);
       await vi.advanceTimersByTimeAsync(WORKER_TIMEOUT_MS);
-      await assertion;
+
+      await expect(stepPromise).rejects.toThrow(/timeout after/);
       expect(current().terminated).toBe(true);
     });
 
@@ -328,10 +112,9 @@ describe('MachineRunner', () => {
       await buildPromise;
 
       const runPromise = runner.run({ debug: true, onPaused: () => {} });
-      // Attach assertion before advancing the clock so the rejection is handled immediately.
-      const assertion = expect(runPromise).rejects.toThrow(/timeout after/);
       await vi.advanceTimersByTimeAsync(WORKER_TIMEOUT_MS);
-      await assertion;
+
+      await expect(runPromise).rejects.toThrow(/timeout after/);
       expect(current().terminated).toBe(true);
     });
 
@@ -398,10 +181,9 @@ describe('MachineRunner', () => {
       });
 
       runner.resume(false);
-      // Attach assertion before advancing the clock so the rejection is handled immediately.
-      const assertion = expect(runPromise).rejects.toThrow(/timeout after/);
       await vi.advanceTimersByTimeAsync(WORKER_TIMEOUT_MS);
-      await assertion;
+
+      await expect(runPromise).rejects.toThrow(/timeout after/);
     });
 
     it('R-timer-cleared-on-ran: ran response clears the timer; subsequent time advance has no effect', async () => {
@@ -430,7 +212,39 @@ describe('MachineRunner', () => {
       expect(current().terminated).toBe(false);
     });
   });
+```
 
+- [ ] **Step 3: Run tests**
+
+Run: `npm test`
+
+Expected: 15 tests pass (PR1's 9 + PR2's 6 timer tests).
+
+- [ ] **Step 4: Run check + lint**
+
+Run: `npm run check && npm run lint`
+
+Expected: both exit 0.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/lib/machineRunner.test.ts
+git commit -m "test(machineRunner): timer category — 6 tests for per-segment WORKER_TIMEOUT_MS"
+```
+
+---
+
+## Task 2: Append `describe('pending')` block
+
+**Files:**
+- Modify: `src/lib/machineRunner.test.ts`
+
+- [ ] **Step 1: Append `describe('pending')` block**
+
+After the closing `});` of the `describe('timer', ...)` block from T1, append:
+
+```ts
   describe('pending', () => {
     it('R-pending-simple-overlap: build then step before built rejects step', async () => {
       const { factory, current } = makeFakeFactory();
@@ -532,7 +346,39 @@ describe('MachineRunner', () => {
       await expect(buildAgain).rejects.toThrow('runner terminated');
     });
   });
+```
 
+- [ ] **Step 2: Run tests**
+
+Run: `npm test`
+
+Expected: 20 tests pass (15 from before + 5 pending tests).
+
+- [ ] **Step 3: Run check + lint**
+
+Run: `npm run check && npm run lint`
+
+Expected: both exit 0.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/lib/machineRunner.test.ts
+git commit -m "test(machineRunner): pending category — 5 tests for two-slot model + supersede"
+```
+
+---
+
+## Task 3: Append `describe('error')` block
+
+**Files:**
+- Modify: `src/lib/machineRunner.test.ts`
+
+- [ ] **Step 1: Append `describe('error')` block**
+
+After the closing `});` of the `describe('pending', ...)` block from T2, append:
+
+```ts
   describe('error', () => {
     it('R-error-wraps-as-worker-error: error response with tapes wraps as WorkerError', async () => {
       const { factory, current } = makeFakeFactory();
@@ -624,4 +470,131 @@ describe('MachineRunner', () => {
       expect((caught as Error).message).toMatch(/^worker error: worker crashed/);
     });
   });
-});
+```
+
+- [ ] **Step 2: Run tests**
+
+Run: `npm test`
+
+Expected: 25 tests pass (20 from before + 5 error tests).
+
+- [ ] **Step 3: Run check + lint**
+
+Run: `npm run check && npm run lint`
+
+Expected: both exit 0.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/lib/machineRunner.test.ts
+git commit -m "test(machineRunner): error category — 5 tests for WorkerError wrapping + onerror"
+```
+
+---
+
+## Task 4: Final verification
+
+**Files:** none modified
+
+- [ ] **Step 1: Type-check**
+
+Run: `npm run check`
+
+Expected: 0 errors, 0 warnings.
+
+- [ ] **Step 2: Lint**
+
+Run: `npm run lint`
+
+Expected: exit 0.
+
+- [ ] **Step 3: Build**
+
+Run: `npm run build`
+
+Expected: build succeeds; `dist/` produced.
+
+- [ ] **Step 4: Run all tests**
+
+Run: `npm test`
+
+Expected:
+
+```
+ Test Files  1 passed (1)
+      Tests  25 passed (25)
+```
+
+- [ ] **Step 5: Coverage check**
+
+Run: `npm run test:coverage`
+
+Expected: `src/lib/machineRunner.ts` shows ≥80% statement coverage (PR1 baseline was ~54%; PR2's 16 tests should push it well above 80%). No threshold enforced; this is informational. Capture the per-file coverage % in your report.
+
+- [ ] **Step 6: Scenario-ID grep audit**
+
+Run:
+
+```bash
+grep -oE '\b[SR]-[a-z-]+' src/lib/machineRunner.test.ts | sort -u
+```
+
+Expected: 26 unique IDs total (25 `R-` + 1 `S-`):
+
+```
+R-error-during-run
+R-error-during-step
+R-error-onerror-event
+R-error-tapes-default-null
+R-error-wraps-as-worker-error
+R-pending-rebuild-rejects-pending
+R-pending-run-overlap
+R-pending-simple-during-run
+R-pending-simple-overlap
+R-pending-terminate-rejects-all
+R-protocol-build
+R-protocol-paused-then-ran
+R-protocol-resume
+R-protocol-run
+R-protocol-run-defaults
+R-protocol-set-debug
+R-protocol-set-debug-no-worker
+R-protocol-step
+R-protocol-step-arming
+R-timer-build-timeout
+R-timer-cleared-on-ran
+R-timer-restart-on-resume
+R-timer-run-timeout-no-paused
+R-timer-step-timeout
+R-timer-suspend-on-paused
+S-step-paused-off
+```
+
+If the count or list differs, investigate — likely a typo in one of the new test names.
+
+- [ ] **Step 7: No fix commit if all checks pass**
+
+If steps 1–6 reveal real issues (broken test, type error, lint fail), fix inline in `src/lib/machineRunner.test.ts` and amend the relevant task's commit. Don't create a "review-pass" commit.
+
+If no fixes needed, T4 has no commit.
+
+---
+
+## Self-review
+
+**Spec coverage.** Each spec section maps to tasks:
+
+- §Decisions and §File map — captured in plan intro and the file map.
+- §Test layout (sibling structure) — T1 sets the import block + first describe; T2/T3 append siblings.
+- §`describe('timer')` 6 tests — T1.
+- §`describe('pending')` 5 tests — T2.
+- §`describe('error')` 5 tests — T3.
+- §Out of scope — explicitly not in any task.
+- §Self-review (5 verifications) — T4.
+
+**Placeholder scan.** No "TBD", "TODO", or "implement later". Every code step shows the actual test code. Every command shows the expected output.
+
+**Type / vocabulary consistency.** All tests use `MachineRunner`, `WorkerError`, `WORKER_TIMEOUT_MS`, `MAX_STEPS`, `FakeWorker` (via `makeFakeFactory`'s `current()` / `all()`), and the `vi.useFakeTimers` / `vi.advanceTimersByTimeAsync` Vitest API consistently. Scenario IDs match the spec design's `R-<topic>-<facet>` grammar.
+
+**Branch hygiene.** All commits land on the existing `47-test-infra-pr2` branch (which already has the spec design commit `be92e95`). Do not commit to master.
