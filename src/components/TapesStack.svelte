@@ -49,7 +49,7 @@
 
 <div class="tapes-stack" data-testid="tapes-stack">
   <div class="head-thread" style:background={headThreadBackground}></div>
-  {#each Array(tapeCount) as _, i}
+  {#each Array(tapeCount) as _, i (i)}
     <Tape
       bind:this={tapeRefs[i]}
       showCaret={i === tapeCount - 1}
