@@ -11,7 +11,7 @@ export default defineConfig({
     conditions: ['browser'],
   },
   test: {
-    environment: 'happy-dom',
+    environment: 'node',
     globals: false,
     include: ['src/**/*.test.ts'],
     setupFiles: ['./vitest.setup.ts'],
