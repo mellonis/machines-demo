@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { MAX_STEPS, WORKER_TIMEOUT_MS } from './caps';
-import { MachineRunner } from './machineRunner';
+import { MachineRunner, WorkerError } from './machineRunner';
 import { type PausedResponse } from './types';
 import { makeFakeFactory } from './testUtils';
 
@@ -293,11 +293,13 @@ describe('MachineRunner', () => {
       const runner = new MachineRunner('turing', factory);
 
       const buildPromise = runner.build('// user code');
-      await vi.advanceTimersByTimeAsync(WORKER_TIMEOUT_MS);
-
-      await expect(buildPromise).rejects.toThrow(
+      // Attach assertion before advancing the clock so the rejection is
+      // handled the moment setTimeout fires (avoids PromiseRejectionHandledWarning).
+      const assertion = expect(buildPromise).rejects.toThrow(
         `timeout after ${WORKER_TIMEOUT_MS}ms — worker terminated (likely infinite loop)`,
       );
+      await vi.advanceTimersByTimeAsync(WORKER_TIMEOUT_MS);
+      await assertion;
       expect(current().terminated).toBe(true);
     });
 
@@ -310,9 +312,10 @@ describe('MachineRunner', () => {
       await buildPromise;
 
       const stepPromise = runner.step();
+      // Attach assertion before advancing the clock so the rejection is handled immediately.
+      const assertion = expect(stepPromise).rejects.toThrow(/timeout after/);
       await vi.advanceTimersByTimeAsync(WORKER_TIMEOUT_MS);
-
-      await expect(stepPromise).rejects.toThrow(/timeout after/);
+      await assertion;
       expect(current().terminated).toBe(true);
     });
 
@@ -325,9 +328,10 @@ describe('MachineRunner', () => {
       await buildPromise;
 
       const runPromise = runner.run({ debug: true, onPaused: () => {} });
+      // Attach assertion before advancing the clock so the rejection is handled immediately.
+      const assertion = expect(runPromise).rejects.toThrow(/timeout after/);
       await vi.advanceTimersByTimeAsync(WORKER_TIMEOUT_MS);
-
-      await expect(runPromise).rejects.toThrow(/timeout after/);
+      await assertion;
       expect(current().terminated).toBe(true);
     });
 
@@ -394,9 +398,10 @@ describe('MachineRunner', () => {
       });
 
       runner.resume(false);
+      // Attach assertion before advancing the clock so the rejection is handled immediately.
+      const assertion = expect(runPromise).rejects.toThrow(/timeout after/);
       await vi.advanceTimersByTimeAsync(WORKER_TIMEOUT_MS);
-
-      await expect(runPromise).rejects.toThrow(/timeout after/);
+      await assertion;
     });
 
     it('R-timer-cleared-on-ran: ran response clears the timer; subsequent time advance has no effect', async () => {
@@ -525,6 +530,98 @@ describe('MachineRunner', () => {
       runner.terminate();
 
       await expect(buildAgain).rejects.toThrow('runner terminated');
+    });
+  });
+
+  describe('error', () => {
+    it('R-error-wraps-as-worker-error: error response with tapes wraps as WorkerError', async () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const buildPromise = runner.build('// user code');
+      const tapes = [{ symbols: ['a', 'b'], position: 0 }];
+      current().respond({ type: 'error', message: 'parse error', tapes });
+
+      let caught: unknown;
+      try {
+        await buildPromise;
+      } catch (e) {
+        caught = e;
+      }
+
+      expect(caught).toBeInstanceOf(WorkerError);
+      expect((caught as WorkerError).message).toBe('parse error');
+      expect((caught as WorkerError).tapes).toEqual(tapes);
+    });
+
+    it('R-error-tapes-default-null: error response without tapes field → tapes is null (not undefined)', async () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const buildPromise = runner.build('// user code');
+      current().respond({ type: 'error', message: 'no edge for symbol' });
+
+      let caught: unknown;
+      try {
+        await buildPromise;
+      } catch (e) {
+        caught = e;
+      }
+
+      expect(caught).toBeInstanceOf(WorkerError);
+      expect((caught as WorkerError).tapes).toBeNull();
+    });
+
+    it('R-error-during-step: error response during pending step rejects step with WorkerError', async () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const buildPromise = runner.build('// user code');
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      await buildPromise;
+
+      const stepPromise = runner.step();
+      current().respond({ type: 'error', message: 'mid-step error' });
+
+      await expect(stepPromise).rejects.toBeInstanceOf(WorkerError);
+    });
+
+    it('R-error-during-run: error response during pending run rejects run with WorkerError; worker not terminated', async () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const buildPromise = runner.build('// user code');
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      await buildPromise;
+
+      const runPromise = runner.run();
+      current().respond({ type: 'error', message: 'mid-run error' });
+
+      await expect(runPromise).rejects.toBeInstanceOf(WorkerError);
+      expect(current().terminated).toBe(false);
+    });
+
+    it('R-error-onerror-event: worker.onerror fires; pending request rejects with plain Error and "worker error:" prefix', async () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const buildPromise = runner.build('// user code');
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      await buildPromise;
+
+      const stepPromise = runner.step();
+      current().errorEvent('worker crashed');
+
+      let caught: unknown;
+      try {
+        await stepPromise;
+      } catch (e) {
+        caught = e;
+      }
+
+      expect(caught).toBeInstanceOf(Error);
+      expect(caught).not.toBeInstanceOf(WorkerError);
+      expect((caught as Error).message).toMatch(/^worker error: worker crashed/);
     });
   });
 });
