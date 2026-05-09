@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-`mellonis/machines-demo` is a **Vite + Svelte 5 (runes) + TypeScript** interactive demo for the upstream Turing and Post machine libraries. Single-page app with two tabs (Turing, Post). User code runs in a Web Worker. Deployed at `demo.machines.mellonis.ru` via the `mellonis/vps` repo (manual rsync of `dist/` into `vps/static/demo.machines.mellonis.ru/`; no CI yet).
+`mellonis/machines-demo` is a **Vite + Svelte 5 (runes) + TypeScript** interactive demo for the upstream Turing and Post machine libraries. Single-page app with two tabs (Turing, Post). User code runs in a Web Worker. Deployed at `demo.machines.mellonis.ru` via GitHub Actions on push to `master` (`.github/workflows/main.yml`: build + rsync straight to the VPS; matches the `mellonis/contacts` CI pattern). Doc-only changes are skipped via `paths-ignore`.
 
 ## Commands
 
@@ -11,6 +11,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `npm run preview` — preview the built bundle
 - `npm run check` — `svelte-check` + `tsc --noEmit`
 - `npm run lint` — ESLint flat config (typescript-eslint + eslint-plugin-svelte)
+- `npm test` — Vitest one-shot (runner / helper tests; node environment, no DOM)
+- `npm run test:watch` — Vitest watch mode
+- `npm run test:coverage` — Vitest with v8 coverage; output in `coverage/` (gitignored)
 
 ## Architecture
 
@@ -29,18 +32,22 @@ src/
 │   ├── Log.svelte           log entries (desktop)
 │   └── IconButton.svelte    shared corner-overlay icon button (reset / clear)
 └── lib/
-    ├── types.ts             Engine, Command, Alphabets, WorkerRequest/Response, TapeSnapshot
-    ├── caps.ts              numeric caps: VIEWPORT_WIDTH, MAX_STEPS, WORKER_TIMEOUT_MS, MAX_TAPES
-    ├── machineRunner.ts     main-thread worker wrapper; WORKER_TIMEOUT_MS round-trip cap
-    ├── machineWorker.ts     spawns user code via new Function inside worker
-    ├── demoLoop.ts          idle-mode random-command loop
-    ├── autoStep.ts          paused-auto-step controller + parseInterval
-    ├── completions.ts       CodeMirror autocomplete: machine namespace + locals
-    ├── syntaxLinter.ts      Lezer-based syntax-error markers
-    ├── persist.ts           localStorage helpers per engine — code, example, snippets (UUID-keyed)
-    ├── defaultCode.ts       starter Turing / Post snippets
-    ├── format.ts            describeAppliedCommand / formatTape / commandsEntry / tapesEntry
-    └── icons.ts             Tabler icon namespace (?raw imports)
+    ├── types.ts                Engine, Command, Alphabets, WorkerRequest/Response, TapeSnapshot
+    ├── caps.ts                 numeric caps: VIEWPORT_WIDTH, MAX_STEPS, WORKER_TIMEOUT_MS, MAX_TAPES
+    ├── machineRunner.ts        main-thread worker wrapper; WORKER_TIMEOUT_MS per-segment cap; injected workerFactory
+    ├── machineRunner.test.ts   Vitest protocol-shape suite (cites R-... / S-... scenario IDs)
+    ├── machineWorker.ts        spawns user code via new Function inside worker
+    ├── testUtils.ts            FakeWorker + makeFakeFactory test helpers
+    ├── log.ts                  log-entry types + helpers shared by Log.svelte
+    ├── demoLoop.ts             idle-mode random-command loop
+    ├── autoStep.ts             paused-auto-step controller + parseInterval
+    ├── completions.ts          CodeMirror autocomplete: machine namespace + locals
+    ├── syntaxLinter.ts         Lezer-based syntax-error markers
+    ├── persist.ts              localStorage helpers per engine — code, example, snippets (UUID-keyed)
+    ├── defaultCode.ts          starter Turing / Post snippets
+    ├── format.ts               describeAppliedCommand / formatTape / commandsEntry / tapesEntry
+    ├── icons.ts                Tabler icon namespace (?raw imports)
+    └── theme.svelte.ts         theme (light / dark) state + matchMedia watcher (Svelte 5 .svelte.ts module)
 ```
 
 **`App.svelte`** picks the active engine from the URL pathname (`/turing`, `/post`) and renders one `<MachineView engine={...}>` keyed by engine — switching engines unmounts and remounts the tab (kills CodeMirror undo, cheap CPU). Legacy `?machine=<engine>` URLs are rewritten to the path form on first load. SPA-fallback routing is required (nginx `try_files $uri $uri/ /index.html;` in `vps/nginx/sites/demo.machines.mellonis.ru`; Vite default in dev).
@@ -54,7 +61,7 @@ src/
 - `panelEnabled` / `applyVisible` / `takeControlVisible` / `loadDisabled` / `stepDisabled` / `runDisabled` / `tapeCount` — all `$derived` (single source of truth for UI state)
 - `mirrorMachine` / `mirrorTapeBlock` — a real `TuringMachine` instance on the main thread that mirrors the worker's tape state. Built by `_buildMirrorMachine` after each `reloadWorker`; advanced one step at a time by `_runMirrorStep` (uses an `ifOtherSymbol` one-step `State` so the upstream library's transitions drive the visualization, not bespoke UI code). `renderFromMirror` hands each `mirrorTapeBlock.tapes[i]` to the matching `<Tape>` via `TapesStack.setFromTape(i, tape, …)`.
 - `$effect`s for the demo loop, auto-step loop, belt-transitions toggle, and a code-changed warning (debounced via `codeChangedWarned` flag — fires once per running session)
-- `runner = new MachineRunner(engine)` and the `doLoad` / `doStep` / `doRun` / `takeControl` / `stopMachine` / `resetCodeToSelected` handlers; `reloadWorker(source?)` is the shared "build worker + rebuild mirrorMachine" helper, taking optional source code (defaults to current `code`) so DEMO can run the canonical `selectedExample.code` regardless of editor state
+- `runner = new MachineRunner(engine, () => new MachineWorker())` and the `doLoad` / `doStep` / `doRun` / `takeControl` / `stopMachine` / `resetCodeToSelected` handlers; `reloadWorker(source?)` is the shared "build worker + rebuild mirrorMachine" helper, taking optional source code (defaults to current `code`) so DEMO can run the canonical `selectedExample.code` regardless of editor state. The factory argument keeps the Vite-specific `?worker` import in `MachineView.svelte`; `machineRunner.ts` is plain TypeScript and accepts any `MachineWorkerLike` (real `Worker` or `FakeWorker` from `testUtils.ts`).
 
 **Execution model and debugger semantics:** see [`docs/execution-model.md`](docs/execution-model.md).
 

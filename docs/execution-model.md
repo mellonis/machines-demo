@@ -454,3 +454,30 @@ Upstream behaviors the spec encodes (won't change without a major upstream versi
 - [`docs/superpowers/specs/2026-05-08-worker-run-mode-design.md`](superpowers/specs/2026-05-08-worker-run-mode-design.md) — the [#40](https://github.com/mellonis/machines-demo/issues/40) design; gives the *why* behind RUNNING_PAUSED and the worker contract.
 - [#47](https://github.com/mellonis/machines-demo/issues/47) — test infrastructure that consumes the scenario IDs defined in this doc.
 - [#46](https://github.com/mellonis/machines-demo/issues/46) — issue this spec resolves.
+
+## 14. Scenario ID grammar
+
+`<prefix>-<action-or-topic>-<context-or-facet>-<flags?>`
+
+| Slot | Values |
+|---|---|
+| `S-` | literal prefix; marks the token as a UI-scenario reference. Used throughout §§4–10. |
+| `R-` | runner / worker / helper internal scenarios (no UI counterpart). Format `R-<topic>-<facet>`, e.g. `R-protocol-build`, `R-timer-suspend-on-paused`. Used in `*.test.ts` files alongside `S-...` IDs. |
+| `<action>` (S only) | `build`, `step`, `run`, `continue`, `stop`, `takectl`, `apply`, `debug-toggle`, `withpause-toggle`, `error`, `truncate`, `timeout` |
+| `<from-state>` (S only) | `demo`, `idle`, `manual`, `auto`, `cont`, `paused`, `halted` (and `step` only in §11 for legacy RUNNING_STEP citations) |
+| `<topic>` (R only) | `protocol`, `timer`, `pending`, `error`, plus equivalents for the worker / helper test scopes added by future PRs |
+| `<facet>` (R only) | short descriptor — `build`, `step-cycle`, `suspend-on-paused`, `reject-overlap`, `wraps-error-with-tapes`, etc. |
+| `<flags?>` (S only) | optional flag suffix(es); `on` / `off` (debug), `auto` / `cont` (withPause when ambiguous), or compound like `off-auto` |
+
+Conventions:
+- Lowercase + hyphen throughout. No shift key, easy to grep.
+- One token per slot. Don't run flags together.
+- Drop slots that don't matter — uniform behavior across flags ⇒ no flag suffix.
+- Stable across spec edits — prefer adding new IDs over renaming.
+- Both prefixes follow the regex `\b[SR]-[a-z-]+`. Tests / CI grep this to find every cited scenario.
+
+Where IDs live:
+- **Matrix cells** (§8): `S-step-paused-off: arm .after, resume(step), → PAUSED`. Text after `:` is the one-line outcome.
+- **Walk-throughs** (§10): each opens with `### \`S-step-paused-off\` / \`S-step-paused-on\` — Step from break` so the ID is the section anchor.
+- **Tests** ([#47](https://github.com/mellonis/machines-demo/issues/47)): each `it()` cites at least one ID. UI-flow tests cite `S-...` (component / E2E layers); runner / worker / helper tests cite `R-...`. Failing tests point straight at the spec rule they broke.
+- **§11 entries**: cite the IDs they affect when describing today's divergences.

@@ -20,11 +20,14 @@ The dev server prints a URL; open it in a browser.
 ## Scripts
 
 ```sh
-npm run dev        # Vite dev server
-npm run build      # type-check + production build into dist/
-npm run preview    # preview the built bundle
-npm run check      # svelte-check + tsc (no emit)
-npm run lint       # ESLint flat config
+npm run dev            # Vite dev server
+npm run build          # type-check + production build into dist/
+npm run preview        # preview the built bundle
+npm run check          # svelte-check + tsc (no emit)
+npm run lint           # ESLint flat config
+npm test               # Vitest one-shot (runner / helper tests)
+npm run test:watch     # Vitest watch mode
+npm run test:coverage  # Vitest with v8 coverage; output in coverage/
 ```
 
 Static bundle emitted to `dist/`. Serve with any static host. The build references hashed assets, so far-future caching is safe.
@@ -74,28 +77,35 @@ User code and the engine live inside a Web Worker. The main thread holds the UI 
 
 ```
 src/
-├── App.svelte               # header + tab nav + popstate routing
-├── app.ts                   # entry; mounts <App>
-├── app.css                  # global tokens + base styles
+├── App.svelte                  # header + tab nav + popstate routing
+├── app.ts                      # entry; mounts <App>
+├── app.css                     # global tokens + base styles
 ├── components/
-│   ├── MachineView.svelte   # per-engine orchestrator (one $state, derived disabled flags)
-│   ├── Tape.svelte          # virtualized belt with prep-shift slide trick
-│   ├── ControlPanel.svelte  # L/S/R + alphabet chips + Apply
-│   ├── Editor.svelte        # CodeMirror wrapper + localStorage persist
-│   ├── Log.svelte           # entries list (desktop) / latest line (mobile)
-│   └── IconButton.svelte    # icon + optional label
+│   ├── MachineView.svelte      # per-engine orchestrator (one $state, derived disabled flags)
+│   ├── TapesStack.svelte       # multi-tape stack with shared head-thread
+│   ├── Tape.svelte             # virtualized belt with prep-shift slide trick
+│   ├── ControlPanel.svelte     # L/S/R + alphabet chips + Apply
+│   ├── Toolbar.svelte          # Build/Step/Run/Stop + with-pause + examples menu
+│   ├── Editor.svelte           # CodeMirror wrapper + localStorage persist
+│   ├── Log.svelte              # entries list (desktop) / latest line (mobile)
+│   └── IconButton.svelte       # icon + optional label
 └── lib/
-    ├── types.ts             # Engine, Command, WorkerRequest/Response, ...
-    ├── runner.ts            # main-thread worker wrapper, 5s timeout
-    ├── worker.ts            # spawns user code via new Function inside worker
-    ├── demoLoop.ts          # idle-mode random-command loop
-    ├── autoStep.ts          # paused-auto-step controller
-    ├── completions.ts       # CodeMirror autocomplete from machine namespace
-    ├── syntaxLinter.ts      # Lezer-based syntax-error markers
-    ├── persist.ts           # localStorage helpers per engine
-    ├── defaultCode.ts       # starter Turing / Post snippets
-    ├── format.ts            # describeCommand / formatTape / formatAlphabet
-    └── icons.ts             # Tabler icon namespace
+    ├── types.ts                # Engine, Command, WorkerRequest/Response, TapeSnapshot, ...
+    ├── caps.ts                 # numeric caps: VIEWPORT_WIDTH, MAX_STEPS, WORKER_TIMEOUT_MS, MAX_TAPES
+    ├── machineRunner.ts        # main-thread worker wrapper; per-segment timeout; injected workerFactory
+    ├── machineRunner.test.ts   # Vitest protocol-shape suite
+    ├── machineWorker.ts        # spawns user code via new Function inside worker
+    ├── testUtils.ts            # FakeWorker + makeFakeFactory test helpers
+    ├── log.ts                  # log-entry types + helpers
+    ├── demoLoop.ts             # idle-mode random-command loop
+    ├── autoStep.ts             # paused-auto-step controller
+    ├── completions.ts          # CodeMirror autocomplete from machine namespace
+    ├── syntaxLinter.ts         # Lezer-based syntax-error markers
+    ├── persist.ts              # localStorage helpers per engine
+    ├── defaultCode.ts          # starter Turing / Post snippets
+    ├── format.ts               # describeAppliedCommand / formatTape / commandsEntry / tapesEntry
+    ├── icons.ts                # Tabler icon namespace
+    └── theme.svelte.ts         # theme (light / dark) state + matchMedia watcher
 ```
 
 ## License
