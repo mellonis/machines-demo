@@ -65,4 +65,23 @@ describe('Toolbar', () => {
       expect(screen.queryByRole('button', { name: /^step$/i })).not.toBeInTheDocument();
     });
   });
+
+  describe('disabled', () => {
+    it('C-toolbar-disabled-build: loadDisabled disables Build button', () => {
+      render(Toolbar, { props: { ...defaultProps(), loadDisabled: true } });
+      expect(screen.getByRole('button', { name: /^build$/i })).toBeDisabled();
+    });
+
+    it('C-toolbar-disabled-step: stepDisabled disables Step button', () => {
+      render(Toolbar, { props: { ...defaultProps(), stepDisabled: true } });
+      expect(screen.getByRole('button', { name: /^step$/i })).toBeDisabled();
+    });
+
+    it('C-toolbar-disabled-run-cascade: runDisabled disables Run + with-pause + debug', () => {
+      render(Toolbar, { props: { ...defaultProps(), executionMode: 'DEMO', runDisabled: true } });
+      expect(screen.getByRole('button', { name: /^run$/i })).toBeDisabled();
+      expect(screen.getByRole('checkbox', { name: /with pause/i })).toBeDisabled();
+      expect(screen.getByRole('checkbox', { name: /^debug$/i })).toBeDisabled();
+    });
+  });
 });
