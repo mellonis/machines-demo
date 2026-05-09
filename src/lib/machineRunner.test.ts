@@ -1,6 +1,8 @@
-import { describe, it, expect } from 'vitest';
-import { MAX_STEPS } from './caps';
-import { MachineRunner } from './machineRunner';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { MAX_STEPS, WORKER_TIMEOUT_MS } from './caps';
+// @ts-expect-error — WorkerError used in Task 3
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+import { MachineRunner, WorkerError } from './machineRunner';
 import { type PausedResponse } from './types';
 import { makeFakeFactory } from './testUtils';
 
@@ -276,6 +278,153 @@ describe('MachineRunner', () => {
         stepsApplied: 0,
       });
       await runPromise;
+    });
+  });
+
+  describe('timer', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('R-timer-build-timeout: build with no response rejects with timeout error and terminates worker', async () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const buildPromise = runner.build('// user code');
+      await vi.advanceTimersByTimeAsync(WORKER_TIMEOUT_MS);
+
+      await expect(buildPromise).rejects.toThrow(
+        `timeout after ${WORKER_TIMEOUT_MS}ms — worker terminated (likely infinite loop)`,
+      );
+      expect(current().terminated).toBe(true);
+    });
+
+    it('R-timer-step-timeout: step with no response rejects with timeout error and terminates worker', async () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const buildPromise = runner.build('// user code');
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      await buildPromise;
+
+      const stepPromise = runner.step();
+      await vi.advanceTimersByTimeAsync(WORKER_TIMEOUT_MS);
+
+      await expect(stepPromise).rejects.toThrow(/timeout after/);
+      expect(current().terminated).toBe(true);
+    });
+
+    it('R-timer-run-timeout-no-paused: run with no paused/ran rejects with timeout error and terminates worker', async () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const buildPromise = runner.build('// user code');
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      await buildPromise;
+
+      const runPromise = runner.run({ debug: true, onPaused: () => {} });
+      await vi.advanceTimersByTimeAsync(WORKER_TIMEOUT_MS);
+
+      await expect(runPromise).rejects.toThrow(/timeout after/);
+      expect(current().terminated).toBe(true);
+    });
+
+    it('R-timer-suspend-on-paused: paused clears the timer; advancing past WORKER_TIMEOUT_MS does not reject', async () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const buildPromise = runner.build('// user code');
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      await buildPromise;
+
+      const runPromise = runner.run({ debug: true, onPaused: () => {} });
+      current().respond({
+        type: 'paused',
+        tapes: [],
+        commands: [],
+        stepsApplied: 1,
+        state: 'q1',
+        currentSymbols: ['a'],
+        debugBreak: { before: true as const },
+      });
+
+      // Advance time well past the timeout — paused should have cleared it.
+      await vi.advanceTimersByTimeAsync(WORKER_TIMEOUT_MS * 2);
+
+      // Run should still be pending.
+      let runSettled = false;
+      void runPromise.then(
+        () => { runSettled = true; },
+        () => { runSettled = true; },
+      );
+      await Promise.resolve();
+      expect(runSettled).toBe(false);
+
+      // Settle cleanly so the test doesn't leak a pending Promise.
+      current().respond({
+        type: 'ran',
+        tapes: [],
+        truncated: false,
+        commands: [],
+        startStep: 0,
+        stepsApplied: 1,
+      });
+      await runPromise;
+    });
+
+    it('R-timer-restart-on-resume: resume re-arms the timer; advancing past WORKER_TIMEOUT_MS rejects', async () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const buildPromise = runner.build('// user code');
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      await buildPromise;
+
+      const runPromise = runner.run({ debug: true, onPaused: () => {} });
+      current().respond({
+        type: 'paused',
+        tapes: [],
+        commands: [],
+        stepsApplied: 1,
+        state: 'q1',
+        currentSymbols: ['a'],
+        debugBreak: { before: true as const },
+      });
+
+      runner.resume(false);
+      await vi.advanceTimersByTimeAsync(WORKER_TIMEOUT_MS);
+
+      await expect(runPromise).rejects.toThrow(/timeout after/);
+    });
+
+    it('R-timer-cleared-on-ran: ran response clears the timer; subsequent time advance has no effect', async () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const buildPromise = runner.build('// user code');
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      await buildPromise;
+
+      const runPromise = runner.run();
+      current().respond({
+        type: 'ran',
+        tapes: [],
+        truncated: false,
+        commands: [],
+        startStep: 0,
+        stepsApplied: 0,
+      });
+      await runPromise;
+
+      // Advance time past WORKER_TIMEOUT_MS — should be a no-op since the timer was cleared on ran.
+      await vi.advanceTimersByTimeAsync(WORKER_TIMEOUT_MS * 2);
+
+      // If the timer had still been alive, it would have called terminate().
+      expect(current().terminated).toBe(false);
     });
   });
 });
