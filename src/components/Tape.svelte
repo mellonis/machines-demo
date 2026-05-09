@@ -95,7 +95,7 @@
   <div class="viewport">
     <div class="center">
       <div class="strip transitions-on" bind:this={stripEl}>
-        {#each viewport as cell}
+        {#each viewport as cell, i (i)}
           <div class="cell" class:blank={cell.blank} data-testid="tape-cell" data-blank={cell.blank}>
             <span class="sym">{cell.sym}</span>
           </div>
