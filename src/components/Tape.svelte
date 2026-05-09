@@ -90,12 +90,13 @@
   class="ui-belt"
   class:no-caret={!showCaret}
   style={caretColor ? `--head: ${caretColor};` : undefined}
+  data-testid="tape"
 >
   <div class="viewport">
     <div class="center">
       <div class="strip transitions-on" bind:this={stripEl}>
         {#each viewport as cell}
-          <div class="cell" class:blank={cell.blank}>
+          <div class="cell" class:blank={cell.blank} data-testid="tape-cell" data-blank={cell.blank}>
             <span class="sym">{cell.sym}</span>
           </div>
         {/each}
