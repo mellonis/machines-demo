@@ -28,6 +28,8 @@ npm run lint           # ESLint flat config
 npm test               # Vitest one-shot (runner / helper tests)
 npm run test:watch     # Vitest watch mode
 npm run test:coverage  # Vitest with v8 coverage; output in coverage/
+npm run test:e2e       # Playwright E2E (Chromium; runs `vite preview` automatically)
+npm run test:e2e:ui    # Playwright interactive mode for local debugging
 ```
 
 Static bundle emitted to `dist/`. Serve with any static host. The build references hashed assets, so far-future caching is safe.
@@ -109,6 +111,11 @@ src/
     ├── format.ts               # describeAppliedCommand / formatTape / commandsEntry / tapesEntry
     ├── icons.ts                # Tabler icon namespace
     └── theme.svelte.ts         # theme (light / dark) state + matchMedia watcher
+
+e2e/
+└── cold-start.spec.ts            # Playwright E2E — 4 cold-start scenarios
+
+playwright.config.ts              # Chromium project; webServer = vite preview
 ```
 
 ## License

@@ -14,6 +14,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `npm test` — Vitest one-shot. Runner / helper tests run in node; component tests opt into happy-dom via the `// @vitest-environment happy-dom` per-file pragma. `vitest.setup.ts` registers `@testing-library/jest-dom` matchers globally.
 - `npm run test:watch` — Vitest watch mode
 - `npm run test:coverage` — Vitest with v8 coverage; output in `coverage/` (gitignored)
+- `npm run test:e2e` — Playwright E2E (Chromium; runs `vite preview` automatically; tests in `e2e/`)
+- `npm run test:e2e:ui` — Playwright interactive mode for local debugging
 
 ## Architecture
 
@@ -51,6 +53,15 @@ src/
     ├── format.ts               describeAppliedCommand / formatTape / commandsEntry / tapesEntry
     ├── icons.ts                Tabler icon namespace (?raw imports)
     └── theme.svelte.ts         theme (light / dark) state + matchMedia watcher (Svelte 5 .svelte.ts module)
+
+e2e/
+└── cold-start.spec.ts          Playwright E2E — 4 cold-start scenarios (cites E-cold-start-...)
+
+playwright.config.ts            Chromium project; webServer runs `npm run preview`
+
+.github/workflows/
+├── main.yml                    CD: build + rsync to VPS on push to master
+└── test.yml                    PR gate: check / lint / vitest / playwright
 ```
 
 **`App.svelte`** picks the active engine from the URL pathname (`/turing`, `/post`) and renders one `<MachineView engine={...}>` keyed by engine — switching engines unmounts and remounts the tab (kills CodeMirror undo, cheap CPU). Legacy `?machine=<engine>` URLs are rewritten to the path form on first load. SPA-fallback routing is required (nginx `try_files $uri $uri/ /index.html;` in `vps/nginx/sites/demo.machines.mellonis.ru`; Vite default in dev).
@@ -137,6 +148,7 @@ A `.head-thread` div sits behind the stack as the first child of `.tapes-stack` 
 - **No static literal fallbacks in `var()`.** A `var()` fallback must itself be another CSS custom property (e.g. `var(--dot, var(--head))`) — never a hardcoded color, length, or time. Literals leak out of the design system and bypass theming. Two patterns satisfy this:
   - **Globally-scoped tokens** (colors, surface vars, animation timings) — declared in `:root` in `app.css`. Optionally promoted to `@property` for type-checking and animatable customs (e.g. `@property --anim-button-hover-ms { syntax: '<time>'; inherits: true; initial-value: 120ms }`). When `@property`'s `initial-value` must mirror another token (it can't reference `var()`), document the coupling with a `/* follows --x — keep in sync when theming */` comment above the literal value.
   - **Optional, per-element customs** (e.g. `--dot` in `ControlPanel.svelte`) — either fall back to another token at the read site (`var(--dot, var(--head))`) or declare a class-level default (`.tape-dot { --dot: var(--head); background: var(--dot) }`). Pick the class-level default when the same custom is read in multiple places, the inline fallback when it's a one-off.
+- **Selector convention for E2E**: buttons use accessible names (text content, role-based queries via Playwright's `getByRole`); non-button DOM (tape cells, log entries, container wrappers) uses `data-testid` attributes (e.g. `data-testid="tape-cell"`, `data-testid="log-line"`). Tape cells additionally carry `data-blank={cell.blank}` and log lines carry `data-kind={entry.kind ?? ''}` for filter-by-attribute queries.
 
 ## Snippets
 
