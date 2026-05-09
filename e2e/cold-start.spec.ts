@@ -16,7 +16,7 @@ test.describe('cold-start', () => {
     // Default Turing example transforms ['a','b','c','b','a'] → ['a','*','c','*','a'].
     // Tape.svelte renders VIEWPORT_WIDTH=23 cells per tape; the * count among
     // the rendered cells is 2 (both 'b's were replaced).
-    const cells = await page.getByTestId('tape-cell').allInnerTexts();
+    const cells = await page.getByTestId('tape').first().getByTestId('tape-cell').allInnerTexts();
     expect(cells.filter((s) => s === '*').length).toBe(2);
   });
 
@@ -69,6 +69,7 @@ test.describe('cold-start', () => {
 
     // Stop returns the machine to MANUAL with workerLive=true: Run/Step stay
     // clickable so the user can keep poking the same machine state.
+    await expect(page.getByRole('button', { name: /^stop$/i })).toBeVisible();
     await page.getByRole('button', { name: /^stop$/i }).click();
     await expect(
       page.getByTestId('log-line').filter({ hasText: /^stopped/ }),
