@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "svelte-check --tsconfig ./tsconfig.json && vite build",
-    "preview": "vite preview",
+    "preview": "vite preview --host 127.0.0.1",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "lint": "eslint .",
     "test": "vitest run",
