@@ -5,6 +5,7 @@ import {
   commandsFromYield,
   snapshotTapes,
   snapshotAlphabets,
+  expectPhase,
   type MachineYield,
   type TapeLike,
 } from './workerHelpers';
@@ -121,6 +122,23 @@ describe('workerHelpers', () => {
         [' ', 'a'],
         [' ', 'b', 'c'],
       ]);
+    });
+  });
+
+  describe('phase-guard', () => {
+    it('R-phase-guard-allows: does not throw when current is in allowed list', () => {
+      expect(() => expectPhase('built', ['idle', 'built'])).not.toThrow();
+      expect(() => expectPhase('paused', ['paused'])).not.toThrow();
+    });
+
+    it('R-phase-guard-rejects: throws when current is not in allowed list', () => {
+      expect(() => expectPhase('idle', ['built'])).toThrow();
+      expect(() => expectPhase('running', ['idle', 'built'])).toThrow();
+    });
+
+    it('R-phase-guard-message-format: error message reads `worker phase X, expected Y|Z`', () => {
+      expect(() => expectPhase('idle', ['built', 'paused']))
+        .toThrow('worker phase idle, expected built|paused');
     });
   });
 });
