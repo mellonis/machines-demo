@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { MAX_STEPS } from './caps';
 import { MachineRunner } from './machineRunner';
+import { type PausedResponse } from './types';
 import { makeFakeFactory } from './testUtils';
 
 describe('MachineRunner', () => {
@@ -138,7 +139,7 @@ describe('MachineRunner', () => {
         stepsApplied: 1,
         state: 'q1',
         currentSymbols: ['a'],
-        debugBreak: { before: true },
+        debugBreak: { before: true as const },
       });
       expect(pausedSeen).toBe(true);
 
@@ -204,7 +205,7 @@ describe('MachineRunner', () => {
       current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
       await buildPromise;
 
-      const pausedPayloads: Parameters<NonNullable<Parameters<MachineRunner['run']>[0]>['onPaused']>[0][] = [];
+      const pausedPayloads: PausedResponse[] = [];
       const runPromise = runner.run({
         debug: true,
         onPaused: (p) => {
@@ -219,7 +220,7 @@ describe('MachineRunner', () => {
         stepsApplied: 1,
         state: 'q1',
         currentSymbols: ['a'],
-        debugBreak: { before: true },
+        debugBreak: { before: true as const },
       };
       current().respond(pausedPayload);
 
