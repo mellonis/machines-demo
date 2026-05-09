@@ -1,4 +1,3 @@
-import MachineWorker from './machineWorker.ts?worker';
 import { MAX_STEPS, WORKER_TIMEOUT_MS } from './caps.ts';
 import {
   type BuiltResponse,
@@ -27,6 +26,15 @@ export class WorkerError extends Error {
   }
 }
 
+export interface MachineWorkerLike {
+  postMessage(msg: WorkerRequest): void;
+  terminate(): void;
+  onmessage: ((e: MessageEvent<WorkerResponse>) => void) | null;
+  onerror: ((e: ErrorEvent) => void) | null;
+}
+
+export type WorkerFactory = () => MachineWorkerLike;
+
 type SimplePending = {
   resolve: (data: WorkerResponse) => void;
   reject: (err: Error) => void;
@@ -42,12 +50,14 @@ type RunPending = {
 
 export class MachineRunner {
   readonly engine: Engine;
-  private worker: Worker | null = null;
+  private worker: MachineWorkerLike | null = null;
+  private workerFactory: WorkerFactory;
   private simplePending: SimplePending | null = null;
   private runPending: RunPending | null = null;
 
-  constructor(engine: Engine) {
+  constructor(engine: Engine, workerFactory: WorkerFactory) {
     this.engine = engine;
+    this.workerFactory = workerFactory;
   }
 
   private rejectAll(err: Error): void {
@@ -69,7 +79,7 @@ export class MachineRunner {
       this.worker.terminate();
       this.worker = null;
     }
-    this.worker = new MachineWorker();
+    this.worker = this.workerFactory();
     this.worker.onmessage = (e: MessageEvent<WorkerResponse>) => this.onMessage(e.data);
     this.worker.onerror = (e) => this.onWorkerError(e);
   }

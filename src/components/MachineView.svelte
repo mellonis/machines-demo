@@ -5,6 +5,7 @@
   import ControlPanel from './ControlPanel.svelte';
   import Log from './Log.svelte';
   import type { LogEntry, LogKind } from '../lib/log.ts';
+  import MachineWorker from '../lib/machineWorker.ts?worker';
   import { MachineRunner, WorkerError } from '../lib/machineRunner.ts';
   import * as turing from '@turing-machine-js/machine';
   import { VIEWPORT_WIDTH } from '../lib/caps.ts';
@@ -130,7 +131,7 @@
   // the editor chunk loads in parallel and slots in once ready.
   const editorPromise = import('./Editor.svelte').then((m) => m.default);
 
-  const runner = new MachineRunner(untrack(() => engine));
+  const runner = new MachineRunner(untrack(() => engine), () => new MachineWorker());
 
   /* ───── derived ─────
    * Single source of truth for button-disabled state and panel visibility.
