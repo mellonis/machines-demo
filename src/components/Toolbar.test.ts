@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/svelte';
+import { render, screen, cleanup, fireEvent } from '@testing-library/svelte';
 import Toolbar from './Toolbar.svelte';
 import type { Example } from '../lib/defaultCode';
 import type { Snippets } from '../lib/persist';
@@ -106,6 +106,50 @@ describe('Toolbar', () => {
     it('C-toolbar-stop-hidden-halted: Stop button absent in HALTED', () => {
       render(Toolbar, { props: { ...defaultProps(), executionMode: 'HALTED' } });
       expect(screen.queryByRole('button', { name: /^stop$/i })).not.toBeInTheDocument();
+    });
+  });
+
+  describe('interval', () => {
+    it('C-toolbar-interval-invalid: intervalIsValid=false marks input .invalid', () => {
+      render(Toolbar, {
+        props: {
+          ...defaultProps(),
+          executionMode: 'DEMO',
+          withPause: true,
+          intervalIsValid: false,
+        },
+      });
+      const input = screen.getByPlaceholderText('1s');
+      expect(input.classList.contains('invalid')).toBe(true);
+    });
+  });
+
+  describe('callbacks', () => {
+    it('C-toolbar-callback-build: clicking Build invokes onBuild', async () => {
+      const props = defaultProps();
+      render(Toolbar, { props });
+      await fireEvent.click(screen.getByRole('button', { name: /^build$/i }));
+      expect(props.onBuild).toHaveBeenCalledTimes(1);
+    });
+
+    it('C-toolbar-callback-step: clicking Step invokes onStep', async () => {
+      const props = defaultProps();
+      render(Toolbar, { props });
+      await fireEvent.click(screen.getByRole('button', { name: /^step$/i }));
+      expect(props.onStep).toHaveBeenCalledTimes(1);
+    });
+
+    it('C-toolbar-callback-run-stop: Run invokes onRun; Stop (in RUNNING_STEP) invokes onStop', async () => {
+      const propsA = defaultProps();
+      const { unmount } = render(Toolbar, { props: propsA });
+      await fireEvent.click(screen.getByRole('button', { name: /^run$/i }));
+      expect(propsA.onRun).toHaveBeenCalledTimes(1);
+      unmount();
+
+      const propsB = { ...defaultProps(), executionMode: 'RUNNING_STEP' as Mode };
+      render(Toolbar, { props: propsB });
+      await fireEvent.click(screen.getByRole('button', { name: /^stop$/i }));
+      expect(propsB.onStop).toHaveBeenCalledTimes(1);
     });
   });
 });
