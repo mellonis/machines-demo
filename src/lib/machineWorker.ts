@@ -13,13 +13,20 @@
 
 import * as turing from '@turing-machine-js/machine';
 import * as post from '@post-machine-js/machine';
+import {
+  commandsFromYield,
+  snapshotTapes,
+  snapshotAlphabets,
+  expectPhase,
+  armStepAfter,
+  type MachineYield,
+  type DebugTarget,
+} from './workerHelpers';
 
 import { MAX_STEPS, MAX_TAPES } from './caps.ts';
 import {
   type Command,
   type Engine,
-  type Movement,
-  type TapeSnapshot,
   type WorkerRequest,
   type WorkerResponse,
 } from './types.ts';
@@ -59,12 +66,6 @@ type AnyTape = {
   symbols: string[];
   position: number;
   alphabet: { symbols: string[]; blankSymbol: string };
-};
-
-type MachineYield = {
-  movements: symbol[];
-  currentSymbols: string[];
-  nextSymbols: string[];
 };
 
 /* ───── sandbox: ban ambient capabilities user code shouldn't reach ─────
@@ -170,51 +171,6 @@ function reset(): void {
   stepPending = false;
 }
 
-function expectPhase(...allowed: WorkerPhase['kind'][]): void {
-  if (!allowed.includes(phase.kind)) {
-    throw new Error(
-      `worker phase ${phase.kind}, expected ${allowed.join('|')}`,
-    );
-  }
-}
-
-function movementCode(m: symbol): Movement {
-  if (m === turing.movements.left) return 'L';
-  if (m === turing.movements.right) return 'R';
-  return 'S';
-}
-
-function commandsFromYield(y: MachineYield): Command[] {
-  // `mv` is a JS Symbol primitive (the upstream library encodes movements as
-  // unique Symbols — `turing.movements.left/right/stay`). Kept short here to
-  // avoid shadowing the surrounding string-typed `movement` (the wire-format
-  // 'L' | 'R' | 'S' code).
-  return y.movements.map((mv, i) => {
-    const movement = movementCode(mv);
-    const written = y.nextSymbols[i];
-    const before = y.currentSymbols[i];
-    return { movement, symbol: written === before ? null : written };
-  });
-}
-
-function snapshotTapes(): TapeSnapshot[] {
-  // Sent on `loaded` (initial state), `ran` (post-run state — halted or
-  // truncated), and `error` (partial state when a step / run threw mid-flight,
-  // e.g. no edge in the state graph for the current symbol). Full tape — no
-  // trim — so the main-thread mirror starts from the user's exact tape and
-  // the user can navigate beyond the initial window without blanks appearing
-  // where original symbols should be. We don't mutate `t.viewportWidth`
-  // either; user tapes stay at the library default.
-  return tapes.map((t) => ({
-    symbols: [...t.symbols],
-    position: t.position,
-  }));
-}
-
-function snapshotAlphabets(): string[][] {
-  return tapes.map((t) => [...t.alphabet.symbols]);
-}
-
 function build(engine: Engine, code: string): void {
   reset();
   const imports: Record<string, unknown> =
@@ -279,7 +235,7 @@ function build(engine: Engine, code: string): void {
 }
 
 function step(): { commands: Command[] | null; nextCommands: Command[] | null; halted: boolean } {
-  expectPhase('built');
+  expectPhase(phase.kind, ['built']);
   const built = phase as Extract<WorkerPhase, { kind: 'built' }>;
   if (built.halted || !pendingCommand || !generator) {
     return { commands: null, nextCommands: null, halted: true };
@@ -305,7 +261,7 @@ async function run(
   debug: boolean,
   step: boolean,
 ): Promise<{ truncated: boolean; startStep: number }> {
-  expectPhase('built');
+  expectPhase(phase.kind, ['built']);
   const built = phase as Extract<WorkerPhase, { kind: 'built' }>;
   if (built.halted || !machine) throw new Error('cannot run: halted or not built');
 
@@ -335,12 +291,8 @@ async function run(
   // still fires naturally on iter 1; we never inject one ourselves, since
   // that would surface as an unauthored pre-iter pause.
   if (step && initialState) {
-    const target = initialState as { debug: { before?: unknown; after?: unknown } | null };
-    const original = target.debug;
-    const newDebug: { before?: unknown; after?: unknown } = { after: true };
-    if (original?.before !== undefined) newDebug.before = original.before;
-    target.debug = newDebug;
-    pendingRestore = () => { target.debug = original; };
+    const { restore } = armStepAfter(initialState as DebugTarget);
+    pendingRestore = restore;
     stepPending = true;
   }
 
@@ -373,7 +325,7 @@ async function run(
         phase = { kind: 'paused' };
         send({
           type: 'paused',
-          tapes: snapshotTapes(),
+          tapes: snapshotTapes(tapes),
           commands: commandsBatch,
           stepsApplied,
           state: m.state.name ?? '',
@@ -389,21 +341,15 @@ async function run(
         phase = { kind: 'running' };
         if (action.step) {
           stepPending = true;
-          // Arm the iteration-we're-stepping-through's state.debug.after = true
-          // so its after-fire fires (in the next iteration's body) and we can
-          // pause there. For a `before` break: m IS that iteration (m.state).
+          // For a `before` break: m IS the iteration we want to step through.
           // For an `after` break (m substituted to prevYield): the next iter's
-          // state lives at m.nextState. Preserve any original `before` filter.
-          // Read .before via the getter (DebugConfig accessor — spread skips it).
+          // state lives at m.nextState. armStepAfter handles the .before
+          // preservation and returns a restore function.
           const target = (
             m.debugBreak?.before ? m.state : m.nextState
-          ) as { debug: { before?: unknown; after?: unknown } | null };
-          const original = target.debug;
-          const preservedBefore = original?.before;
-          const newDebug: { before?: unknown; after?: unknown } = { after: true };
-          if (preservedBefore !== undefined) newDebug.before = preservedBefore;
-          target.debug = newDebug;
-          pendingRestore = () => { target.debug = original; };
+          ) as DebugTarget;
+          const { restore } = armStepAfter(target);
+          pendingRestore = restore;
         }
       };
 
@@ -472,8 +418,8 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
       const built = phase as Extract<WorkerPhase, { kind: 'built' }>;
       send({
         type: 'built',
-        tapes: snapshotTapes(),
-        alphabets: snapshotAlphabets(),
+        tapes: snapshotTapes(tapes),
+        alphabets: snapshotAlphabets(tapes),
         halted: built.halted,
       });
       return;
@@ -499,7 +445,7 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
       );
       send({
         type: 'ran',
-        tapes: snapshotTapes(),
+        tapes: snapshotTapes(tapes),
         truncated,
         commands: runCommandBuffer,
         startStep,
@@ -510,7 +456,7 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
     }
 
     if (req.type === 'resume') {
-      expectPhase('paused');
+      expectPhase(phase.kind, ['paused']);
       const r = resumeResolve;
       if (!r) throw new Error('resume: no pending Promise');
       r({ step: req.step ?? false });
@@ -535,7 +481,7 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
     send({
       type: 'error',
       message: err instanceof Error ? err.message : String(err),
-      tapes: tapes.length > 0 ? snapshotTapes() : undefined,
+      tapes: tapes.length > 0 ? snapshotTapes(tapes) : undefined,
     });
   }
 }
