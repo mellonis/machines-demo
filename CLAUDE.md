@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `npm run preview` — preview the built bundle
 - `npm run check` — `svelte-check` + `tsc --noEmit`
 - `npm run lint` — ESLint flat config (typescript-eslint + eslint-plugin-svelte)
-- `npm test` — Vitest one-shot (runner / helper tests; node environment, no DOM)
+- `npm test` — Vitest one-shot. Runner / helper tests run in node; component tests opt into happy-dom via the `// @vitest-environment happy-dom` per-file pragma. `vitest.setup.ts` registers `@testing-library/jest-dom` matchers globally.
 - `npm run test:watch` — Vitest watch mode
 - `npm run test:coverage` — Vitest with v8 coverage; output in `coverage/` (gitignored)
 
@@ -28,6 +28,7 @@ src/
 │   ├── Tape.svelte          single horizontal belt (renders a turing.Tape)
 │   ├── ControlPanel.svelte  L/S/R + alphabet chips + Apply
 │   ├── Toolbar.svelte       Build/Step/Run/Stop + with-pause + examples menu
+│   ├── Toolbar.test.ts      Vitest suite for Toolbar — runLabel / disabled / visibility / interval / callbacks (cites C-toolbar-...)
 │   ├── Editor.svelte        CodeMirror 6 wrapper + reset overlay
 │   ├── Log.svelte           log entries (desktop)
 │   └── IconButton.svelte    shared corner-overlay icon button (reset / clear)
