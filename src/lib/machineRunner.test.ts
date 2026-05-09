@@ -195,5 +195,58 @@ describe('MachineRunner', () => {
       // No build yet, so no worker. setDebug must not throw.
       expect(() => runner.setDebug(true)).not.toThrow();
     });
+
+    it('R-protocol-paused-then-ran: run() invokes onPaused on paused, resolves on ran', async () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const buildPromise = runner.build('// user code');
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      await buildPromise;
+
+      const pausedPayloads: Parameters<NonNullable<Parameters<MachineRunner['run']>[0]>['onPaused']>[0][] = [];
+      const runPromise = runner.run({
+        debug: true,
+        onPaused: (p) => {
+          pausedPayloads.push(p);
+        },
+      });
+
+      const pausedPayload = {
+        type: 'paused' as const,
+        tapes: [],
+        commands: [],
+        stepsApplied: 1,
+        state: 'q1',
+        currentSymbols: ['a'],
+        debugBreak: { before: true },
+      };
+      current().respond(pausedPayload);
+
+      // onPaused fired with the payload.
+      expect(pausedPayloads).toHaveLength(1);
+      expect(pausedPayloads[0]).toEqual(pausedPayload);
+
+      // Run still pending.
+      let runSettled = false;
+      void runPromise.then(() => {
+        runSettled = true;
+      });
+      await Promise.resolve();
+      expect(runSettled).toBe(false);
+
+      // Now finish the run.
+      const ranPayload = {
+        type: 'ran' as const,
+        tapes: [],
+        truncated: false,
+        commands: [],
+        startStep: 0,
+        stepsApplied: 5,
+      };
+      current().respond(ranPayload);
+
+      await expect(runPromise).resolves.toEqual(ranPayload);
+    });
   });
 });
