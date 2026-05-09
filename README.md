@@ -86,6 +86,7 @@ src/
 │   ├── Tape.svelte             # virtualized belt with prep-shift slide trick
 │   ├── ControlPanel.svelte     # L/S/R + alphabet chips + Apply
 │   ├── Toolbar.svelte          # Build/Step/Run/Stop + with-pause + examples menu
+│   ├── Toolbar.test.ts         # Vitest suite for Toolbar — 5 topic groups
 │   ├── Editor.svelte           # CodeMirror wrapper + localStorage persist
 │   ├── Log.svelte              # entries list (desktop) / latest line (mobile)
 │   └── IconButton.svelte       # icon + optional label
