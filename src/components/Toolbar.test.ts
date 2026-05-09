@@ -84,4 +84,28 @@ describe('Toolbar', () => {
       expect(screen.getByRole('checkbox', { name: /^debug$/i })).toBeDisabled();
     });
   });
+
+  describe('visibility', () => {
+    it('C-toolbar-config-visible-demo: with-pause + debug checkboxes render in DEMO', () => {
+      render(Toolbar, { props: { ...defaultProps(), executionMode: 'DEMO' } });
+      expect(screen.getByRole('checkbox', { name: /with pause/i })).toBeInTheDocument();
+      expect(screen.getByRole('checkbox', { name: /^debug$/i })).toBeInTheDocument();
+    });
+
+    it('C-toolbar-config-hidden-running-auto: config row absent in RUNNING_AUTO', () => {
+      render(Toolbar, { props: { ...defaultProps(), executionMode: 'RUNNING_AUTO' } });
+      expect(screen.queryByRole('checkbox', { name: /with pause/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('checkbox', { name: /^debug$/i })).not.toBeInTheDocument();
+    });
+
+    it('C-toolbar-stop-visible-running-step: Stop button renders in RUNNING_STEP', () => {
+      render(Toolbar, { props: { ...defaultProps(), executionMode: 'RUNNING_STEP' } });
+      expect(screen.getByRole('button', { name: /^stop$/i })).toBeInTheDocument();
+    });
+
+    it('C-toolbar-stop-hidden-halted: Stop button absent in HALTED', () => {
+      render(Toolbar, { props: { ...defaultProps(), executionMode: 'HALTED' } });
+      expect(screen.queryByRole('button', { name: /^stop$/i })).not.toBeInTheDocument();
+    });
+  });
 });
