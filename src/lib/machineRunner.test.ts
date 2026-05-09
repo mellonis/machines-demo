@@ -113,5 +113,63 @@ describe('MachineRunner', () => {
 
       await runPromise;
     });
+
+    it('R-protocol-resume: posts {type:"resume",step} and does not resolve the run promise', async () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      // Build, then start a run with onPaused.
+      const buildPromise = runner.build('// user code');
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      await buildPromise;
+
+      let pausedSeen = false;
+      const runPromise = runner.run({
+        onPaused: () => {
+          pausedSeen = true;
+        },
+      });
+
+      // Worker pauses.
+      current().respond({
+        type: 'paused',
+        tapes: [],
+        commands: [],
+        stepsApplied: 1,
+        state: 'q1',
+        currentSymbols: ['a'],
+        debugBreak: { before: true },
+      });
+      expect(pausedSeen).toBe(true);
+
+      // Now resume(step=true).
+      runner.resume(true);
+
+      expect(current().last).toEqual({ type: 'resume', step: true });
+
+      // Run promise still pending — resolves only on `ran`/`error`.
+      // Sanity check: settle a microtask, ensure no resolution yet.
+      let runResolved = false;
+      void runPromise.then(() => {
+        runResolved = true;
+      });
+      await Promise.resolve();
+      expect(runResolved).toBe(false);
+
+      // Default resume() posts step:false.
+      runner.resume();
+      expect(current().last).toEqual({ type: 'resume', step: false });
+
+      // Cleanly settle the pending run by responding with `ran`.
+      current().respond({
+        type: 'ran',
+        tapes: [],
+        truncated: false,
+        commands: [],
+        startStep: 0,
+        stepsApplied: 1,
+      });
+      await runPromise;
+    });
   });
 });
