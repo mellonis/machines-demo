@@ -93,8 +93,10 @@ src/
     ├── types.ts                # Engine, Command, WorkerRequest/Response, TapeSnapshot, ...
     ├── caps.ts                 # numeric caps: VIEWPORT_WIDTH, MAX_STEPS, WORKER_TIMEOUT_MS, MAX_TAPES
     ├── machineRunner.ts        # main-thread worker wrapper; per-segment timeout; injected workerFactory
-    ├── machineRunner.test.ts   # Vitest protocol-shape suite
+    ├── machineRunner.test.ts   # Vitest suite for MachineRunner — protocol-shape / timer / pending / error
     ├── machineWorker.ts        # spawns user code via new Function inside worker
+    ├── workerHelpers.ts        # pure helpers extracted from machineWorker (movementCode, commandsFromYield, snapshot*, expectPhase, armStepAfter)
+    ├── workerHelpers.test.ts   # Vitest suite for workerHelpers — 5 topic groups
     ├── testUtils.ts            # FakeWorker + makeFakeFactory test helpers
     ├── log.ts                  # log-entry types + helpers
     ├── demoLoop.ts             # idle-mode random-command loop
