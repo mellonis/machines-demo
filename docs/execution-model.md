@@ -464,9 +464,10 @@ Upstream behaviors the spec encodes (won't change without a major upstream versi
 | `S-` | literal prefix; marks the token as a UI-scenario reference. Used throughout §§4–10. |
 | `R-` | runner / worker / helper internal scenarios (no UI counterpart). Format `R-<topic>-<facet>`, e.g. `R-protocol-build`, `R-timer-suspend-on-paused`. Used in `*.test.ts` files alongside `S-...` IDs. |
 | `C-` | component-test scenarios. Format `C-<component>-<facet>`, e.g. `C-toolbar-run-label-default`, `C-toolbar-disabled-build`. Used in component test files (`*.test.ts` co-located with `.svelte` files). |
+| `E-` | end-to-end scenarios — full UI flow including worker round-trip. Format `E-<from-state-or-context>-<facet>`, e.g. `E-cold-start-run-debug-off`. Used in `e2e/*.spec.ts`. |
 | `<action>` (S only) | `build`, `step`, `run`, `continue`, `stop`, `takectl`, `apply`, `debug-toggle`, `withpause-toggle`, `error`, `truncate`, `timeout` |
 | `<from-state>` (S only) | `demo`, `idle`, `manual`, `auto`, `cont`, `paused`, `halted` (and `step` only in §11 for legacy RUNNING_STEP citations) |
-| `<topic>` (R / C) | `machineRunner.test.ts`: `protocol`, `timer`, `pending`, `error`. `workerHelpers.test.ts`: `movement-code`, `commands`, `snapshot`, `phase-guard`, `step-arm`. `Toolbar.test.ts`: `run-label`, `disabled`, `visibility`, `interval`, `callbacks`. |
+| `<topic>` (R / C / E) | `machineRunner.test.ts`: `protocol`, `timer`, `pending`, `error`. `workerHelpers.test.ts`: `movement-code`, `commands`, `snapshot`, `phase-guard`, `step-arm`. `Toolbar.test.ts`: `run-label`, `disabled`, `visibility`, `interval`, `callbacks`. `e2e/cold-start.spec.ts`: `cold-start`, `continue-from-step`, `stop-while-paused`. |
 | `<facet>` (R only) | short descriptor — `build`, `step-cycle`, `suspend-on-paused`, `reject-overlap`, `wraps-error-with-tapes`, etc. |
 | `<flags?>` (S only) | optional flag suffix(es); `on` / `off` (debug), `auto` / `cont` (withPause when ambiguous), or compound like `off-auto` |
 
@@ -475,7 +476,7 @@ Conventions:
 - One token per slot. Don't run flags together.
 - Drop slots that don't matter — uniform behavior across flags ⇒ no flag suffix.
 - Stable across spec edits — prefer adding new IDs over renaming.
-- All three prefixes follow the regex `\b[SRC]-[a-z-]+`. Tests / CI grep this to find every cited scenario.
+- All four prefixes follow the regex `\b[SRCE]-[a-z-]+`. Tests / CI grep this to find every cited scenario.
 
 Where IDs live:
 - **Matrix cells** (§8): `S-step-paused-off: arm .after, resume(step), → PAUSED`. Text after `:` is the one-line outcome.
