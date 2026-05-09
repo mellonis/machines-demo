@@ -171,5 +171,29 @@ describe('MachineRunner', () => {
       });
       await runPromise;
     });
+
+    it('R-protocol-set-debug: posts {type:"setDebug",on}', async () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      // Build first to spawn the worker (setDebug is a no-op without one).
+      const buildPromise = runner.build('// user code');
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      await buildPromise;
+
+      runner.setDebug(true);
+      expect(current().last).toEqual({ type: 'setDebug', on: true });
+
+      runner.setDebug(false);
+      expect(current().last).toEqual({ type: 'setDebug', on: false });
+    });
+
+    it('R-protocol-set-debug-no-worker: setDebug before build is a silent no-op', () => {
+      const { factory } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      // No build yet, so no worker. setDebug must not throw.
+      expect(() => runner.setDebug(true)).not.toThrow();
+    });
   });
 });
