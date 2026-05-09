@@ -1,8 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { MAX_STEPS, WORKER_TIMEOUT_MS } from './caps';
-// @ts-expect-error — WorkerError used in Task 3
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-import { MachineRunner, WorkerError } from './machineRunner';
+import { MachineRunner } from './machineRunner';
 import { type PausedResponse } from './types';
 import { makeFakeFactory } from './testUtils';
 
@@ -425,6 +423,108 @@ describe('MachineRunner', () => {
 
       // If the timer had still been alive, it would have called terminate().
       expect(current().terminated).toBe(false);
+    });
+  });
+
+  describe('pending', () => {
+    it('R-pending-simple-overlap: build then step before built rejects step', async () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const buildPromise = runner.build('// user code');
+      await expect(runner.step()).rejects.toThrow('previous request still pending');
+
+      // Settle the build.
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      await buildPromise;
+    });
+
+    it('R-pending-run-overlap: run then run synchronously throws', async () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const buildPromise = runner.build('// user code');
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      await buildPromise;
+
+      const runPromise = runner.run();
+
+      // run() is NOT async — overlap throws synchronously.
+      expect(() => runner.run()).toThrow('previous request still pending');
+
+      // Settle the first run.
+      current().respond({
+        type: 'ran',
+        tapes: [],
+        truncated: false,
+        commands: [],
+        startStep: 0,
+        stepsApplied: 0,
+      });
+      await runPromise;
+    });
+
+    it('R-pending-simple-during-run: step during pending run rejects step', async () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const buildPromise = runner.build('// user code');
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      await buildPromise;
+
+      const runPromise = runner.run();
+      await expect(runner.step()).rejects.toThrow('previous request still pending');
+
+      // Settle.
+      current().respond({
+        type: 'ran',
+        tapes: [],
+        truncated: false,
+        commands: [],
+        startStep: 0,
+        stepsApplied: 0,
+      });
+      await runPromise;
+    });
+
+    it('R-pending-rebuild-rejects-pending: second build rejects the first with "superseded by new worker"', async () => {
+      const { factory, all } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const firstBuild = runner.build('// first');
+      expect(all()).toHaveLength(1);
+
+      const secondBuild = runner.build('// second');
+      expect(all()).toHaveLength(2);
+
+      await expect(firstBuild).rejects.toThrow('superseded by new worker');
+      expect(all()[0].terminated).toBe(true);
+
+      // Second build proceeds normally.
+      all()[1].respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      await secondBuild;
+    });
+
+    it('R-pending-terminate-rejects-all: terminate rejects pending run; then rejects pending build on a fresh build', async () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      // Pending run case.
+      const buildPromise = runner.build('// user code');
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      await buildPromise;
+
+      const runPromise = runner.run();
+      runner.terminate();
+
+      await expect(runPromise).rejects.toThrow('runner terminated');
+      expect(current().terminated).toBe(true);
+
+      // Pending build case (fresh build via spawnWorker, then terminate before built response).
+      const buildAgain = runner.build('// user code');
+      runner.terminate();
+
+      await expect(buildAgain).rejects.toThrow('runner terminated');
     });
   });
 });
