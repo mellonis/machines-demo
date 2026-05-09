@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import * as turing from '@turing-machine-js/machine';
-import { movementCode, commandsFromYield, type MachineYield } from './workerHelpers';
+import {
+  movementCode,
+  commandsFromYield,
+  snapshotTapes,
+  snapshotAlphabets,
+  type MachineYield,
+  type TapeLike,
+} from './workerHelpers';
 
 describe('workerHelpers', () => {
   describe('movement-code', () => {
@@ -53,6 +60,66 @@ describe('workerHelpers', () => {
         { movement: 'R', symbol: null },
         { movement: 'S', symbol: 'B' },
         { movement: 'L', symbol: null },
+      ]);
+    });
+  });
+
+  describe('snapshot', () => {
+    it('R-snapshot-tapes-clones-symbols: returned symbols array is a defensive copy (not aliased)', () => {
+      const tape: TapeLike = {
+        symbols: ['a', 'b', 'c'],
+        position: 1,
+        alphabet: { symbols: [' ', 'a', 'b', 'c'] },
+      };
+      const snap = snapshotTapes([tape]);
+
+      expect(snap).toHaveLength(1);
+      expect(snap[0].symbols).toEqual(['a', 'b', 'c']);
+      expect(snap[0].position).toBe(1);
+      expect(snap[0].symbols).not.toBe(tape.symbols);
+
+      // Mutating the snapshot must not affect the original.
+      snap[0].symbols.push('d');
+      expect(tape.symbols).toEqual(['a', 'b', 'c']);
+    });
+
+    it('R-snapshot-tapes-multi-tape: handles N tapes with correct positions', () => {
+      const tapes: TapeLike[] = [
+        { symbols: ['a'], position: 0, alphabet: { symbols: [' ', 'a'] } },
+        { symbols: ['b', 'c'], position: 1, alphabet: { symbols: [' ', 'b', 'c'] } },
+        { symbols: ['d', 'e', 'f'], position: 2, alphabet: { symbols: [' ', 'd', 'e', 'f'] } },
+      ];
+      const snap = snapshotTapes(tapes);
+      expect(snap).toEqual([
+        { symbols: ['a'], position: 0 },
+        { symbols: ['b', 'c'], position: 1 },
+        { symbols: ['d', 'e', 'f'], position: 2 },
+      ]);
+    });
+
+    it('R-snapshot-alphabets-clones: returned string[] is a defensive copy', () => {
+      const tape: TapeLike = {
+        symbols: ['a'],
+        position: 0,
+        alphabet: { symbols: [' ', 'a', 'b'] },
+      };
+      const snap = snapshotAlphabets([tape]);
+
+      expect(snap).toEqual([[' ', 'a', 'b']]);
+      expect(snap[0]).not.toBe(tape.alphabet.symbols);
+
+      snap[0].push('c');
+      expect(tape.alphabet.symbols).toEqual([' ', 'a', 'b']);
+    });
+
+    it('R-snapshot-alphabets-multi-tape: handles N tapes', () => {
+      const tapes: TapeLike[] = [
+        { symbols: ['a'], position: 0, alphabet: { symbols: [' ', 'a'] } },
+        { symbols: ['b'], position: 0, alphabet: { symbols: [' ', 'b', 'c'] } },
+      ];
+      expect(snapshotAlphabets(tapes)).toEqual([
+        [' ', 'a'],
+        [' ', 'b', 'c'],
       ]);
     });
   });
