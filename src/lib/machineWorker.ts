@@ -7,7 +7,7 @@
  *   idle → (build) → built → (run) → running → (paused) → paused → (resume) → running
  *                          → (step) → built (same, halted advances)
  *
- * A `paused` response is sent when `onDebugBreak` fires; the worker's `run()`
+ * A `paused` response is sent when `onPause` fires; the worker's `run()`
  * Promise stays pending until a `resume` request resolves the internal Promise.
  */
 
@@ -40,8 +40,8 @@ import {
  * The strong types live at the worker postMessage boundary instead.
  */
 
-// onDebugBreak payload subset we read. Engine's full type carries more.
-type DebugBreakPayload = {
+// onPause payload subset we read. Engine's full type carries more.
+type OnPausePayload = {
   state: { name?: string };
   currentSymbols: string[];
   nextState: { debug: { before?: true; after?: true } | null };
@@ -54,8 +54,8 @@ type AnyMachine = {
     initialState?: unknown;
     stepsLimit?: number;
     onStep?: (m: MachineYield) => void;
-    onDebugBreak?: (m: DebugBreakPayload) => void | Promise<void>;
-    __onDebugBreak?: (m: DebugBreakPayload) => void | Promise<void>;
+    onPause?: (m: OnPausePayload) => void | Promise<void>;
+    __onPause?: (m: OnPausePayload) => void | Promise<void>;
   }) => Promise<void>;
   initialState?: unknown;
   tape?: AnyTape;
@@ -128,7 +128,7 @@ let generator: Generator<MachineYield, void, void> | null = null;
 let stepsApplied = 0;
 let pendingCommand: MachineYield | null = null;
 
-// Holds the resolver of the Promise awaited inside onDebugBreak. Set when
+// Holds the resolver of the Promise awaited inside onPause. Set when
 // the worker is paused at a break; cleared on `resume`. Concurrent `run`
 // requests are rejected by the phase machine before they reach this slot.
 let resumeResolve: ((action: { step: boolean }) => void) | null = null;
@@ -144,7 +144,7 @@ let pendingRestore: (() => void) | null = null;
 let runCommandBuffer: Command[][] = [];
 let runStartStep = 0;
 
-// Runtime-mutable gate consulted inside onDebugBreak. Initialized from the
+// Runtime-mutable gate consulted inside onPause. Initialized from the
 // `run` request's `debug` flag; toggled mid-run via the `setDebug` message
 // so the user can flip the checkbox without restarting.
 let debugEnabled = false;
@@ -302,7 +302,7 @@ async function run(
   // mid-run. The hook self-gates on `debugEnabled` and resolves immediately
   // when off — engine continues without pausing — UNLESS the user just
   // clicked Step, in which case the next break always pauses.
-  const onDebugBreakFn = async (m: DebugBreakPayload) => {
+  const onPauseFn = async (m: OnPausePayload) => {
         // Restore the synthesized one-shot before the user observes the break.
         // (Done unconditionally — clean up even when debug is currently off,
         // so a Step-armed mutation doesn't leak past a debug toggle.)
@@ -353,10 +353,9 @@ async function run(
         }
       };
 
-  // PostMachine.run() uses `__onDebugBreak` and does not accept `initialState`
-  // (uses its own #initialState). TuringMachine.run() uses `onDebugBreak` and
-  // requires `initialState`. Branch on the presence of `__onDebugBreak` in the
-  // machine's `run` signature to route correctly.
+  // PostMachine.run() uses `__onPause` and does not accept `initialState`
+  // (uses its own #initialState). TuringMachine.run() uses `onPause` and
+  // requires `initialState`. Branch on the machine class to route correctly.
   const runOpts: Parameters<AnyMachine['run']>[0] = {
     stepsLimit: maxSteps,
     onStep: (m: MachineYield) => {
@@ -366,13 +365,13 @@ async function run(
   };
 
   if (machine instanceof post.PostMachine) {
-    // PostMachine.run() uses `__onDebugBreak` and ignores `initialState`
+    // PostMachine.run() uses `__onPause` and ignores `initialState`
     // (it carries its own #initialState internally).
-    runOpts.__onDebugBreak = onDebugBreakFn;
+    runOpts.__onPause = onPauseFn;
   } else {
-    // TuringMachine.run() uses `onDebugBreak` and requires `initialState`.
+    // TuringMachine.run() uses `onPause` and requires `initialState`.
     runOpts.initialState = initialState;
-    runOpts.onDebugBreak = onDebugBreakFn;
+    runOpts.onPause = onPauseFn;
   }
 
   try {

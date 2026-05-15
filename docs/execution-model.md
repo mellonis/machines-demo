@@ -4,7 +4,7 @@
 
 ## 1. Overview
 
-The demo runs user-typed JavaScript inside a Web Worker that drives a `@turing-machine-js/machine` v4 instance. The main thread tracks the worker's progress with a 7-mode state machine: three resting states (DEMO, IDLE, MANUAL), three running states (RUNNING_AUTO, RUNNING_CONTINUOUS, RUNNING_PAUSED), and one terminal (HALTED).
+The demo runs user-typed JavaScript inside a Web Worker that drives a `@turing-machine-js/machine` v6 instance. The main thread tracks the worker's progress with a 7-mode state machine: three resting states (DEMO, IDLE, MANUAL), three running states (RUNNING_AUTO, RUNNING_CONTINUOUS, RUNNING_PAUSED), and one terminal (HALTED).
 
 Most user actions are mode transitions; a few — debug toggle, withPause toggle, Apply — are flag changes or in-place mirror writes that don't move the mode.
 
@@ -287,7 +287,7 @@ sequenceDiagram
 
     User->>Main: click Run [debug=on]
     Main->>Worker: postMessage { type: 'run', debug: true }
-    Worker->>Engine: machine.run({ onDebugBreak })
+    Worker->>Engine: machine.run({ onPause })
     Engine-->>Worker: yield N, state.debug.before fires
     Worker-->>Main: { type: 'paused', state, currentSymbols, debugBreak: { before: true } }
     Note over Worker: timer suspended
@@ -297,7 +297,7 @@ sequenceDiagram
     Main->>Main: arm m.state.debug.after = true (pendingRestore captured)
     Main->>Worker: postMessage { type: 'resume', step: true }
     Note over Worker: timer restarted
-    Worker->>Engine: resolve onDebugBreak Promise
+    Worker->>Engine: resolve onPause Promise
     Engine-->>Worker: yield N+1, state.debug.after fires (armed)
     Worker->>Worker: pendingRestore() — undo arm
     Worker-->>Main: { type: 'paused', debugBreak: { after: true } }
@@ -334,7 +334,7 @@ A Run with `debug=on` and user-authored `state.debug` triggers a sequence of pau
 **Sequence (debug=off).**
 1. User clicks Run while in RUNNING_PAUSED. The button reads "Continue".
 2. Main thread sends `resume({ step: false })`.
-3. Worker resolves the pending Promise. `debugEnabled = false` so `onDebugBreak` returns immediately on subsequent breaks.
+3. Worker resolves the pending Promise. `debugEnabled = false` so `onPause` returns immediately on subsequent breaks.
 4. Run continues to halt; worker sends `ran` → HALTED.
 
 **Sequence (debug=on).**
@@ -366,7 +366,7 @@ Stop is visible while in RUNNING_AUTO, RUNNING_CONTINUOUS, and RUNNING_PAUSED.
 
 The `debugMode` UI checkbox is reactive across mode transitions. A change while in any RUNNING_* mode pushes `setDebug(on)` to the worker.
 
-- `S-debug-toggle-auto` / `S-debug-toggle-cont` — `runner.setDebug(on)` posts a fire-and-forget message. Worker flips an internal `debugEnabled` flag. Subsequent `onDebugBreak` calls honor the new value (no run restart).
+- `S-debug-toggle-auto` / `S-debug-toggle-cont` — `runner.setDebug(on)` posts a fire-and-forget message. Worker flips an internal `debugEnabled` flag. Subsequent `onPause` calls honor the new value (no run restart).
 - `S-debug-toggle-paused` — same `setDebug()` send. The current paused state is unaffected; the next break (after Continue) is gated by the new flag value.
 - In DEMO / IDLE / MANUAL / HALTED — flag flip only; no worker call (the worker is idle, the flag is read at the next `run()`).
 
@@ -425,7 +425,7 @@ A run that doesn't halt naturally hits `MAX_STEPS = 100_000` inside the worker's
 **Log entries**
 - `timeout after 5000ms — worker terminated (likely infinite loop)`
 
-**Edge case.** Today's API doesn't expose any callback hook to user code — `state.debug.before` / `state.debug.after` are filter values (`true | string[] | null`), not user-supplied functions, and the worker's `onStep` / `onDebugBreak` wrap the run on the demo side. So a "stall via async user callback" isn't reachable in the current surface. The per-segment cap defends against the cases that *are* reachable: infinite loops in user code, hung worker-side Promises, and any future API surface that might let user-supplied async logic interpose.
+**Edge case.** Today's API doesn't expose any callback hook to user code — `state.debug.before` / `state.debug.after` are filter values (`true | string[] | null`), not user-supplied functions, and the worker's `onStep` / `onPause` wrap the run on the demo side. So a "stall via async user callback" isn't reachable in the current surface. The per-segment cap defends against the cases that *are* reachable: infinite loops in user code, hung worker-side Promises, and any future API surface that might let user-supplied async logic interpose.
 
 ## 11. Current divergences from spec
 
@@ -443,8 +443,8 @@ A punchlist of where today's code differs from the spec, each with a tracking-is
 
 Upstream behaviors the spec encodes (won't change without a major upstream version, so the spec works around them):
 
-- `onDebugBreak` after-fire payload substitutes `m` to `prevYield` — the un-substituted `machineState` is not exposed. Affects step-over-from-after implementations. Cross-ref [turing-machine-js#107](https://github.com/mellonis/turing-machine-js/issues/107).
-- `onStep` and `onDebugBreak` after-fire payloads carry semantically identical `MachineState`. Both hooks are documented; the demo wires both for orthogonal reasons (per-step buffer vs. pause cycle). Cross-ref [turing-machine-js#109](https://github.com/mellonis/turing-machine-js/issues/109).
+- `onPause` after-fire payload substitutes `m` to `prevYield` — the un-substituted `machineState` is not exposed. Affects step-over-from-after implementations. Cross-ref [turing-machine-js#107](https://github.com/mellonis/turing-machine-js/issues/107).
+- `onStep` and `onPause` after-fire payloads carry semantically identical `MachineState`. Both hooks are documented; the demo wires both for orthogonal reasons (per-step buffer vs. pause cycle). Cross-ref [turing-machine-js#109](https://github.com/mellonis/turing-machine-js/issues/109).
 
 §11 vs §12: §11 lists demo-side gaps to be closed; §12 lists engine semantics that won't change. Items can move from §12 to §11 if the upstream issue lands and a corresponding demo-side simplification becomes possible.
 
