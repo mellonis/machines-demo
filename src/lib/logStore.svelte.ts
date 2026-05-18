@@ -8,6 +8,17 @@ export class LogStore {
 
   entries = $state<LogEntry[]>([]);
 
+  get latest(): LogEntry | null {
+    // Read #version to make this getter reactive to mutations even though
+    // #buffer itself isn't $state. Callers wrapped in $derived re-run when
+    // #version changes.
+    void this.#version;
+    for (let i = this.#buffer.length - 1; i >= 0; i--) {
+      if (!this.#buffer[i].separator) return this.#buffer[i];
+    }
+    return null;
+  }
+
   report(textOrEntry: string | LogEntry, kind?: LogKind): void {
     const entry: LogEntry =
       typeof textOrEntry === 'string'

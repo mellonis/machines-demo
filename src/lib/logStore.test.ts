@@ -79,4 +79,27 @@ describe('LogStore', () => {
       ]);
     });
   });
+
+  describe('latest', () => {
+    it('R-logstore-latest-skips-separator: latest walks buffer from tail, skipping separators', () => {
+      const log = new LogStore();
+      expect(log.latest).toBe(null);
+
+      log.report('first');
+      log.reportSeparator();
+      expect(log.latest).toEqual({ text: 'first' });
+
+      log.report('second');
+      expect(log.latest).toEqual({ text: 'second' });
+    });
+
+    it('R-logstore-latest-synchronous: latest reflects the freshly-pushed entry before the timer fires', () => {
+      const log = new LogStore();
+      log.report('synchronous-read');
+
+      // No vi.advanceTimersByTime — view has not flushed yet.
+      expect(log.entries).toEqual([]);
+      expect(log.latest).toEqual({ text: 'synchronous-read' });
+    });
+  });
 });
