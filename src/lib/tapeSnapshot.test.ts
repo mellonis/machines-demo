@@ -90,4 +90,41 @@ describe('tapeSnapshot', () => {
       expect(result).toMatchObject({ reason: 'unsupported-version' });
     });
   });
+
+  describe('parse-wrong-shape-tapes', () => {
+    const baseValid = {
+      format: SNAPSHOT_FORMAT,
+      version: 1,
+      alphabets: [[' ', 'a']],
+    };
+
+    const expectWrongShape = (text: string): void => {
+      const result = parse(text);
+      expect(result).toMatchObject({ reason: 'wrong-shape' });
+    };
+
+    it('R-snapshot-parse-wrong-shape-tapes: missing or non-array tapes', () => {
+      expectWrongShape(JSON.stringify({ ...baseValid }));
+      expectWrongShape(JSON.stringify({ ...baseValid, tapes: 'not-array' }));
+      expectWrongShape(JSON.stringify({ ...baseValid, tapes: null }));
+      expectWrongShape(JSON.stringify({ ...baseValid, tapes: {} }));
+    });
+
+    it('R-snapshot-parse-wrong-shape-tapes: tape entry missing symbols or position', () => {
+      expectWrongShape(JSON.stringify({ ...baseValid, tapes: [{ position: 0 }] }));
+      expectWrongShape(JSON.stringify({ ...baseValid, tapes: [{ symbols: [' '] }] }));
+    });
+
+    it('R-snapshot-parse-wrong-shape-tapes: symbols must be array of strings', () => {
+      expectWrongShape(JSON.stringify({ ...baseValid, tapes: [{ symbols: 'abc', position: 0 }] }));
+      expectWrongShape(JSON.stringify({ ...baseValid, tapes: [{ symbols: [1, 2], position: 0 }] }));
+    });
+
+    it('R-snapshot-parse-wrong-shape-tapes: position must be non-negative integer in range', () => {
+      expectWrongShape(JSON.stringify({ ...baseValid, tapes: [{ symbols: [' ', 'a'], position: -1 }] }));
+      expectWrongShape(JSON.stringify({ ...baseValid, tapes: [{ symbols: [' ', 'a'], position: 2 }] }));   // out of range
+      expectWrongShape(JSON.stringify({ ...baseValid, tapes: [{ symbols: [' ', 'a'], position: 0.5 }] })); // not integer
+      expectWrongShape(JSON.stringify({ ...baseValid, tapes: [{ symbols: [], position: 0 }] }));            // empty symbols
+    });
+  });
 });

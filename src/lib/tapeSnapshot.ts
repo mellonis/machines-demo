@@ -47,5 +47,26 @@ export function parse(text: string): TapeSnapshotPayload | ParseError {
     return { reason: 'unsupported-version', got: obj.version as number };
   }
 
+  if (!Array.isArray(obj.tapes)) {
+    return { reason: 'wrong-shape', detail: 'tapes missing or not an array' };
+  }
+
+  for (let i = 0; i < obj.tapes.length; i++) {
+    const t = obj.tapes[i];
+    if (typeof t !== 'object' || t === null || Array.isArray(t)) {
+      return { reason: 'wrong-shape', detail: `tapes[${i}] is not an object` };
+    }
+    const tape = t as Record<string, unknown>;
+    if (!Array.isArray(tape.symbols) || !tape.symbols.every((s) => typeof s === 'string')) {
+      return { reason: 'wrong-shape', detail: `tapes[${i}].symbols must be string[]` };
+    }
+    if (typeof tape.position !== 'number' || !Number.isInteger(tape.position)) {
+      return { reason: 'wrong-shape', detail: `tapes[${i}].position must be an integer` };
+    }
+    if (tape.position < 0 || tape.position >= tape.symbols.length) {
+      return { reason: 'wrong-shape', detail: `tapes[${i}].position ${tape.position} out of range [0, ${tape.symbols.length})` };
+    }
+  }
+
   return obj as unknown as TapeSnapshotPayload;
 }
