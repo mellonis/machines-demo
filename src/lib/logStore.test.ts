@@ -127,4 +127,34 @@ describe('LogStore', () => {
       expect(log.entries).toEqual([{ text: 'post-clear' }]);
     });
   });
+
+  describe('flush-pending', () => {
+    it('R-logstore-flush-no-pending-timer: after flush, next report schedules a fresh timer', () => {
+      const log = new LogStore();
+
+      log.report('first');
+      vi.advanceTimersByTime(LOG_FLUSH_INTERVAL_MS);
+      expect(log.entries).toEqual([{ text: 'first' }]);
+
+      // Timer has fired and cleared itself. A second report should schedule
+      // a new one, not silently skip because of a stale "pending" flag.
+      log.report('second');
+      expect(log.entries).toEqual([{ text: 'first' }]);  // not flushed yet
+
+      vi.advanceTimersByTime(LOG_FLUSH_INTERVAL_MS);
+      expect(log.entries).toEqual([{ text: 'first' }, { text: 'second' }]);
+    });
+
+    it('R-logstore-dispose: cancels pending timer; subsequent reports do not flush', () => {
+      const log = new LogStore();
+      log.report('before-dispose');
+
+      // Pending flush.
+      log.dispose();
+
+      // Even after the interval, no flush fires.
+      vi.advanceTimersByTime(LOG_FLUSH_INTERVAL_MS * 10);
+      expect(log.entries).toEqual([]);
+    });
+  });
 });

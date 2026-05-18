@@ -58,6 +58,15 @@ export class LogStore {
     this.entries = [];
   }
 
+  /** Cancels any pending flush so the timer doesn't outlive the owning
+   *  component. Call from `onDestroy` in the consumer (MachineView). */
+  dispose(): void {
+    if (this.#flushTimer !== null) {
+      clearTimeout(this.#flushTimer);
+      this.#flushTimer = null;
+    }
+  }
+
   #scheduleFlush(): void {
     if (this.#flushTimer !== null) return;
     this.#flushTimer = setTimeout(() => {
