@@ -12,6 +12,7 @@
   import { type Alphabets, type Command, type Engine, type PausedResponse, type TapeSnapshot } from '../lib/types.ts';
   import { startDemoLoop } from '../lib/demoLoop.ts';
   import { startAutoStep, parseInterval } from '../lib/autoStep.ts';
+  import { parse as parseSnapshot, serialize as serializeSnapshot } from '../lib/tapeSnapshot.ts';
   import { commandsEntry, tapesEntry } from '../lib/format.ts';
   import {
     defaultExample,
@@ -158,6 +159,9 @@
     executionMode !== 'MANUAL' &&
     executionMode !== 'RUNNING_CONTINUOUS' &&
     executionMode !== 'RUNNING_PAUSED_AT_BREAK',
+  );
+  const pasteEnabled = $derived(
+    executionMode === 'MANUAL' || executionMode === 'DEMO',
   );
   const beltTransitionsOn = $derived(
     executionMode !== 'RUNNING_CONTINUOUS' &&
@@ -564,6 +568,73 @@
     }
   }
 
+  async function onCopy(): Promise<void> {
+    if (!lastSnapshots) {
+      log.report('copy failed: no tape state to copy', 'error');
+      return;
+    }
+    try {
+      const text = serializeSnapshot(lastSnapshots, alphabets);
+      await navigator.clipboard.writeText(text);
+      const n = lastSnapshots.length;
+      log.report(`copied ${n}-tape snapshot`, 'ok');
+    } catch {
+      log.report('copy failed: clipboard unavailable', 'error');
+    }
+  }
+
+  async function onPaste(): Promise<void> {
+    let text: string;
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      log.report('paste failed: clipboard unavailable', 'error');
+      return;
+    }
+
+    const result = parseSnapshot(text);
+    if ('reason' in result) {
+      switch (result.reason) {
+        case 'not-json':
+          log.report('paste failed: not JSON', 'error');
+          return;
+        case 'wrong-format':
+          log.report('paste failed: not a machines-demo snapshot', 'error');
+          return;
+        case 'unsupported-version':
+          log.report(`paste failed: unsupported snapshot version (got ${result.got}, expected 1)`, 'error');
+          return;
+        case 'wrong-shape':
+          log.report(`paste failed: malformed — ${result.detail}`, 'error');
+          return;
+      }
+    }
+
+    // Tape-count compatibility check against the current machine.
+    if (lastSnapshots && result.tapes.length !== lastSnapshots.length) {
+      log.report(
+        `paste failed: snapshot has ${result.tapes.length} tapes, current machine emits ${lastSnapshots.length}`,
+        'error',
+      );
+      return;
+    }
+
+    // DEMO auto-take-control. After this, executionMode is MANUAL and
+    // demoEnabled is false, matching the existing Apply-during-DEMO transition.
+    if (executionMode === 'DEMO') {
+      demoEnabled = false;
+      userTookControl = true;
+      executionMode = 'MANUAL';
+    }
+
+    alphabets = result.alphabets;
+    lastSnapshots = result.tapes;
+    _buildMirrorMachine(result.tapes, result.alphabets);
+    setAllFromMirror();
+
+    log.report(`pasted ${result.tapes.length}-tape snapshot`, 'ok');
+  }
+
   function takeControl(): void {
     log.report('user took control', 'ok');
     userTookControl = true;
@@ -731,12 +802,33 @@
       />
     </div>
 
-    {#if takeControlVisible}
-      <button class="take-control" type="button" onclick={takeControl}>
-        {@html icons.takeControl}
-        <span class="btn-label">Take control</span>
+    <div class="tape-actions">
+      <button
+        class="tape-action-btn"
+        type="button"
+        onclick={onCopy}
+        title="Copy tape state"
+        aria-label="Copy tape state"
+      >
+        {@html icons.copy}
       </button>
-    {/if}
+      <button
+        class="tape-action-btn"
+        type="button"
+        onclick={onPaste}
+        disabled={!pasteEnabled}
+        title="Paste tape state"
+        aria-label="Paste tape state"
+      >
+        {@html icons.clipboard}
+      </button>
+      {#if takeControlVisible}
+        <button class="take-control" type="button" onclick={takeControl}>
+          {@html icons.takeControl}
+          <span class="btn-label">Take control</span>
+        </button>
+      {/if}
+    </div>
 
     <Log entries={log.entries} onClear={() => log.clear()} />
   </div>
@@ -843,6 +935,48 @@
     @media (max-width: 768px) {
       padding: 16px;
       min-height: 60vh;
+    }
+  }
+
+  .tape-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+  }
+
+  .tape-action-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    background: transparent;
+    border: 1px solid var(--cell-border);
+    color: var(--muted);
+    border-radius: 6px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition:
+      background-color var(--anim-button-hover-ms) ease,
+      border-color var(--anim-button-hover-ms) ease,
+      color var(--anim-button-hover-ms) ease;
+
+    &:hover:not(:disabled) {
+      background: var(--hover-bg);
+      color: var(--fg);
+    }
+
+    &:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    :global(svg) {
+      width: 16px;
+      height: 16px;
+      display: block;
     }
   }
 
