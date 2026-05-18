@@ -60,4 +60,34 @@ describe('tapeSnapshot', () => {
       expect(parse('[]')).toEqual({ reason: 'wrong-format', got: undefined });
     });
   });
+
+  describe('parse-unsupported-version', () => {
+    it('R-snapshot-parse-unsupported-version: returns { reason: "unsupported-version", got: N } for version !== 1', () => {
+      const v99 = JSON.stringify({
+        format: SNAPSHOT_FORMAT,
+        version: 99,
+        tapes: [{ symbols: [' '], position: 0 }],
+        alphabets: [[' ']],
+      });
+      expect(parse(v99)).toEqual({ reason: 'unsupported-version', got: 99 });
+
+      const v0 = JSON.stringify({
+        format: SNAPSHOT_FORMAT,
+        version: 0,
+        tapes: [{ symbols: [' '], position: 0 }],
+        alphabets: [[' ']],
+      });
+      expect(parse(v0)).toEqual({ reason: 'unsupported-version', got: 0 });
+
+      // Non-number version → still treated as unsupported (with whatever value as the `got`).
+      const vStr = JSON.stringify({
+        format: SNAPSHOT_FORMAT,
+        version: 'one',
+        tapes: [{ symbols: [' '], position: 0 }],
+        alphabets: [[' ']],
+      });
+      const result = parse(vStr);
+      expect(result).toMatchObject({ reason: 'unsupported-version' });
+    });
+  });
 });

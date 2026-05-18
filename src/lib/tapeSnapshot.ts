@@ -43,5 +43,9 @@ export function parse(text: string): TapeSnapshotPayload | ParseError {
     return { reason: 'wrong-format', got: obj.format };
   }
 
+  if (obj.version !== SNAPSHOT_VERSION) {
+    return { reason: 'unsupported-version', got: obj.version as number };
+  }
+
   return obj as unknown as TapeSnapshotPayload;
 }
