@@ -44,11 +44,15 @@ src/
     ├── workerHelpers.test.ts   Vitest suite for workerHelpers — 5 topic groups (movement-code, commands, snapshot, phase-guard, step-arm)
     ├── testUtils.ts            FakeWorker + makeFakeFactory test helpers
     ├── log.ts                  log-entry types + helpers shared by Log.svelte
+    ├── logStore.svelte.ts      per-MachineView log store — non-reactive #buffer + setTimeout-throttled $state view, LOG_RENDER_CAP slice with synthetic overflow header, buffer-sourced reactive `latest` getter
+    ├── logStore.test.ts        Vitest suite for LogStore — buffer-append / cap / separator / latest / clear / dispose / flush-* (cites R-logstore-...)
     ├── demoLoop.ts             idle-mode random-command loop
     ├── autoStep.ts             paused-auto-step controller + parseInterval
     ├── completions.ts          CodeMirror autocomplete: machine namespace + locals
     ├── syntaxLinter.ts         Lezer-based syntax-error markers
     ├── persist.ts              localStorage helpers per engine — code, example, snippets (UUID-keyed)
+    ├── tapeSnapshot.ts         serialize/parse for tape-block copy+paste snapshots — JSON with `format`/`version` discriminator, categorized ParseError, no DOM/clipboard knowledge
+    ├── tapeSnapshot.test.ts    Vitest suite for tapeSnapshot — roundtrip / parse-not-json / wrong-format / unsupported-version / wrong-shape-* / length-mismatch (cites R-snapshot-...)
     ├── defaultCode.ts          starter Turing / Post snippets
     ├── format.ts               describeAppliedCommand / formatTape / commandsEntry / tapesEntry
     ├── icons.ts                Tabler icon namespace (?raw imports)
@@ -76,7 +80,7 @@ playwright.config.ts            Chromium project; webServer runs `npm run previe
 - `panelEnabled` / `applyVisible` / `takeControlVisible` / `loadDisabled` / `stepDisabled` / `runDisabled` / `tapeCount` — all `$derived` (single source of truth for UI state)
 - `mirrorMachine` / `mirrorTapeBlock` — a real `TuringMachine` instance on the main thread that mirrors the worker's tape state. Built by `_buildMirrorMachine` after each `reloadWorker`; advanced one step at a time by `_runMirrorStep` (uses an `ifOtherSymbol` one-step `State` so the upstream library's transitions drive the visualization, not bespoke UI code). `renderFromMirror` hands each `mirrorTapeBlock.tapes[i]` to the matching `<Tape>` via `TapesStack.setFromTape(i, tape, …)`.
 - `$effect`s for the demo loop, auto-step loop, belt-transitions toggle, and a code-changed warning (debounced via `codeChangedWarned` flag — fires once per running session)
-- `runner = new MachineRunner(engine, () => new MachineWorker())` and the `doLoad` / `doStep` / `doRun` / `takeControl` / `stopMachine` / `resetCodeToSelected` handlers; `reloadWorker(source?)` is the shared "build worker + rebuild mirrorMachine" helper, taking optional source code (defaults to current `code`) so DEMO can run the canonical `selectedExample.code` regardless of editor state. The factory argument keeps the Vite-specific `?worker` import in `MachineView.svelte`; `machineRunner.ts` is plain TypeScript and accepts any `MachineWorkerLike` (real `Worker` or `FakeWorker` from `testUtils.ts`).
+- `runner = new MachineRunner(engine, () => new MachineWorker())` and the `doLoad` / `doStep` / `doRun` / `takeControl` / `stopMachine` / `resetCodeToSelected` / `onCopy` / `onPaste` handlers; `reloadWorker(source?)` is the shared "build worker + rebuild mirrorMachine" helper, taking optional source code (defaults to current `code`) so DEMO can run the canonical `selectedExample.code` regardless of editor state. The factory argument keeps the Vite-specific `?worker` import in `MachineView.svelte`; `machineRunner.ts` is plain TypeScript and accepts any `MachineWorkerLike` (real `Worker` or `FakeWorker` from `testUtils.ts`). `onCopy` / `onPaste` use `navigator.clipboard.{writeText,readText}` and the `lib/tapeSnapshot.ts` serialize/parse pair; paste is mirror-only (next Build reloads the worker from the editor code).
 
 **Execution model and debugger semantics:** see [`docs/execution-model.md`](docs/execution-model.md).
 
