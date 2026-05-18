@@ -40,6 +40,13 @@ test.describe('cold-start', () => {
     await page.getByRole('checkbox', { name: /^debug$/i }).check();
     await page.getByRole('button', { name: /^step$/i }).click();
     await expect(page.getByRole('button', { name: /^continue$/i })).toBeVisible();
+    // Wait for the paused log entry to flush before snapshotting the baseline.
+    // executionMode flips synchronously (Continue button becomes visible
+    // immediately) but `log.report` is buffered behind LogStore's 16ms timer;
+    // without this wait, pausedBefore can race-snapshot 0 instead of 1.
+    await expect(
+      page.getByTestId('log-line').filter({ hasText: /^paused at/ }),
+    ).toBeVisible();
 
     // Snapshot the pre-Continue paused-line count.
     const pausedBefore = await page

@@ -6,7 +6,7 @@ Interactive in-browser playground for **Turing** and **Post** machines.
 
 **Live demo:** [demo.machines.mellonis.ru](https://demo.machines.mellonis.ru)
 
-Two tabs (Turing, Post) where you write JavaScript that builds a machine — using the published [`@turing-machine-js/machine`](https://www.npmjs.com/package/@turing-machine-js/machine) and [`@post-machine-js/machine`](https://www.npmjs.com/package/@post-machine-js/machine) libraries — and watch it execute on an animated tape. Auto-running demo on first load, manual control of the tape head via a movement/symbol/Apply panel, single-step and paused-auto-step execution, and a log of every command applied.
+Two tabs (Turing, Post) where you write JavaScript that builds a machine — using the published [`@turing-machine-js/machine`](https://www.npmjs.com/package/@turing-machine-js/machine) and [`@post-machine-js/machine`](https://www.npmjs.com/package/@post-machine-js/machine) libraries — and watch it execute on an animated tape. Auto-running demo on first load, manual control of the tape head via a movement/symbol/Apply panel, single-step and paused-auto-step execution, a log of every command applied, and clipboard copy/paste of the tape-block state for sharing or restoring snapshots.
 
 ## Running locally
 
@@ -102,11 +102,15 @@ src/
     ├── workerHelpers.test.ts   # Vitest suite for workerHelpers — 5 topic groups
     ├── testUtils.ts            # FakeWorker + makeFakeFactory test helpers
     ├── log.ts                  # log-entry types + helpers
+    ├── logStore.svelte.ts      # per-MachineView log store — buffer + throttled view + overflow cap
+    ├── logStore.test.ts        # Vitest suite for LogStore
     ├── demoLoop.ts             # idle-mode random-command loop
     ├── autoStep.ts             # paused-auto-step controller
     ├── completions.ts          # CodeMirror autocomplete from machine namespace
     ├── syntaxLinter.ts         # Lezer-based syntax-error markers
     ├── persist.ts              # localStorage helpers per engine
+    ├── tapeSnapshot.ts         # serialize/parse tape-block snapshots for copy+paste
+    ├── tapeSnapshot.test.ts    # Vitest suite for tapeSnapshot
     ├── defaultCode.ts          # starter Turing / Post snippets
     ├── format.ts               # describeAppliedCommand / formatTape / commandsEntry / tapesEntry
     ├── icons.ts                # Tabler icon namespace

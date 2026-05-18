@@ -8,10 +8,11 @@
   import MachineWorker from '../lib/machineWorker.ts?worker';
   import { MachineRunner, WorkerError } from '../lib/machineRunner.ts';
   import * as turing from '@turing-machine-js/machine';
-  import { VIEWPORT_WIDTH } from '../lib/caps.ts';
+  import { MAX_TAPES, VIEWPORT_WIDTH } from '../lib/caps.ts';
   import { type Alphabets, type Command, type Engine, type PausedResponse, type TapeSnapshot } from '../lib/types.ts';
   import { startDemoLoop } from '../lib/demoLoop.ts';
   import { startAutoStep, parseInterval } from '../lib/autoStep.ts';
+  import { parse as parseSnapshot, serialize as serializeSnapshot } from '../lib/tapeSnapshot.ts';
   import { commandsEntry, tapesEntry } from '../lib/format.ts';
   import {
     defaultExample,
@@ -158,6 +159,9 @@
     executionMode !== 'MANUAL' &&
     executionMode !== 'RUNNING_CONTINUOUS' &&
     executionMode !== 'RUNNING_PAUSED_AT_BREAK',
+  );
+  const pasteEnabled = $derived(
+    executionMode === 'MANUAL' || executionMode === 'DEMO',
   );
   const beltTransitionsOn = $derived(
     executionMode !== 'RUNNING_CONTINUOUS' &&
@@ -564,6 +568,83 @@
     }
   }
 
+  async function onCopy(): Promise<void> {
+    if (!lastSnapshots) {
+      log.report('copy failed: no tape state to copy', 'error');
+      return;
+    }
+    try {
+      const text = serializeSnapshot(lastSnapshots, alphabets);
+      await navigator.clipboard.writeText(text);
+      const n = lastSnapshots.length;
+      log.report(`copied ${n}-tape snapshot`, 'ok');
+    } catch {
+      log.report('copy failed: clipboard unavailable', 'error');
+    }
+  }
+
+  async function onPaste(): Promise<void> {
+    let text: string;
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      log.report('paste failed: clipboard unavailable', 'error');
+      return;
+    }
+
+    const result = parseSnapshot(text);
+    if ('reason' in result) {
+      switch (result.reason) {
+        case 'not-json':
+          log.report('paste failed: not JSON', 'error');
+          return;
+        case 'wrong-format':
+          log.report('paste failed: not a machines-demo snapshot', 'error');
+          return;
+        case 'unsupported-version':
+          log.report(`paste failed: unsupported snapshot version (got ${result.got}, expected 1)`, 'error');
+          return;
+        case 'wrong-shape':
+          log.report(`paste failed: malformed — ${result.detail}`, 'error');
+          return;
+      }
+    }
+
+    // Tape-count bounds: must have ≥1 tape and fit within MAX_TAPES (the
+    // CARET_COLORS palette length + the worker's hard limit on builds).
+    // Paste is mirror-only — the user takes control and operates against
+    // the pasted state regardless of what the current machine emits.
+    if (result.tapes.length === 0) {
+      log.report('paste failed: snapshot has no tapes', 'error');
+      return;
+    }
+    if (result.tapes.length > MAX_TAPES) {
+      log.report(
+        `paste failed: snapshot has ${result.tapes.length} tapes (max ${MAX_TAPES})`,
+        'error',
+      );
+      return;
+    }
+
+    // DEMO auto-take-control. After this, executionMode is MANUAL and
+    // demoEnabled is false, matching the existing Apply-during-DEMO transition.
+    if (executionMode === 'DEMO') {
+      demoEnabled = false;
+      userTookControl = true;
+      executionMode = 'MANUAL';
+    }
+
+    alphabets = result.alphabets;
+    lastSnapshots = result.tapes;
+    _buildMirrorMachine(result.tapes, result.alphabets);
+    // Wait for Svelte to mount/unmount tape rows when the count changed,
+    // then push state into the (now-correct) refs. Matches reloadWorker.
+    await tick();
+    setAllFromMirror();
+
+    log.report(`pasted ${result.tapes.length}-tape snapshot`, 'ok');
+  }
+
   function takeControl(): void {
     log.report('user took control', 'ok');
     userTookControl = true;
@@ -731,12 +812,33 @@
       />
     </div>
 
-    {#if takeControlVisible}
-      <button class="take-control" type="button" onclick={takeControl}>
-        {@html icons.takeControl}
-        <span class="btn-label">Take control</span>
+    <div class="tape-actions">
+      {#if takeControlVisible}
+        <button class="take-control" type="button" onclick={takeControl}>
+          {@html icons.takeControl}
+          <span class="btn-label">Take control</span>
+        </button>
+      {/if}
+      <button
+        class="tape-action-btn"
+        type="button"
+        onclick={onCopy}
+        title="Copy tape state"
+        aria-label="Copy tape state"
+      >
+        {@html icons.copy}
       </button>
-    {/if}
+      <button
+        class="tape-action-btn"
+        type="button"
+        onclick={onPaste}
+        disabled={!pasteEnabled}
+        title="Paste tape state"
+        aria-label="Paste tape state"
+      >
+        {@html icons.clipboard}
+      </button>
+    </div>
 
     <Log entries={log.entries} onClear={() => log.clear()} />
   </div>
@@ -846,11 +948,54 @@
     }
   }
 
+  .tape-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    width: 100%;
+  }
+
+  .tape-action-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    background: transparent;
+    border: 1px solid var(--cell-border);
+    color: var(--muted);
+    border-radius: 6px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition:
+      background-color var(--anim-button-hover-ms) ease,
+      border-color var(--anim-button-hover-ms) ease,
+      color var(--anim-button-hover-ms) ease;
+
+    &:hover:not(:disabled) {
+      background: var(--hover-bg);
+      color: var(--fg);
+    }
+
+    &:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    :global(svg) {
+      width: 16px;
+      height: 16px;
+      display: block;
+    }
+  }
+
   .take-control {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 100%;
+    flex: 1;
     gap: 6px;
     height: 30px;
     padding: 4px 12px;
