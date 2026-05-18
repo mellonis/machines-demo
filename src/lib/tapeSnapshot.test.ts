@@ -152,4 +152,19 @@ describe('tapeSnapshot', () => {
       expectWrongShape(JSON.stringify({ ...baseValid, alphabets: [null] }));
     });
   });
+
+  describe('parse-length-mismatch', () => {
+    it('R-snapshot-parse-length-mismatch: tapes.length !== alphabets.length → wrong-shape', () => {
+      const result = parse(JSON.stringify({
+        format: SNAPSHOT_FORMAT,
+        version: 1,
+        tapes: [
+          { symbols: [' '], position: 0 },
+          { symbols: [' '], position: 0 },
+        ],
+        alphabets: [[' ']],  // only 1 alphabet for 2 tapes
+      }));
+      expect(result).toMatchObject({ reason: 'wrong-shape' });
+    });
+  });
 });

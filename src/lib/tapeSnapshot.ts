@@ -79,5 +79,12 @@ export function parse(text: string): TapeSnapshotPayload | ParseError {
     }
   }
 
+  if (obj.tapes.length !== obj.alphabets.length) {
+    return {
+      reason: 'wrong-shape',
+      detail: `tape count (${obj.tapes.length}) does not match alphabet count (${obj.alphabets.length})`,
+    };
+  }
+
   return obj as unknown as TapeSnapshotPayload;
 }
