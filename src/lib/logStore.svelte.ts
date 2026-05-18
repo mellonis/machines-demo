@@ -30,6 +30,13 @@ export class LogStore {
     this.#scheduleFlush();
   }
 
+  reportSeparator(): void {
+    if (this.#buffer.length === 0) return;
+    this.#buffer.push({ text: '', separator: true });
+    this.#version++;
+    this.#scheduleFlush();
+  }
+
   #scheduleFlush(): void {
     if (this.#flushTimer !== null) return;
     this.#flushTimer = setTimeout(() => {

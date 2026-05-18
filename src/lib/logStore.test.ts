@@ -60,4 +60,23 @@ describe('LogStore', () => {
       expect(b.entries[0]).toEqual({ text: '', overflow: true, hiddenCount: 1 });
     });
   });
+
+  describe('separator', () => {
+    it('R-logstore-separator-skip-empty: reportSeparator on empty buffer is a no-op', () => {
+      const log = new LogStore();
+      log.reportSeparator();
+      vi.advanceTimersByTime(LOG_FLUSH_INTERVAL_MS);
+
+      expect(log.entries).toEqual([]);
+
+      log.report('first');
+      log.reportSeparator();
+      vi.advanceTimersByTime(LOG_FLUSH_INTERVAL_MS);
+
+      expect(log.entries).toEqual([
+        { text: 'first' },
+        { text: '', separator: true },
+      ]);
+    });
+  });
 });
