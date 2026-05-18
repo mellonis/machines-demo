@@ -102,4 +102,29 @@ describe('LogStore', () => {
       expect(log.latest).toEqual({ text: 'synchronous-read' });
     });
   });
+
+  describe('clear', () => {
+    it('R-logstore-clear: empties both buffer and view, cancels pending timer, no header lingers', () => {
+      const log = new LogStore();
+      log.appendBatch(Array.from({ length: LOG_RENDER_CAP + 10 }, (_, i) => ({ text: `${i}` })));
+      vi.advanceTimersByTime(LOG_FLUSH_INTERVAL_MS);
+
+      expect(log.entries.length).toBe(LOG_RENDER_CAP + 1);
+
+      log.clear();
+
+      // View empties immediately (synchronous flush), buffer too.
+      expect(log.entries).toEqual([]);
+      expect(log.latest).toBe(null);
+
+      // No stale timer to fire.
+      vi.advanceTimersByTime(LOG_FLUSH_INTERVAL_MS);
+      expect(log.entries).toEqual([]);
+
+      // Fresh reports start clean — no overflow header carryover.
+      log.report('post-clear');
+      vi.advanceTimersByTime(LOG_FLUSH_INTERVAL_MS);
+      expect(log.entries).toEqual([{ text: 'post-clear' }]);
+    });
+  });
 });

@@ -48,6 +48,16 @@ export class LogStore {
     this.#scheduleFlush();
   }
 
+  clear(): void {
+    this.#buffer.length = 0;
+    if (this.#flushTimer !== null) {
+      clearTimeout(this.#flushTimer);
+      this.#flushTimer = null;
+    }
+    this.#version++;
+    this.entries = [];
+  }
+
   #scheduleFlush(): void {
     if (this.#flushTimer !== null) return;
     this.#flushTimer = setTimeout(() => {
