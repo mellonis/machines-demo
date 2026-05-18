@@ -156,5 +156,36 @@ describe('LogStore', () => {
       vi.advanceTimersByTime(LOG_FLUSH_INTERVAL_MS * 10);
       expect(log.entries).toEqual([]);
     });
+
+    it('R-logstore-flush-coalesce: N reports within one window → one entries reassignment', () => {
+      const log = new LogStore();
+
+      // Track entries reassignments by snapshotting the reference. Since the
+      // class reassigns `this.entries = [...]` on flush, the reference changes
+      // exactly once per flush.
+      const firstRef = log.entries;
+
+      // 100 reports, all within the same fake-timer window (no advance yet).
+      for (let i = 0; i < 100; i++) {
+        log.report(`entry ${i}`);
+      }
+
+      // Still the original empty array — no flush has run.
+      expect(log.entries).toBe(firstRef);
+
+      vi.advanceTimersByTime(LOG_FLUSH_INTERVAL_MS);
+
+      // After the single timer fires, entries has been reassigned exactly once.
+      expect(log.entries).not.toBe(firstRef);
+      expect(log.entries.length).toBe(100);
+      expect(log.entries[0]).toEqual({ text: 'entry 0' });
+      expect(log.entries[99]).toEqual({ text: 'entry 99' });
+
+      // No further pending flushes — advancing time should not produce a new
+      // reference.
+      const afterFlushRef = log.entries;
+      vi.advanceTimersByTime(LOG_FLUSH_INTERVAL_MS);
+      expect(log.entries).toBe(afterFlushRef);
+    });
   });
 });
