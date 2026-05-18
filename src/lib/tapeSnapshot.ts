@@ -27,7 +27,11 @@ export function serialize(tapes: TapeSnapshot[], alphabets: Alphabets): string {
 }
 
 export function parse(text: string): TapeSnapshotPayload | ParseError {
-  // T3: minimal happy-path parse. Subsequent tasks add validation layers
-  // for not-json, wrong-format, unsupported-version, and wrong-shape.
-  return JSON.parse(text) as TapeSnapshotPayload;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return { reason: 'not-json' };
+  }
+  return raw as TapeSnapshotPayload;
 }

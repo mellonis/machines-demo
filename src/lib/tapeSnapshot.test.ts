@@ -26,4 +26,12 @@ describe('tapeSnapshot', () => {
       });
     });
   });
+
+  describe('parse-not-json', () => {
+    it('R-snapshot-parse-not-json: returns { reason: "not-json" } on JSON.parse failure', () => {
+      expect(parse('not valid json')).toEqual({ reason: 'not-json' });
+      expect(parse('{ unterminated')).toEqual({ reason: 'not-json' });
+      expect(parse('')).toEqual({ reason: 'not-json' });
+    });
+  });
 });
