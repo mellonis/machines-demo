@@ -3,7 +3,7 @@ import { LOG_FLUSH_INTERVAL_MS, LOG_RENDER_CAP } from './caps.ts';
 
 export class LogStore {
   #buffer: LogEntry[] = [];
-  #flushTimer: ReturnType<typeof setTimeout> | null = null;
+  #flushTimeoutId: ReturnType<typeof setTimeout> | null = null;
   #version = $state(0);
 
   entries = $state<LogEntry[]>([]);
@@ -50,9 +50,9 @@ export class LogStore {
 
   clear(): void {
     this.#buffer.length = 0;
-    if (this.#flushTimer !== null) {
-      clearTimeout(this.#flushTimer);
-      this.#flushTimer = null;
+    if (this.#flushTimeoutId !== null) {
+      clearTimeout(this.#flushTimeoutId);
+      this.#flushTimeoutId = null;
     }
     this.#version++;
     this.entries = [];
@@ -61,16 +61,16 @@ export class LogStore {
   /** Cancels any pending flush so the timer doesn't outlive the owning
    *  component. Call from `onDestroy` in the consumer (MachineView). */
   dispose(): void {
-    if (this.#flushTimer !== null) {
-      clearTimeout(this.#flushTimer);
-      this.#flushTimer = null;
+    if (this.#flushTimeoutId !== null) {
+      clearTimeout(this.#flushTimeoutId);
+      this.#flushTimeoutId = null;
     }
   }
 
   #scheduleFlush(): void {
-    if (this.#flushTimer !== null) return;
-    this.#flushTimer = setTimeout(() => {
-      this.#flushTimer = null;
+    if (this.#flushTimeoutId !== null) return;
+    this.#flushTimeoutId = setTimeout(() => {
+      this.#flushTimeoutId = null;
       this.#flush();
     }, LOG_FLUSH_INTERVAL_MS);
   }
