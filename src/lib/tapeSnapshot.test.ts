@@ -127,4 +127,29 @@ describe('tapeSnapshot', () => {
       expectWrongShape(JSON.stringify({ ...baseValid, tapes: [{ symbols: [], position: 0 }] }));            // empty symbols
     });
   });
+
+  describe('parse-wrong-shape-alphabets', () => {
+    const baseValid = {
+      format: SNAPSHOT_FORMAT,
+      version: 1,
+      tapes: [{ symbols: [' ', 'a'], position: 0 }],
+    };
+
+    const expectWrongShape = (text: string): void => {
+      const result = parse(text);
+      expect(result).toMatchObject({ reason: 'wrong-shape' });
+    };
+
+    it('R-snapshot-parse-wrong-shape-alphabets: missing or non-array alphabets', () => {
+      expectWrongShape(JSON.stringify({ ...baseValid }));
+      expectWrongShape(JSON.stringify({ ...baseValid, alphabets: 'not-array' }));
+      expectWrongShape(JSON.stringify({ ...baseValid, alphabets: null }));
+    });
+
+    it('R-snapshot-parse-wrong-shape-alphabets: alphabet entry must be array of strings', () => {
+      expectWrongShape(JSON.stringify({ ...baseValid, alphabets: ['not-array'] }));
+      expectWrongShape(JSON.stringify({ ...baseValid, alphabets: [[1, 2, 3]] }));
+      expectWrongShape(JSON.stringify({ ...baseValid, alphabets: [null] }));
+    });
+  });
 });

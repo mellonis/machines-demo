@@ -68,5 +68,16 @@ export function parse(text: string): TapeSnapshotPayload | ParseError {
     }
   }
 
+  if (!Array.isArray(obj.alphabets)) {
+    return { reason: 'wrong-shape', detail: 'alphabets missing or not an array' };
+  }
+
+  for (let i = 0; i < obj.alphabets.length; i++) {
+    const a = obj.alphabets[i];
+    if (!Array.isArray(a) || !a.every((s) => typeof s === 'string')) {
+      return { reason: 'wrong-shape', detail: `alphabets[${i}] must be string[]` };
+    }
+  }
+
   return obj as unknown as TapeSnapshotPayload;
 }
