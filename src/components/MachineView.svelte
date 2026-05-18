@@ -8,7 +8,7 @@
   import MachineWorker from '../lib/machineWorker.ts?worker';
   import { MachineRunner, WorkerError } from '../lib/machineRunner.ts';
   import * as turing from '@turing-machine-js/machine';
-  import { VIEWPORT_WIDTH } from '../lib/caps.ts';
+  import { MAX_TAPES, VIEWPORT_WIDTH } from '../lib/caps.ts';
   import { type Alphabets, type Command, type Engine, type PausedResponse, type TapeSnapshot } from '../lib/types.ts';
   import { startDemoLoop } from '../lib/demoLoop.ts';
   import { startAutoStep, parseInterval } from '../lib/autoStep.ts';
@@ -610,10 +610,17 @@
       }
     }
 
-    // Tape-count compatibility check against the current machine.
-    if (lastSnapshots && result.tapes.length !== lastSnapshots.length) {
+    // Tape-count bounds: must have ≥1 tape and fit within MAX_TAPES (the
+    // CARET_COLORS palette length + the worker's hard limit on builds).
+    // Paste is mirror-only — the user takes control and operates against
+    // the pasted state regardless of what the current machine emits.
+    if (result.tapes.length === 0) {
+      log.report('paste failed: snapshot has no tapes', 'error');
+      return;
+    }
+    if (result.tapes.length > MAX_TAPES) {
       log.report(
-        `paste failed: snapshot has ${result.tapes.length} tapes, current machine emits ${lastSnapshots.length}`,
+        `paste failed: snapshot has ${result.tapes.length} tapes (max ${MAX_TAPES})`,
         'error',
       );
       return;
@@ -630,6 +637,9 @@
     alphabets = result.alphabets;
     lastSnapshots = result.tapes;
     _buildMirrorMachine(result.tapes, result.alphabets);
+    // Wait for Svelte to mount/unmount tape rows when the count changed,
+    // then push state into the (now-correct) refs. Matches reloadWorker.
+    await tick();
     setAllFromMirror();
 
     log.report(`pasted ${result.tapes.length}-tape snapshot`, 'ok');
@@ -803,6 +813,12 @@
     </div>
 
     <div class="tape-actions">
+      {#if takeControlVisible}
+        <button class="take-control" type="button" onclick={takeControl}>
+          {@html icons.takeControl}
+          <span class="btn-label">Take control</span>
+        </button>
+      {/if}
       <button
         class="tape-action-btn"
         type="button"
@@ -822,12 +838,6 @@
       >
         {@html icons.clipboard}
       </button>
-      {#if takeControlVisible}
-        <button class="take-control" type="button" onclick={takeControl}>
-          {@html icons.takeControl}
-          <span class="btn-label">Take control</span>
-        </button>
-      {/if}
     </div>
 
     <Log entries={log.entries} onClear={() => log.clear()} />
@@ -941,6 +951,7 @@
   .tape-actions {
     display: flex;
     align-items: center;
+    justify-content: flex-end;
     gap: 6px;
     width: 100%;
   }
@@ -984,7 +995,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 100%;
+    flex: 1;
     gap: 6px;
     height: 30px;
     padding: 4px 12px;

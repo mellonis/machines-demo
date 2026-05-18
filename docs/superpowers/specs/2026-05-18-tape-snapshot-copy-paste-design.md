@@ -22,7 +22,7 @@ No current mechanism does this. The user can't share, can't checkpoint, and a Ta
 - **Paste is mirror-only.** It replaces `lastSnapshots` + `alphabets` + the mirror machine on the main thread. The next Build/Step/Run reloads the worker from the editor's code, **discarding the pasted state** — paste does NOT make the machine resume execution from the snapshot. Supporting that would require a worker `build` variant that accepts `initialTapes`; tracked separately if needed.
 - **Atomic application.** Any validation failure → zero state mutation. Either the entire snapshot lands or none of it does.
 - **Errors via the existing log.** Same surface as other failures (snippet-not-found, code errors, etc.) — `log.report('paste failed: ...', 'error')` with a categorized message per error reason. No alerts, no toasts.
-- **Button placement: alongside Take Control.** A `.tape-actions` flex row groups the three "user-controls-tape-state" actions: `[Copy] [Paste] [Take Control]`. Copy / Paste are icon-only with tooltips; Take Control keeps its existing icon + label. Paste greys when disabled (matches `Step`/`Run` disabled convention; consistent visual anchoring across modes).
+- **Button placement: alongside Take Control, icons right-aligned.** A `.tape-actions` flex row groups the three "user-controls-tape-state" actions: `[Take Control (fills available space)] [Copy] [Paste]`. Copy / Paste are icon-only with tooltips, anchored at the right edge of the row (`justify-content: flex-end`). When Take Control is hidden (MANUAL / RUNNING_CONTINUOUS / PAUSED_AT_BREAK), the two icon buttons stay pinned to the right of the empty row. Take Control keeps its existing icon + label and uses `flex: 1` so it fills the remaining space without crowding the icons. Paste greys when disabled (matches `Step`/`Run` disabled convention; consistent visual anchoring across modes).
 - **Extract `lib/tapeSnapshot.ts`.** Pure serialize/parse with categorized errors — no DOM, no clipboard, no machine knowledge. Unit-testable in isolation. Keeps MachineView focused on orchestration; mirrors the `lib/logStore.svelte.ts` extraction pattern from #45.
 - **Clipboard API: `navigator.clipboard.readText` / `writeText`.** Both are well-supported on HTTPS and localhost (the only contexts where the demo runs). No fallback to hidden-textarea hacks — if the API rejects (no permission, no support), surface as a log error.
 
@@ -61,7 +61,7 @@ Wire format (formatted JSON, 2-space indent for readability):
 | `unsupported-version` | `version` is not `1` | `paste failed: unsupported snapshot version (got <N>, expected 1)` |
 | `wrong-shape` | missing `tapes`/`alphabets`, wrong types, length mismatch, position out of range | `paste failed: malformed — <detail>` |
 
-`parse` does NOT check tape-count compatibility against the current machine — that's a separate guard at the MachineView call site (requires knowing the current `lastSnapshots.length`).
+`parse` does NOT check tape-count *bounds* — that's a separate guard at the MachineView call site, where `MAX_TAPES` is available. Empty snapshots (`tapes.length === 0`) and over-cap snapshots (`tapes.length > MAX_TAPES`) are rejected with a `paste failed: …` log entry. There is no compatibility check against the *current machine's* emit count — paste is mirror-only and the user is implicitly taking control, so they're free to paste any in-bounds snapshot regardless of what the editor's code would emit on the next Build.
 
 ## File map
 
@@ -70,7 +70,7 @@ Wire format (formatted JSON, 2-space indent for readability):
 | `src/lib/tapeSnapshot.ts` | **Create** — `SNAPSHOT_FORMAT` / `SNAPSHOT_VERSION` constants, `TapeSnapshotPayload` + `ParseError` types, `serialize(tapes, alphabets) → string`, `parse(text) → payload \| ParseError`. | ~80 lines |
 | `src/lib/tapeSnapshot.test.ts` | **Create** — node-env Vitest suite, ~7 scenarios (see Test plan). | ~120 lines |
 | `src/lib/icons.ts` | **Modify** — add `clipboard` and `clipboardPlus` (or equivalents from Tabler) icon imports. | +2 lines |
-| `src/components/MachineView.svelte` | **Modify** — wrap existing Take Control button in `.tape-actions` row; add Copy/Paste IconButtons; add `onCopy()` / `onPaste()` handlers; add `pasteEnabled` $derived; tape-count guard at paste site. | ~50 lines added |
+| `src/components/MachineView.svelte` | **Modify** — wrap existing Take Control button in `.tape-actions` row (icons right-aligned via `justify-content: flex-end`; Take Control uses `flex: 1`); add Copy/Paste icon buttons; add `onCopy()` / `onPaste()` handlers; add `pasteEnabled` $derived; `MAX_TAPES` upper bound + empty-snapshot lower bound at paste site; `await tick()` before `setAllFromMirror()` (tape count can change). Adds `MAX_TAPES` to the existing `caps` import. | ~55 lines added |
 | `docs/execution-model.md` | **Modify** — extend §14 `<topic>` row to include `tapeSnapshot.test.ts` topics. | +1 line |
 
 `Log.svelte`, `lib/logStore.svelte.ts`, `lib/caps.ts`, `lib/log.ts`, the worker, and the protocol are all unchanged.
@@ -97,4 +97,4 @@ No component tests for the Copy/Paste buttons themselves — UI wiring is mechan
 - **URL / share-link encoding.** This PR ships JSON-via-clipboard only. A future PR can layer base64 / compression / `encodeURIComponent` on top of the same `serialize` / `parse` for shorter shareable URLs.
 - **Snippet integration.** Snippets store editor code, not tape state — different concept. Not blending the two.
 - **History / undo of paste.** Paste is destructive (replaces tape state). User wants an undo? They should Copy first.
-- **Multi-machine snapshots.** The snapshot format only carries the data for the current MachineView's engine; no cross-engine portability (a Turing snapshot pasted in Post would alphabet-fail, which the existing tape-count and alphabet-shape checks would catch).
+- **Multi-machine snapshots.** The snapshot format only carries the data for the current MachineView's engine; no cross-engine portability. A Turing-style snapshot pasted into the Post tab is technically permitted (alphabets and tapes pass shape validation), but the alphabet glyphs won't match the Post engine's `{blank, mark}` semantics — the user gets a visually loaded but semantically meaningless tape. Not worth a separate rejection rule today.
