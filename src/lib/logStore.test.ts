@@ -43,5 +43,21 @@ describe('LogStore', () => {
       expect(log.entries[1]).toEqual({ text: 'entry 100' });
       expect(log.entries[LOG_RENDER_CAP]).toEqual({ text: `entry ${LOG_RENDER_CAP + 99}` });
     });
+
+    it('R-logstore-cap-boundary: exactly CAP → no header; CAP+1 → header hiddenCount=1', () => {
+      const a = new LogStore();
+      a.appendBatch(Array.from({ length: LOG_RENDER_CAP }, (_, i) => ({ text: `${i}` })));
+      vi.advanceTimersByTime(LOG_FLUSH_INTERVAL_MS);
+
+      expect(a.entries.length).toBe(LOG_RENDER_CAP);
+      expect(a.entries[0]).toEqual({ text: '0' }); // no overflow header
+
+      const b = new LogStore();
+      b.appendBatch(Array.from({ length: LOG_RENDER_CAP + 1 }, (_, i) => ({ text: `${i}` })));
+      vi.advanceTimersByTime(LOG_FLUSH_INTERVAL_MS);
+
+      expect(b.entries.length).toBe(LOG_RENDER_CAP + 1);
+      expect(b.entries[0]).toEqual({ text: '', overflow: true, hiddenCount: 1 });
+    });
   });
 });
