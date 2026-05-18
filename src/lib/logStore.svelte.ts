@@ -20,6 +20,16 @@ export class LogStore {
     this.#scheduleFlush();
   }
 
+  appendBatch(items: LogEntry[]): void {
+    if (items.length === 0) return;
+    // Avoid `this.#buffer.push(...items)` — call-stack limit kicks in at
+    // ~100k arg-count on most engines, and post-cap-removal a single Run
+    // can carry up to MAX_STEPS (100k) commands.
+    for (const item of items) this.#buffer.push(item);
+    this.#version++;
+    this.#scheduleFlush();
+  }
+
   #scheduleFlush(): void {
     if (this.#flushTimer !== null) return;
     this.#flushTimer = setTimeout(() => {
