@@ -33,5 +33,15 @@ export function parse(text: string): TapeSnapshotPayload | ParseError {
   } catch {
     return { reason: 'not-json' };
   }
-  return raw as TapeSnapshotPayload;
+
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return { reason: 'wrong-format', got: undefined };
+  }
+
+  const obj = raw as Record<string, unknown>;
+  if (obj.format !== SNAPSHOT_FORMAT) {
+    return { reason: 'wrong-format', got: obj.format };
+  }
+
+  return obj as unknown as TapeSnapshotPayload;
 }

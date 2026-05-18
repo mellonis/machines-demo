@@ -34,4 +34,30 @@ describe('tapeSnapshot', () => {
       expect(parse('')).toEqual({ reason: 'not-json' });
     });
   });
+
+  describe('parse-wrong-format', () => {
+    it('R-snapshot-parse-wrong-format: returns { reason: "wrong-format" } when format field is missing or wrong', () => {
+      // Missing format.
+      const missing = JSON.stringify({
+        version: 1,
+        tapes: [{ symbols: [' '], position: 0 }],
+        alphabets: [[' ']],
+      });
+      expect(parse(missing)).toEqual({ reason: 'wrong-format', got: undefined });
+
+      // Wrong format string.
+      const wrong = JSON.stringify({
+        format: 'something-else',
+        version: 1,
+        tapes: [{ symbols: [' '], position: 0 }],
+        alphabets: [[' ']],
+      });
+      expect(parse(wrong)).toEqual({ reason: 'wrong-format', got: 'something-else' });
+
+      // Top-level not an object.
+      expect(parse('null')).toEqual({ reason: 'wrong-format', got: undefined });
+      expect(parse('"a string"')).toEqual({ reason: 'wrong-format', got: undefined });
+      expect(parse('[]')).toEqual({ reason: 'wrong-format', got: undefined });
+    });
+  });
 });
