@@ -26,6 +26,10 @@
     {#each entries as entry, i (i)}
       {#if entry.separator}
         <hr class="sep" />
+      {:else if entry.overflow}
+        <div class="overflow" data-testid="log-overflow-header">
+          ({entry.hiddenCount} earlier {entry.hiddenCount === 1 ? 'entry' : 'entries'} hidden)
+        </div>
       {:else}
         <div
           class="line"
@@ -108,6 +112,15 @@
     border: none;
     border-top: 1px solid var(--cell-border);
     margin: 6px 0;
+  }
+
+  .overflow {
+    text-align: center;
+    font-style: italic;
+    color: var(--muted);
+    opacity: 0.7;
+    padding: 6px 0;
+    font-size: 11px;
   }
 
   .head {

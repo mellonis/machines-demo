@@ -4,7 +4,7 @@
   import Toolbar from './Toolbar.svelte';
   import ControlPanel from './ControlPanel.svelte';
   import Log from './Log.svelte';
-  import type { LogEntry, LogKind } from '../lib/log.ts';
+  import { LogStore } from '../lib/logStore.svelte.ts';
   import MachineWorker from '../lib/machineWorker.ts?worker';
   import { MachineRunner, WorkerError } from '../lib/machineRunner.ts';
   import * as turing from '@turing-machine-js/machine';
@@ -65,7 +65,7 @@
   let demoEnabled = $state(true);
   let halted = $state(false);
   let alphabets = $state<Alphabets>([]);
-  let logEntries = $state<LogEntry[]>([]);
+  const log = new LogStore();
   let lastSnapshots = $state<TapeSnapshot[] | null>(null);
   let pendingOp = $state<'load' | 'run' | null>(null);
   let stepInFlight = $state(false);
@@ -141,13 +141,10 @@
 
   const intervalMs = $derived(parseInterval(intervalText));
   const intervalIsValid = $derived(intervalMs !== null);
-  // Skip separators — mobile status mirrors a meaningful message, not a divider.
-  const latestEntry = $derived.by(() => {
-    for (let i = logEntries.length - 1; i >= 0; i--) {
-      if (!logEntries[i].separator) return logEntries[i];
-    }
-    return null;
-  });
+  // Mobile status mirrors the latest non-separator entry. Provided by LogStore;
+  // it walks the buffer (not the throttled view) so mobile stays in sync with
+  // `report()` calls without a 16ms timer lag.
+  const latestEntry = $derived(log.latest);
 
   // ControlPanel handles both single- and multi-tape via Command[]; tape
   // labels are only useful to disambiguate, so show them only when N > 1.
@@ -203,32 +200,7 @@
       (withPause && !intervalIsValid),
   );
   /* ───── log helpers ───── */
-
-  function report(textOrEntry: string | LogEntry, kind?: LogKind): void {
-    const entry: LogEntry =
-      typeof textOrEntry === 'string'
-        ? { text: textOrEntry, kind }
-        : kind
-          ? { ...textOrEntry, kind }
-          : textOrEntry;
-    logEntries = [...logEntries, entry];
-  }
-
-  function appendBatch(items: LogEntry[]): void {
-    if (items.length === 0) return;
-    logEntries = [...logEntries, ...items];
-  }
-
-  // Visually divides log activity per session (Build / Step / Run). Skipped
-  // when the log is empty so we don't open with a stranded divider.
-  function reportSeparator(): void {
-    if (logEntries.length === 0) return;
-    logEntries = [...logEntries, { text: '', separator: true }];
-  }
-
-  function clearLog(): void {
-    logEntries = [];
-  }
+  /* See LogStore (lib/logStore.svelte.ts) — methods live there. */
 
   /* ───── side-effect handlers (one source of truth on error) ───── */
 
@@ -246,7 +218,7 @@
       _buildMirrorMachine(err.tapes, alphabets);
       setAllFromMirror();
     }
-    report(`error: ${msg}`, 'error');
+    log.report(`error: ${msg}`, 'error');
     halted = true;
     executionMode = 'HALTED';
   }
@@ -336,7 +308,7 @@
       lastSnapshots = null;
       halted = true;
       const msg = err instanceof Error ? err.message : String(err);
-      report(`error: ${msg}`, 'error');
+      log.report(`error: ${msg}`, 'error');
       return false;
     } finally {
       pendingOp = null;
@@ -353,7 +325,7 @@
       runner.terminate();
     }
     executionMode = 'HALTED';
-    report('stopped', 'warn');
+    log.report('stopped', 'warn');
   }
 
   function reflectToActivePanel(commands: Command[] | null): void {
@@ -368,8 +340,8 @@
 
   async function doLoad({ userInitiated = false } = {}): Promise<void> {
     if (userInitiated) demoEnabled = false;
-    reportSeparator();
-    report(userInitiated ? 'loading…' : 'demo machine is loading…');
+    log.reportSeparator();
+    log.report(userInitiated ? 'loading…' : 'demo machine is loading…');
 
     // For DEMO (initial / non-user load), always run the canonical example —
     // user's persisted edits in the editor may be incomplete or broken; the
@@ -383,8 +355,8 @@
 
     // Tape refs are bound by {#each tapes}: wait one tick for new
     // <Tape> instances to mount before reflecting panel state.
-    appendBatch(tapesEntry(lastSnapshots!, alphabets, CARET_COLORS));
-    report(halted ? 'loaded — halted immediately' : 'loaded — ready', 'ok');
+    log.appendBatch(tapesEntry(lastSnapshots!, alphabets, CARET_COLORS));
+    log.report(halted ? 'loaded — halted immediately' : 'loaded — ready', 'ok');
     await tick();
     if (userTookControl) reflectNeutral();
   }
@@ -403,7 +375,7 @@
     // Step button doubles as "Pause" while RUNNING_AUTO.
     if (executionMode === 'RUNNING_AUTO') {
       executionMode = 'RUNNING_STEP';
-      report('paused');
+      log.report('paused');
       return;
     }
 
@@ -428,10 +400,10 @@
         // Always log the iter's command — even on the halting iter — so the
         // legacy step path matches the run-mode Step path. The halt entry
         // follows separately when applicable.
-        report(commandsEntry(res.commands, { stepNumber: res.stepsApplied }, CARET_COLORS));
+        log.report(commandsEntry(res.commands, { stepNumber: res.stepsApplied }, CARET_COLORS));
       }
       if (res.halted) {
-        report(`halted after ${res.stepsApplied} step(s)`, 'ok');
+        log.report(`halted after ${res.stepsApplied} step(s)`, 'ok');
         executionMode = 'HALTED';
       }
       if (res.commands) {
@@ -447,21 +419,21 @@
     // the step boundary; user-authored state.debug.before still fires naturally.
     // onPausedHandler takes over; subsequent Step clicks resume(step: true).
     if (stepInFlight) return;
-    reportSeparator();
-    report('loading…');
+    log.reportSeparator();
+    log.report('loading…');
     const ok = await reloadWorker();
     if (!ok) {
       executionMode = userTookControl ? 'MANUAL' : 'DEMO';
       return;
     }
     if (halted) {
-      report('halted immediately', 'ok');
+      log.report('halted immediately', 'ok');
       executionMode = 'HALTED';
       return;
     }
     codeChangedWarned = false;
     reflectNeutral();
-    report('running step by step…');
+    log.report('running step by step…');
 
     pendingOp = 'run';
     try {
@@ -479,17 +451,17 @@
       setAllFromMirror();
       halted = true;
       reflectNeutral();
-      if (!res.truncated && res.commands.length > 0) {
-        appendBatch(
+      if (res.commands.length > 0) {
+        log.appendBatch(
           res.commands.map((commands, i) =>
             commandsEntry(commands, { stepNumber: res.startStep + i + 1 }, CARET_COLORS),
           ),
         );
       }
       if (res.truncated) {
-        report(`truncated at ${res.stepsApplied} steps (limit hit)`, 'warn');
+        log.report(`truncated at ${res.stepsApplied} steps (limit hit)`, 'warn');
       } else {
-        report(`halted after ${res.stepsApplied} step(s)`, 'ok');
+        log.report(`halted after ${res.stepsApplied} step(s)`, 'ok');
       }
       executionMode = 'HALTED';
     } catch (err) {
@@ -503,7 +475,7 @@
     // Replay buffered per-step commands so the trace leading to the break is visible.
     if (paused.commands.length > 0) {
       const startStep = paused.stepsApplied - paused.commands.length;
-      appendBatch(
+      log.appendBatch(
         paused.commands.map((commands, i) =>
           commandsEntry(commands, { stepNumber: startStep + i + 1 }, CARET_COLORS),
         ),
@@ -520,7 +492,7 @@
     const when = paused.debugBreak.before ? 'before' : 'after';
     const symbols = paused.currentSymbols.map((s) => `'${s}'`).join(', ');
     const stateRef = paused.state ? `state ${paused.state}` : 'unnamed state';
-    report(`paused at ${stateRef} ${when} applying command for symbols: [${symbols}]`, 'ok');
+    log.report(`paused at ${stateRef} ${when} applying command for symbols: [${symbols}]`, 'ok');
     executionMode = 'RUNNING_PAUSED_AT_BREAK';
   }
 
@@ -535,8 +507,8 @@
     if (withPause) {
       // Resume auto-stepping from current RUNNING_STEP position without reload.
       if (executionMode !== 'RUNNING_STEP') {
-        reportSeparator();
-        report('loading…');
+        log.reportSeparator();
+        log.report('loading…');
         const ok = await reloadWorker();
         if (!ok) {
           executionMode = userTookControl ? 'MANUAL' : 'DEMO';
@@ -545,13 +517,13 @@
       }
       executionMode = 'RUNNING_AUTO';
       codeChangedWarned = false;
-      report(`running, auto-stepping every ${intervalMs}ms`);
+      log.report(`running, auto-stepping every ${intervalMs}ms`);
       // Auto-step loop is started by the $effect that watches executionMode.
       return;
     }
 
-    reportSeparator();
-    report('loading…');
+    log.reportSeparator();
+    log.report('loading…');
     const ok = await reloadWorker();
     if (!ok) {
       executionMode = userTookControl ? 'MANUAL' : 'DEMO';
@@ -559,7 +531,7 @@
     }
     reflectNeutral();
     executionMode = 'RUNNING_CONTINUOUS';
-    report('running…');
+    log.report('running…');
     pendingOp = 'run';
     try {
       const res = await runner.run({
@@ -572,20 +544,17 @@
       setAllFromMirror();
       halted = true;
       reflectNeutral();
-      // Skip the per-step trace dump on truncated runs — at MAX_STEPS the
-      // payload is 100k entries and Svelte's reactive list freezes the page.
-      // Band-aid for #45 (proper log throttle/buffer split tracked there).
-      if (!res.truncated && res.commands.length > 0) {
-        appendBatch(
+      if (res.commands.length > 0) {
+        log.appendBatch(
           res.commands.map((commands, i) =>
             commandsEntry(commands, { stepNumber: res.startStep + i + 1 }, CARET_COLORS),
           ),
         );
       }
       if (res.truncated) {
-        report(`truncated at ${res.stepsApplied} steps (limit hit)`, 'warn');
+        log.report(`truncated at ${res.stepsApplied} steps (limit hit)`, 'warn');
       } else {
-        report(`halted after ${res.stepsApplied} step(s)`, 'ok');
+        log.report(`halted after ${res.stepsApplied} step(s)`, 'ok');
       }
       executionMode = 'HALTED';
     } catch (err) {
@@ -596,7 +565,7 @@
   }
 
   function takeControl(): void {
-    report('user took control', 'ok');
+    log.report('user took control', 'ok');
     userTookControl = true;
     executionMode = 'MANUAL';
     reflectNeutral();
@@ -604,7 +573,7 @@
 
   async function onApply(commands: Command[]): Promise<void> {
     await renderFromMirror(commands, true);
-    report(commandsEntry(commands, 'applied', CARET_COLORS));
+    log.report(commandsEntry(commands, 'applied', CARET_COLORS));
   }
 
   function resetCodeToSelected(): void {
@@ -634,7 +603,7 @@
     if (!existing) return;
     const { id, snippet } = saveSnippet(engine, existing.title, code);
     snippets = { ...snippets, [id]: snippet };
-    report(`saved "${existing.title}"`, 'ok');
+    log.report(`saved "${existing.title}"`, 'ok');
   }
 
   function onLoadSnippet(id: string): void {
@@ -704,10 +673,10 @@
             reflectToActivePanel(res.commands);
             await renderFromMirror(res.commands, true);
             // Always log the iter's command (incl. halting iter), then halt.
-            report(commandsEntry(res.commands, { stepNumber: res.stepsApplied }, CARET_COLORS));
+            log.report(commandsEntry(res.commands, { stepNumber: res.stepsApplied }, CARET_COLORS));
           }
           if (res.halted) {
-            report(`halted after ${res.stepsApplied} step(s)`, 'ok');
+            log.report(`halted after ${res.stepsApplied} step(s)`, 'ok');
             executionMode = 'HALTED';
           }
         } catch (err) {
@@ -727,7 +696,7 @@
       if (executionMode === 'RUNNING_STEP' || executionMode === 'RUNNING_AUTO' || executionMode === 'RUNNING_PAUSED_AT_BREAK') {
         if (!codeChangedWarned) {
           codeChangedWarned = true;
-          report('code changed — current execution continues from loaded state', 'warn');
+          log.report('code changed — current execution continues from loaded state', 'warn');
         }
       }
     });
@@ -736,12 +705,13 @@
   /* ───── lifecycle ───── */
 
   onMount(() => {
-    if (initial.badUrlId !== null) report(`snippet not found: ${initial.badUrlId}`, 'error');
+    if (initial.badUrlId !== null) log.report(`snippet not found: ${initial.badUrlId}`, 'error');
     void doLoad();
   });
 
   onDestroy(() => {
     runner.terminate();
+    log.dispose();
   });
 </script>
 
@@ -768,7 +738,7 @@
       </button>
     {/if}
 
-    <Log entries={logEntries} onClear={clearLog} />
+    <Log entries={log.entries} onClear={() => log.clear()} />
   </div>
 
   <div class="panel-editor">

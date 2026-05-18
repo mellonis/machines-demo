@@ -24,3 +24,17 @@ export const WORKER_TIMEOUT_MS = 5_000;
 /** UI-side cap on tape count. `CARET_COLORS` (in `MachineView.svelte`) must
  *  have at least this many entries; the worker rejects loads with more. */
 export const MAX_TAPES = 5;
+
+/** Render-view cap: `Log.svelte` only ever renders this many entries.
+ *  Anything older lives in the LogStore's non-reactive buffer and is
+ *  summarized by a synthetic overflow header. Bounds the DOM cost of a
+ *  large-trace flush; configurable in the future via #65. */
+export const LOG_RENDER_CAP = 5000;
+
+/** Flush interval for the LogStore's buffer-to-view recompute. `report` /
+ *  `appendBatch` push into the buffer synchronously but defer the reactive
+ *  `entries` reassignment so N rapid calls within one window coalesce into
+ *  one Svelte update / one auto-scroll layout. 16ms ≈ one frame — long
+ *  enough to coalesce a bulk dump, short enough that step-by-step still
+ *  feels live. */
+export const LOG_FLUSH_INTERVAL_MS = 16;

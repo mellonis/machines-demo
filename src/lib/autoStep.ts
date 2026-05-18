@@ -17,7 +17,7 @@ export function parseInterval(str: string): number | null {
 export function startAutoStep(intervalMs: number, tick: () => Promise<void>): () => void {
   let stopped = false;
   let inFlight = false;
-  let timer: ReturnType<typeof setTimeout> | null = null;
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
   const run = async (): Promise<void> => {
     if (stopped || inFlight) return;
@@ -28,13 +28,13 @@ export function startAutoStep(intervalMs: number, tick: () => Promise<void>): ()
       inFlight = false;
     }
     if (stopped) return;
-    timer = setTimeout(run, intervalMs);
+    timeoutId = setTimeout(run, intervalMs);
   };
 
   run();
 
   return () => {
     stopped = true;
-    if (timer !== null) clearTimeout(timer);
+    if (timeoutId !== null) clearTimeout(timeoutId);
   };
 }

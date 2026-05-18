@@ -20,4 +20,10 @@ export type LogEntry = {
   /** Renders as a horizontal divider instead of a text row. Used to visually
    * group log activity per Build/Step/Run session. */
   separator?: boolean;
+  /** Synthetic header injected at the top of the render view when the
+   *  non-reactive buffer holds more entries than `LOG_RENDER_CAP`. Never
+   *  stored in the buffer; recomputed on every render-view flush. */
+  overflow?: boolean;
+  /** Companion to `overflow`: how many buffer entries are not in the view. */
+  hiddenCount?: number;
 };
