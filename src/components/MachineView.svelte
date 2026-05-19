@@ -181,13 +181,20 @@
       : 'Reset to selected example',
   );
 
-  const loadDisabled = $derived(
-    pendingOp !== null && executionMode !== 'RUNNING_PAUSED',
-  );
+  // Build is disabled whenever an op is in flight, including RUNNING_PAUSED:
+  // clicking Build from a paused state would terminate the worker mid-run,
+  // discard the paused machine state, and reload from code — destructive and
+  // surprising. The user must Stop first to get a clean cold-start surface.
+  const loadDisabled = $derived(pendingOp !== null);
   // Step/Run stay enabled in HALTED — they reload-from-code on entry, which
   // also clears `halted`. Disabling would just force an extra Build click.
+  // RUNNING_AUTO is also allowed: the Step button doubles as Pause and must
+  // be clickable to cancel the throttle. RUNNING_CONTINUOUS is the only
+  // running mode that disables the button (no per-iter checkpoint).
   const stepDisabled = $derived(
-    (pendingOp !== null && executionMode !== 'RUNNING_PAUSED') ||
+    (pendingOp !== null &&
+      executionMode !== 'RUNNING_PAUSED' &&
+      executionMode !== 'RUNNING_AUTO') ||
       !workerLive ||
       executionMode === 'RUNNING_CONTINUOUS',
   );
@@ -425,6 +432,11 @@
         debug: debugMode,
         step: true,
         onPaused: onPausedHandler,
+        // Same run Promise survives Continue → if withPause is on at that
+        // click, the worker switches to throttled mode and emits per-iter
+        // `idle` messages. Without onIter wired here, those commands would
+        // drop on the floor and the tape wouldn't animate until halt.
+        onIter: onIterHandler,
       });
       // Reached only when the run halts without pausing — e.g. Continue from
       // a paused state, or the armed break never fires before halt. Mirror

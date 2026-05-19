@@ -56,6 +56,50 @@ test.describe('cold-start', () => {
     await expect(page.getByRole('button', { name: /^continue$/i })).toBeVisible();
   });
 
+  test('E-continue-from-step-with-pause-renders-iters: Continue after cold-start Step (withPause on) animates iters, not just halt', async ({ page }) => {
+    // Reach RUNNING_PAUSED via cold-start Step (debug=on uses the engine's
+    // armed .after on iter 1). Same flow as E-cold-start-step-debug-on but
+    // also turn withPause on so Continue enters the throttled auto loop.
+    await page.getByRole('checkbox', { name: /^debug$/i }).check();
+    await page.getByRole('checkbox', { name: /^with pause$/i }).check();
+    await page.getByPlaceholder('1s').fill('100ms');
+    await page.getByRole('button', { name: /^step$/i }).click();
+    await expect(page.getByRole('button', { name: /^continue$/i })).toBeVisible();
+    await expect(
+      page.getByTestId('log-line').filter({ hasText: /^paused at/ }),
+    ).toBeVisible();
+
+    // Snapshot log line counts before Continue. The auto-loop emits a
+    // per-iter `step N:` line via onIter; the bug we're catching here was
+    // those lines being dropped because doStep didn't register onIter on
+    // the run Promise that Continue resumes.
+    const stepLinesBefore = await page
+      .getByTestId('log-line')
+      .filter({ hasText: /^step \d+:/ })
+      .count();
+
+    await page.getByRole('button', { name: /^continue$/i }).click();
+    await expect(
+      page.getByTestId('log-line').filter({ hasText: /halted after \d+ step\(s\)/ }),
+    ).toBeVisible({ timeout: 10_000 });
+
+    // Per-iter step lines must have grown by ≥2 between resume and halt
+    // (the default example takes more than 2 iters past iter 1). If onIter
+    // was dropped, this count stays at the cold-start-Step value and the
+    // test fails — the UI was getting the halt snap with no animation in
+    // between, exactly the user-reported symptom.
+    const stepLinesAfter = await page
+      .getByTestId('log-line')
+      .filter({ hasText: /^step \d+:/ })
+      .count();
+    expect(stepLinesAfter - stepLinesBefore).toBeGreaterThanOrEqual(2);
+
+    // Final tape still correct (the halt-snap path was unaffected by the
+    // bug; assert it for completeness, mirroring E-cold-start-run-debug-off).
+    const cells = await page.getByTestId('tape').first().getByTestId('tape-cell').allInnerTexts();
+    expect(cells.filter((s) => s === '*').length).toBe(2);
+  });
+
   test('E-continue-from-step: Continue (debug=off) runs to halt without further pauses', async ({ page }) => {
     // Reach the paused state via the same flow as the previous test.
     await page.getByRole('checkbox', { name: /^debug$/i }).check();
@@ -113,12 +157,14 @@ test.describe('cold-start', () => {
       page.getByTestId('log-line').filter({ hasText: /halted after/ }),
     ).not.toBeVisible();
 
-    // Step doubles as Pause in RUNNING_AUTO — sends a `pause` request; the
-    // worker cancels the throttle and dispatches a synthetic `paused` from
-    // inside `onIter`. The "after applying command" phrasing falls out of
-    // debugBreak={} (the renderer falls back to "after" when neither
-    // before/after is set).
-    await page.getByRole('button', { name: /^step$/i }).click();
+    // Step doubles as Pause in RUNNING_AUTO — same button, icon + label
+    // flip to a pause glyph and the word "Pause". Target by the rendered
+    // label to assert it's actually labelled correctly AND enabled (this
+    // button is what the user clicks to pause an auto run). The
+    // "after applying command" phrasing falls out of debugBreak={} (the
+    // renderer falls back to "after" when neither before/after is set).
+    await expect(page.getByRole('button', { name: /^pause$/i })).toBeEnabled();
+    await page.getByRole('button', { name: /^pause$/i }).click();
 
     // The state name must be a non-empty token — proves the fix for
     // `state: '' → m.state.name ?? ''`. State names in the default example

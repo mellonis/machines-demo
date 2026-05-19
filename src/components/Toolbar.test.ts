@@ -54,6 +54,18 @@ describe('Toolbar', () => {
       expect(screen.queryByRole('button', { name: /^run$/i })).not.toBeInTheDocument();
     });
 
+    it('C-toolbar-run-label-running-auto: shows "Continue" in RUNNING_AUTO (run already in flight)', () => {
+      render(Toolbar, { props: { ...defaultProps(), executionMode: 'RUNNING_AUTO' } });
+      expect(screen.getByRole('button', { name: /^continue$/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^run$/i })).not.toBeInTheDocument();
+    });
+
+    it('C-toolbar-run-label-running-continuous: shows "Continue" in RUNNING_CONTINUOUS (run already in flight)', () => {
+      render(Toolbar, { props: { ...defaultProps(), executionMode: 'RUNNING_CONTINUOUS' } });
+      expect(screen.getByRole('button', { name: /^continue$/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^run$/i })).not.toBeInTheDocument();
+    });
+
     it('C-toolbar-step-label-default: shows "Step" outside running-auto', () => {
       render(Toolbar, { props: { ...defaultProps(), executionMode: 'DEMO' } });
       expect(screen.getByRole('button', { name: /^step$/i })).toBeInTheDocument();
@@ -106,6 +118,22 @@ describe('Toolbar', () => {
     it('C-toolbar-stop-hidden-halted: Stop button absent in HALTED', () => {
       render(Toolbar, { props: { ...defaultProps(), executionMode: 'HALTED' } });
       expect(screen.queryByRole('button', { name: /^stop$/i })).not.toBeInTheDocument();
+    });
+
+    it('C-toolbar-stop-visible-running-auto: Stop button renders in RUNNING_AUTO', () => {
+      render(Toolbar, { props: { ...defaultProps(), executionMode: 'RUNNING_AUTO' } });
+      expect(screen.getByRole('button', { name: /^stop$/i })).toBeInTheDocument();
+    });
+
+    it('C-toolbar-stop-visible-running-continuous: Stop button renders in RUNNING_CONTINUOUS (kill-switch for continuous runs)', () => {
+      render(Toolbar, { props: { ...defaultProps(), executionMode: 'RUNNING_CONTINUOUS' } });
+      expect(screen.getByRole('button', { name: /^stop$/i })).toBeInTheDocument();
+    });
+
+    it('C-toolbar-pause-label-running-auto: Step button shows "Pause" label in RUNNING_AUTO (doubles as Pause)', () => {
+      render(Toolbar, { props: { ...defaultProps(), executionMode: 'RUNNING_AUTO' } });
+      expect(screen.getByRole('button', { name: /^pause$/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^step$/i })).not.toBeInTheDocument();
     });
   });
 

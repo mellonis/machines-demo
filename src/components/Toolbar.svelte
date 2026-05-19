@@ -225,12 +225,26 @@
   const configVisible = $derived(
     executionMode !== 'RUNNING_AUTO' && executionMode !== 'RUNNING_CONTINUOUS',
   );
+  // Stop is the user's kill-switch for any non-halted run state. Without it
+  // in RUNNING_CONTINUOUS the user is locked into the run until halt (or the
+  // worker-side timeout backstop) — visible across all three running modes.
   const stopVisible = $derived(
     executionMode === 'RUNNING_AUTO' ||
+      executionMode === 'RUNNING_CONTINUOUS' ||
       executionMode === 'RUNNING_PAUSED',
   );
+  // Once a run is in flight (any RUNNING_*), the only meaningful action this
+  // button could take is "resume / let the run finish", so it reads as
+  // `Continue` — enabled in RUNNING_PAUSED, disabled in RUNNING_AUTO /
+  // RUNNING_CONTINUOUS where the run is already advancing on its own. In
+  // resting modes (DEMO/IDLE/MANUAL/HALTED) it's a fresh-start action and
+  // reads `Run`.
   const runLabel = $derived(
-    executionMode === 'RUNNING_PAUSED' ? 'Continue' : 'Run',
+    executionMode === 'RUNNING_AUTO' ||
+      executionMode === 'RUNNING_CONTINUOUS' ||
+      executionMode === 'RUNNING_PAUSED'
+      ? 'Continue'
+      : 'Run',
   );
 </script>
 

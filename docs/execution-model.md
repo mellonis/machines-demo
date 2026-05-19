@@ -81,12 +81,12 @@ Entry: Run from IDLE / MANUAL / HALTED with `withPause=on`; Continue from RUNNIN
 Exit: Pause (→ RUNNING_PAUSED), debug break with `debug=on` (→ RUNNING_PAUSED), Stop (→ HALTED), run completion (→ HALTED), Take Control (→ MANUAL).
 
 ### RUNNING_CONTINUOUS
-The worker is running inside `machine.run({ onStep, onPause, onIter })` with no throttle (`onIter` no-ops in this mode) — snap-to-final. Belt animation is suppressed; per-step commands batch-log on completion. Same control surface as RUNNING_AUTO.
+The worker is running inside `machine.run({ onStep, onPause, onIter })` with no throttle (`onIter` no-ops in this mode) — snap-to-final. Belt animation is suppressed; per-step commands batch-log on completion. Stop is visible as the user's kill-switch; the Step-→-Pause affordance is hidden (no per-iter checkpoint).
 Entry: Run from IDLE / MANUAL / HALTED with `withPause=off`; Continue from RUNNING_PAUSED with `withPause=off`.
 Exit: debug break with `debug=on` (→ RUNNING_PAUSED), Stop (→ HALTED), run completion (→ HALTED), Take Control (→ MANUAL).
 
 ### RUNNING_PAUSED
-The worker is suspended inside `machine.run()` awaiting a `resume` message from the main thread. Reachable from any RUNNING_* mode via debug break, click-pause, or cold-start arming. The button labeled "Run" elsewhere reads "Continue" here.
+The worker is suspended inside `machine.run()` awaiting a `resume` message from the main thread. Reachable from any RUNNING_* mode via debug break, click-pause, or cold-start arming. The Run button reads "Continue" throughout any RUNNING_* mode (disabled in AUTO/CONTINUOUS, enabled here). Build is disabled while a run is in flight (including PAUSED) — to start over the user must Stop first, then Build, which makes the worker tear-down explicit rather than silent.
 Entry: cold-start Step (arms `initialState.debug.after`); break fires from RUNNING_AUTO / RUNNING_CONTINUOUS with `debug=on`; click-pause from RUNNING_AUTO; Step self-loop from RUNNING_PAUSED.
 Exit: Step (arm next `.after`, → RUNNING_PAUSED via re-pause), Continue (→ RUNNING_AUTO / RUNNING_CONTINUOUS for the duration of the resume), Stop (terminate worker → HALTED), Take Control (→ MANUAL).
 
