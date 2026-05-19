@@ -60,23 +60,3 @@ export function expectPhase(currentKind: WorkerPhaseKind, allowed: WorkerPhaseKi
   }
 }
 
-// --- Step trick arming ---
-
-export type DebugConfig = { before?: unknown; after?: unknown } | null;
-export type DebugTarget = { debug: DebugConfig };
-
-/** Sets `target.debug.after = true` while preserving any user-authored `.before`.
- *  Returns a `restore` function that reverts to the original `target.debug`
- *  (by reference, so a complex original config is restored exactly). */
-export function armStepAfter(target: DebugTarget): { restore: () => void } {
-  const original = target.debug;
-  const preservedBefore = original?.before;
-  const newDebug: { before?: unknown; after?: unknown } = { after: true };
-  if (preservedBefore !== undefined) newDebug.before = preservedBefore;
-  target.debug = newDebug;
-  return {
-    restore: () => {
-      target.debug = original;
-    },
-  };
-}

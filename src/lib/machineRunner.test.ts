@@ -71,6 +71,7 @@ describe('MachineRunner', () => {
         maxSteps: 100,
         debug: true,
         step: false,
+        intervalMs: null,
       });
 
       const ranPayload = {
@@ -101,6 +102,7 @@ describe('MachineRunner', () => {
         maxSteps: MAX_STEPS,
         debug: false,
         step: false,
+        intervalMs: null,
       });
 
       current().respond({
@@ -248,6 +250,185 @@ describe('MachineRunner', () => {
       current().respond(ranPayload);
 
       await expect(runPromise).resolves.toEqual(ranPayload);
+    });
+
+    it('R-run-intervalms-passthrough: run({intervalMs}) posts the value on the run request', async () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const buildPromise = runner.build('// user code');
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      await buildPromise;
+
+      const runPromise = runner.run({ intervalMs: 250 });
+      expect(current().last).toMatchObject({ type: 'run', intervalMs: 250 });
+
+      // Settle so the test doesn't leak a pending run.
+      current().respond({
+        type: 'ran',
+        tapes: [],
+        truncated: false,
+        commands: [],
+        startStep: 0,
+        stepsApplied: 0,
+      });
+      await runPromise;
+    });
+
+    it('R-resume-intervalms-on: resume(step, intervalMs) posts intervalMs', async () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const buildPromise = runner.build('// user code');
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      await buildPromise;
+
+      const runPromise = runner.run({ debug: true, onPaused: () => {} });
+      current().respond({
+        type: 'paused',
+        tapes: [],
+        commands: [],
+        stepsApplied: 1,
+        state: 'q1',
+        currentSymbols: ['a'],
+        debugBreak: { before: true as const },
+      });
+
+      runner.resume(false, 500);
+      expect(current().last).toEqual({ type: 'resume', step: false, intervalMs: 500 });
+
+      runner.resume(true, null);
+      expect(current().last).toEqual({ type: 'resume', step: true, intervalMs: null });
+
+      current().respond({
+        type: 'ran',
+        tapes: [],
+        truncated: false,
+        commands: [],
+        startStep: 0,
+        stepsApplied: 1,
+      });
+      await runPromise;
+    });
+
+    it('R-resume-intervalms-omitted: resume(step) without intervalMs leaves field off', async () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const buildPromise = runner.build('// user code');
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      await buildPromise;
+
+      const runPromise = runner.run({ debug: true, onPaused: () => {} });
+      current().respond({
+        type: 'paused',
+        tapes: [],
+        commands: [],
+        stepsApplied: 1,
+        state: 'q1',
+        currentSymbols: ['a'],
+        debugBreak: { before: true as const },
+      });
+
+      runner.resume(true);
+      // Default resume() must not carry intervalMs — the worker reads the
+      // missing field as "keep the previous policy", and tests downstream
+      // depend on that exact wire shape.
+      expect(current().last).toEqual({ type: 'resume', step: true });
+
+      current().respond({
+        type: 'ran',
+        tapes: [],
+        truncated: false,
+        commands: [],
+        startStep: 0,
+        stepsApplied: 1,
+      });
+      await runPromise;
+    });
+
+    it('R-pause-protocol: pause() posts {type:"pause"} mid-run', async () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const buildPromise = runner.build('// user code');
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      await buildPromise;
+
+      const runPromise = runner.run({ intervalMs: 250 });
+      runner.pause();
+      expect(current().last).toEqual({ type: 'pause' });
+
+      // pause doesn't complete the run; settle via ran for cleanup.
+      current().respond({
+        type: 'ran',
+        tapes: [],
+        truncated: false,
+        commands: [],
+        startStep: 0,
+        stepsApplied: 1,
+      });
+      await runPromise;
+    });
+
+    it('R-pause-no-run: pause() with no pending run throws', () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const buildPromise = runner.build('// user code');
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      void buildPromise;
+
+      expect(() => runner.pause()).toThrow('pause: no pending run');
+    });
+
+    it('R-iter-callback: idle forwards to onIter and does not complete the run', async () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const buildPromise = runner.build('// user code');
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      await buildPromise;
+
+      const iters: { stepsApplied: number; len: number }[] = [];
+      const runPromise = runner.run({
+        intervalMs: 250,
+        onIter: (d) => iters.push({ stepsApplied: d.stepsApplied, len: d.commands.length }),
+      });
+
+      current().respond({
+        type: 'idle',
+        commands: [[{ movement: 'R', symbol: null }]],
+        stepsApplied: 1,
+      });
+      current().respond({ type: 'busy' });
+      current().respond({
+        type: 'idle',
+        commands: [[{ movement: 'L', symbol: null }]],
+        stepsApplied: 2,
+      });
+      current().respond({ type: 'busy' });
+
+      expect(iters).toEqual([
+        { stepsApplied: 1, len: 1 },
+        { stepsApplied: 2, len: 1 },
+      ]);
+
+      // Run still pending — only ran/error complete it.
+      let resolved = false;
+      void runPromise.then(() => { resolved = true; });
+      await Promise.resolve();
+      expect(resolved).toBe(false);
+
+      current().respond({
+        type: 'ran',
+        tapes: [],
+        truncated: false,
+        commands: [],
+        startStep: 2,
+        stepsApplied: 2,
+      });
+      await runPromise;
     });
 
     it('S-step-paused-off / R-protocol-step-arming: run({step:true}) posts step=true', async () => {
@@ -399,6 +580,67 @@ describe('MachineRunner', () => {
 
       runner.resume(false);
       // Attach assertion before advancing the clock so the rejection is handled immediately.
+      const assertion = expect(runPromise).rejects.toThrow(/timeout after/);
+      await vi.advanceTimersByTimeAsync(WORKER_TIMEOUT_MS);
+      await assertion;
+    });
+
+    it('R-timer-suspend-on-idle: idle clears the timer; advancing past WORKER_TIMEOUT_MS does not reject', async () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const buildPromise = runner.build('// user code');
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      await buildPromise;
+
+      const runPromise = runner.run({ intervalMs: 60_000, onIter: () => {} });
+      // Worker is now in a throttle window — emit idle so the runner suspends.
+      current().respond({
+        type: 'idle',
+        commands: [[{ movement: 'R', symbol: null }]],
+        stepsApplied: 1,
+      });
+
+      // Advance past WORKER_TIMEOUT_MS — should NOT reject (we're idle).
+      await vi.advanceTimersByTimeAsync(WORKER_TIMEOUT_MS * 2);
+
+      let runSettled = false;
+      void runPromise.then(
+        () => { runSettled = true; },
+        () => { runSettled = true; },
+      );
+      await Promise.resolve();
+      expect(runSettled).toBe(false);
+
+      // Settle cleanly.
+      current().respond({
+        type: 'ran',
+        tapes: [],
+        truncated: false,
+        commands: [],
+        startStep: 1,
+        stepsApplied: 1,
+      });
+      await runPromise;
+    });
+
+    it('R-timer-restart-on-busy: busy re-arms the timer; advancing past WORKER_TIMEOUT_MS rejects', async () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const buildPromise = runner.build('// user code');
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      await buildPromise;
+
+      const runPromise = runner.run({ intervalMs: 60_000, onIter: () => {} });
+      current().respond({
+        type: 'idle',
+        commands: [[{ movement: 'R', symbol: null }]],
+        stepsApplied: 1,
+      });
+      current().respond({ type: 'busy' });
+
+      // Timer restarted — advancing past WORKER_TIMEOUT_MS should reject.
       const assertion = expect(runPromise).rejects.toThrow(/timeout after/);
       await vi.advanceTimersByTimeAsync(WORKER_TIMEOUT_MS);
       await assertion;

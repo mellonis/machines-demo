@@ -6,10 +6,8 @@ import {
   snapshotTapes,
   snapshotAlphabets,
   expectPhase,
-  armStepAfter,
   type MachineYield,
   type TapeLike,
-  type DebugTarget,
 } from './workerHelpers';
 
 describe('workerHelpers', () => {
@@ -144,36 +142,4 @@ describe('workerHelpers', () => {
     });
   });
 
-  describe('step-arm', () => {
-    it('R-step-arm-sets-after: assigns target.debug = { after: true } when original was null', () => {
-      const target: DebugTarget = { debug: null };
-      armStepAfter(target);
-      expect(target.debug).toEqual({ after: true });
-    });
-
-    it('R-step-arm-preserves-before: keeps user-authored .before in the new debug config', () => {
-      const target: DebugTarget = { debug: { before: true } };
-      armStepAfter(target);
-      expect(target.debug).toEqual({ after: true, before: true });
-    });
-
-    it('R-step-arm-restore-null: restore() reverts target.debug to original null', () => {
-      const target: DebugTarget = { debug: null };
-      const { restore } = armStepAfter(target);
-      expect(target.debug).not.toBeNull();
-      restore();
-      expect(target.debug).toBeNull();
-    });
-
-    it('R-step-arm-restore-by-reference: restore() puts the exact original object reference back', () => {
-      const original = { before: true, after: 'someFilter' as unknown };
-      const target: DebugTarget = { debug: original };
-      const { restore } = armStepAfter(target);
-      // Helper assigned a NEW object containing { after: true, before: true }.
-      expect(target.debug).not.toBe(original);
-      restore();
-      // Restore puts the SAME original reference back, not a copy.
-      expect(target.debug).toBe(original);
-    });
-  });
 });

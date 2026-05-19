@@ -40,14 +40,14 @@ src/
     ├── machineRunner.ts        main-thread worker wrapper; WORKER_TIMEOUT_MS per-segment cap; injected workerFactory
     ├── machineRunner.test.ts   Vitest suite for MachineRunner — protocol-shape / timer / pending / error categories (cites R-... / S-... scenario IDs)
     ├── machineWorker.ts        spawns user code via new Function inside worker; imports pure logic from workerHelpers.ts
-    ├── workerHelpers.ts        pure helpers extracted from machineWorker — movementCode, commandsFromYield, snapshot*, expectPhase, armStepAfter
+    ├── workerHelpers.ts        pure helpers extracted from machineWorker — movementCode, commandsFromYield, snapshot*, expectPhase
     ├── workerHelpers.test.ts   Vitest suite for workerHelpers — 5 topic groups (movement-code, commands, snapshot, phase-guard, step-arm)
     ├── testUtils.ts            FakeWorker + makeFakeFactory test helpers
     ├── log.ts                  log-entry types + helpers shared by Log.svelte
     ├── logStore.svelte.ts      per-MachineView log store — non-reactive #buffer + setTimeout-throttled $state view, LOG_RENDER_CAP slice with synthetic overflow header, buffer-sourced reactive `latest` getter
     ├── logStore.test.ts        Vitest suite for LogStore — buffer-append / cap / separator / latest / clear / dispose / flush-* (cites R-logstore-...)
     ├── demoLoop.ts             idle-mode random-command loop
-    ├── autoStep.ts             paused-auto-step controller + parseInterval
+    ├── interval.ts             parseInterval + MIN_AUTO_INTERVAL_MS for the RUNNING_AUTO throttle
     ├── completions.ts          CodeMirror autocomplete: machine namespace + locals
     ├── syntaxLinter.ts         Lezer-based syntax-error markers
     ├── persist.ts              localStorage helpers per engine — code, example, snippets (UUID-keyed)
