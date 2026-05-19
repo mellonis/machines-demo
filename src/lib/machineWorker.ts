@@ -168,7 +168,7 @@ let stepRequested = false;
 // `resume` request — withPause is re-read at Continue per spec §3).
 let runIntervalMs: number | null = null;
 let pendingTimeoutId: ReturnType<typeof setTimeout> | null = null;
-let pendingTimerResolve: (() => void) | null = null;
+let pendingTimeoutResolve: (() => void) | null = null;
 
 // Click-pause: set by the `pause` request handler; consumed in onIter after
 // the throttle await unwinds. The handler cancels the throttle timer so
@@ -190,7 +190,7 @@ function reset(): void {
   stepRequested = false;
   runIntervalMs = null;
   pendingTimeoutId = null;
-  pendingTimerResolve = null;
+  pendingTimeoutResolve = null;
   pauseRequested = false;
 }
 
@@ -202,9 +202,9 @@ function cancelThrottle(): void {
     _clearTimeout(pendingTimeoutId);
     pendingTimeoutId = null;
   }
-  if (pendingTimerResolve !== null) {
-    const r = pendingTimerResolve;
-    pendingTimerResolve = null;
+  if (pendingTimeoutResolve !== null) {
+    const r = pendingTimeoutResolve;
+    pendingTimeoutResolve = null;
     r();
   }
 }
@@ -413,10 +413,10 @@ async function run(
       runCommandBuffer = [];
       send({ type: 'idle', commands: drained, stepsApplied });
       await new Promise<void>((resolve) => {
-        pendingTimerResolve = resolve;
+        pendingTimeoutResolve = resolve;
         pendingTimeoutId = _setTimeout(() => {
           pendingTimeoutId = null;
-          pendingTimerResolve = null;
+          pendingTimeoutResolve = null;
           resolve();
         }, runIntervalMs as number);
       });
