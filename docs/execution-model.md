@@ -76,12 +76,12 @@ Entry: Take Control from any non-MANUAL mode; post-RUNNING_* completion or Build
 Exit: Step / Run via §7 cold-start (→ RUNNING_AUTO / RUNNING_CONTINUOUS / RUNNING_PAUSED), Build (→ MANUAL, reload), Apply (stays MANUAL, writes to mirror).
 
 ### RUNNING_AUTO
-The worker is running inside `machine.run({ onStep })` with a per-step throttle (the `withPause` interval). Belt animations follow the cadence; the user can click Pause to suspend.
+The worker is running inside `machine.run({ onStep, onPause, onIter })` with the throttle inside `onIter` (the `withPause` interval awaited at end-of-iter). Belt animations follow the cadence; the user can click Pause to suspend.
 Entry: Run from IDLE / MANUAL / HALTED with `withPause=on`; Continue from RUNNING_PAUSED with `withPause=on`.
 Exit: Pause (→ RUNNING_PAUSED), debug break with `debug=on` (→ RUNNING_PAUSED), Stop (→ HALTED), run completion (→ HALTED), Take Control (→ MANUAL).
 
 ### RUNNING_CONTINUOUS
-The worker is running inside `machine.run({ onStep })` with no throttle — snap-to-final. Belt animation is suppressed; per-step commands batch-log on completion. Same control surface as RUNNING_AUTO.
+The worker is running inside `machine.run({ onStep, onPause, onIter })` with no throttle (`onIter` no-ops in this mode) — snap-to-final. Belt animation is suppressed; per-step commands batch-log on completion. Same control surface as RUNNING_AUTO.
 Entry: Run from IDLE / MANUAL / HALTED with `withPause=off`; Continue from RUNNING_PAUSED with `withPause=off`.
 Exit: debug break with `debug=on` (→ RUNNING_PAUSED), Stop (→ HALTED), run completion (→ HALTED), Take Control (→ MANUAL).
 
@@ -171,8 +171,8 @@ The cold-start path (Build / Step / Run from IDLE, MANUAL, or HALTED — and DEM
 The path is identical from IDLE, MANUAL, and HALTED. Each Build / Step / Run reloads the worker, builds a fresh mirror, then routes by action:
 
 - **Build** — reload only. → IDLE if `!userTookControl`, → MANUAL if `userTookControl`.
-- **Step** — reload, arm `initialState.debug.after = true` (preserving any user-authored `state.debug.before`), call `runner.run({ debug: debugMode, step: true })`. Worker pauses at iter 1's after-fire → RUNNING_PAUSED. With `debug=on` and a user-authored `state.debug.before` on `initialState`, the before-fire interposes first; same target mode.
-- **Run** — reload, call `runner.run({ debug: debugMode })`. → RUNNING_AUTO (`withPause=on`, with throttled `onStep`) or RUNNING_CONTINUOUS (`withPause=off`, no throttle). Debug breaks during the run land → RUNNING_PAUSED.
+- **Step** — reload, call `runner.run({ debug: debugMode, step: true })`. Worker sets `stepRequested = true`; `onIter` dispatches paused at end of iter 1 → RUNNING_PAUSED. With `debug=on` and a user-authored `state.debug.before` on `initialState`, the before-fire `onPause` interposes first; same target mode. (Pre-v6.4.0 this worked via arming `initialState.debug.after = true` and pausing at the after-fire; the engine's `onIter` hook in v6.4.0 lets the worker do this without mutating user state.)
+- **Run** — reload, call `runner.run({ debug: debugMode })`. → RUNNING_AUTO (`withPause=on`, `onIter` awaits the throttle) or RUNNING_CONTINUOUS (`withPause=off`, `onIter` no-ops). Debug breaks during the run land → RUNNING_PAUSED.
 
 If the reload itself fails (build error in user code), → HALTED with an error log; covered by walk-through 7.
 
@@ -185,13 +185,12 @@ flowchart TD
     Action -->|Build| Resolve1{userTookControl?}
     Resolve1 -->|true| ManualOut[→ MANUAL]
     Resolve1 -->|false| IdleOut[→ IDLE]
-    Action -->|Step| ArmAfter[arm initialState.debug.after = true; preserve user-authored .before]
-    ArmAfter --> RunStep[runner.run debug=debugMode, step=true]
-    RunStep --> PauseOut[→ RUNNING_PAUSED at iter 1 after-fire]
+    Action -->|Step| RunStep[runner.run debug=debugMode, step=true]
+    RunStep --> PauseOut[worker sets stepRequested; onIter dispatches paused after iter 1 → RUNNING_PAUSED]
     Action -->|Run| WithPause{withPause?}
-    WithPause -->|true| RunAuto[runner.run debug=debugMode, with throttled onStep]
+    WithPause -->|true| RunAuto[runner.run debug=debugMode, intervalMs=N — onIter throttles each iter]
     RunAuto --> AutoOut[→ RUNNING_AUTO]
-    WithPause -->|false| RunCont[runner.run debug=debugMode, no throttle]
+    WithPause -->|false| RunCont[runner.run debug=debugMode, no intervalMs — onIter no-ops]
     RunCont --> ContOut[→ RUNNING_CONTINUOUS]
 ```
 
@@ -439,8 +438,7 @@ A punchlist of where today's code differs from the spec, each with a tracking-is
 
 Upstream behaviors the spec encodes (won't change without a major upstream version, so the spec works around them):
 
-- `onPause` after-fire payload substitutes `m` to `prevYield` — the un-substituted `machineState` is not exposed. Affects step-over-from-after implementations. Cross-ref [turing-machine-js#107](https://github.com/mellonis/turing-machine-js/issues/107).
-- `onStep` and `onPause` after-fire payloads carry semantically identical `MachineState`. Both hooks are documented; the demo wires both for orthogonal reasons (per-step buffer vs. pause cycle). Cross-ref [turing-machine-js#109](https://github.com/mellonis/turing-machine-js/issues/109).
+- `onStep` is sync and not awaited (engine docstring: "must not be async"). The demo uses it purely to buffer commands. Per-iter awaited coordination lives on `onIter` (v6.4.0+). Cross-ref [turing-machine-js#163](https://github.com/mellonis/turing-machine-js/issues/163) for the hook's introduction.
 
 §11 vs §12: §11 lists demo-side gaps to be closed; §12 lists engine semantics that won't change. Items can move from §12 to §11 if the upstream issue lands and a corresponding demo-side simplification becomes possible.
 
