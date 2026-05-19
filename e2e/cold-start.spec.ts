@@ -83,10 +83,19 @@ test.describe('cold-start', () => {
       page.getByTestId('log-line').filter({ hasText: /^step 1:/ }),
     ).toBeVisible({ timeout: 3_000 });
 
+    // The run MUST still be in-flight at click time — if the throttle is
+    // broken (e.g. engine doesn't await the worker's onIter), the run halts
+    // before this click can land and the test below would "succeed" by
+    // accidentally exercising the cold-start Step path from HALTED. Assert
+    // the absence of the halt log line to fail loudly on that regression.
+    await expect(
+      page.getByTestId('log-line').filter({ hasText: /halted after/ }),
+    ).not.toBeVisible();
+
     // Step doubles as Pause in RUNNING_AUTO — sends a `pause` request; the
     // worker cancels the throttle and dispatches a synthetic `paused` from
-    // inside the next onStep. The "after applying command" phrasing falls out
-    // of debugBreak={} (the renderer falls back to "after" when neither
+    // inside `onIter`. The "after applying command" phrasing falls out of
+    // debugBreak={} (the renderer falls back to "after" when neither
     // before/after is set).
     await page.getByRole('button', { name: /^step$/i }).click();
 

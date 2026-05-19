@@ -18,9 +18,7 @@ import {
   snapshotTapes,
   snapshotAlphabets,
   expectPhase,
-  armStepAfter,
   type MachineYield,
-  type DebugTarget,
 } from './workerHelpers';
 
 import { MAX_STEPS, MAX_TAPES } from './caps.ts';
@@ -55,7 +53,7 @@ type AnyMachine = {
     stepsLimit?: number;
     onStep?: (m: MachineYield) => void;
     onPause?: (m: OnPausePayload) => void | Promise<void>;
-    __onPause?: (m: OnPausePayload) => void | Promise<void>;
+    onIter?: (m: OnPausePayload) => void | Promise<void>;
   }) => Promise<void>;
   initialState?: unknown;
   tape?: AnyTape;
@@ -139,19 +137,14 @@ let generator: Generator<MachineYield, void, void> | null = null;
 let stepsApplied = 0;
 let pendingCommand: MachineYield | null = null;
 
-// Holds the resolver of the Promise awaited inside onPause. Set when
+// Holds the resolver of the Promise awaited inside dispatchPause. Set when
 // the worker is paused at a break; cleared on `resume`. Concurrent `run`
 // requests are rejected by the phase machine before they reach this slot.
-let resumeResolve: ((action: { step: boolean }) => void) | null = null;
-
-// Step trick: when the user clicks Step, arm the iteration-we're-stepping-
-// through's state.debug.after = true so the engine fires an after-break in
-// the next iteration's body and we pause there. pendingRestore undoes the
-// mutation before the user observes the new break.
-let pendingRestore: (() => void) | null = null;
+let resumeResolve: (() => void) | null = null;
 
 // Per-run buffer of commands captured by onStep. Drained on `paused` (sent
-// in the response) and on `ran` (sent in the response).
+// in the response), on `idle` per-iter (auto mode), and on `ran` (sent in
+// the response).
 let runCommandBuffer: Command[][] = [];
 let runStartStep = 0;
 
@@ -160,14 +153,16 @@ let runStartStep = 0;
 // so the user can flip the checkbox without restarting.
 let debugEnabled = false;
 
-// Step semantics: with debug off, Step pauses at the next "after" break
-// event (= one iteration's command applied), matching the legacy step-by-
-// step mental model. Before-fires are skipped. With debug on, Step pauses
-// at every break (debug toggle dominates).
-let stepPending = false;
+// "Pause at end of next iter." Set by the `run`/`resume` request handler
+// from the `step` field, consumed in onIter. Replaces the v6.0–v6.3
+// `armStepAfter` + `stepPending` mechanism: we no longer mutate
+// `state.debug` on the engine's graph for our own coordination — onIter
+// fires unconditionally per iter (engine v6.4+), so a flag check is
+// enough.
+let stepRequested = false;
 
 // RUNNING_AUTO throttle: when `runIntervalMs !== null` the worker awaits a
-// `setTimeout(intervalMs)` Promise inside onStep, sending `idle`/`busy` to
+// `setTimeout(intervalMs)` Promise inside onIter, sending `idle`/`busy` to
 // bracket each await so the runner can suspend `WORKER_TIMEOUT_MS`. Updated
 // at run-start (from the `run` request) and at every `resume` (from the
 // `resume` request — withPause is re-read at Continue per spec §3).
@@ -175,9 +170,9 @@ let runIntervalMs: number | null = null;
 let pendingTimerId: ReturnType<typeof setTimeout> | null = null;
 let pendingTimerResolve: (() => void) | null = null;
 
-// Click-pause: set by the `pause` request handler; consumed in onStep after
-// the throttle await unwinds. The handler cancels the throttle timer so the
-// onStep doesn't sit waiting for the full intervalMs before checking.
+// Click-pause: set by the `pause` request handler; consumed in onIter after
+// the throttle await unwinds. The handler cancels the throttle timer so
+// onIter doesn't sit waiting for the full intervalMs before checking.
 let pauseRequested = false;
 
 function reset(): void {
@@ -189,11 +184,10 @@ function reset(): void {
   stepsApplied = 0;
   pendingCommand = null;
   resumeResolve = null;
-  pendingRestore = null;
   runCommandBuffer = [];
   runStartStep = 0;
   debugEnabled = false;
-  stepPending = false;
+  stepRequested = false;
   runIntervalMs = null;
   pendingTimerId = null;
   pendingTimerResolve = null;
@@ -301,23 +295,21 @@ function step(): { commands: Command[] | null; nextCommands: Command[] | null; h
 }
 
 /**
- * Send `paused`, await `resume`. Shared by:
- *   (a) the engine-fired user-authored breaks routed through `onPause`,
- *   (b) cold-start Step's armed `.after` (same path as (a)),
- *   (c) click-pause from RUNNING_AUTO: a synthetic call from inside `onStep`
- *       with `debugBreak = {}`.
+ * Send `paused`, await `resume`. Three call sites:
+ *   (a) engine-fired user-authored breaks routed through `onPause`,
+ *   (b) cold-start Step / step-from-paused: `stepRequested` flag triggers
+ *       a synthetic call from `onIter` at end-of-iter,
+ *   (c) click-pause from RUNNING_AUTO: `pauseRequested` flag triggers a
+ *       synthetic call from `onIter` (possibly mid-throttle).
  *
- * All three call sites have an `m` (MachineState) in scope and pass it as
- * `rearmFrom`, so Step-from-paused uniformly re-arms the next state's `.after`
- * regardless of how the pause originated. Click-pause's `m.debugBreak` is
- * empty, which routes its Step through the `nextState`-based arm path (same
- * as an `.after` engine break).
+ * No engine-graph mutation needed — `stepRequested` is what makes the
+ * next iter's `onIter` pause again. The resume handler sets it from
+ * `req.step` directly.
  */
 async function dispatchPause(info: {
   state: string;
   currentSymbols: string[];
   debugBreak: { before?: true; after?: true };
-  rearmFrom: OnPausePayload;
 }): Promise<void> {
   const commandsBatch = runCommandBuffer;
   runCommandBuffer = [];
@@ -331,28 +323,13 @@ async function dispatchPause(info: {
     currentSymbols: info.currentSymbols,
     debugBreak: info.debugBreak,
   });
-  const action = await new Promise<{ step: boolean }>((resolve) => {
-    resumeResolve = (a) => {
+  await new Promise<void>((resolve) => {
+    resumeResolve = () => {
       resumeResolve = null;
-      resolve(a);
+      resolve();
     };
   });
   phase = { kind: 'running' };
-  if (action.step) {
-    stepPending = true;
-    // For a `before` break: m IS the iteration we want to step through.
-    // For an `after` break (m substituted to prevYield) and for click-pause
-    // (empty debugBreak): the next iter's state lives at m.nextState.
-    // armStepAfter handles the .before preservation and returns a restore
-    // function.
-    const target = (
-      info.rearmFrom.debugBreak?.before
-        ? info.rearmFrom.state
-        : info.rearmFrom.nextState
-    ) as DebugTarget;
-    const { restore } = armStepAfter(target);
-    pendingRestore = restore;
-  }
 }
 
 async function run(
@@ -380,121 +357,94 @@ async function run(
   runCommandBuffer = [];
   phase = { kind: 'running' };
   debugEnabled = debug;
-  stepPending = false;
+  stepRequested = step;
   runIntervalMs = intervalMs;
   pauseRequested = false;
 
-  // Cold-start Step: arm the initial state's .after = true so iter 1's
-  // after-fire pauses (the legacy step-by-step boundary — pause once iter
-  // 1's command has been applied). Always .after, regardless of debug
-  // toggle: the toggle gates whether user-authored breaks pause, not where
-  // the Step boundary lands. We preserve the user's .before (read via the
-  // DebugConfig getter — spread skips it) so a user-authored before-break
-  // still fires naturally on iter 1; we never inject one ourselves, since
-  // that would surface as an unauthored pre-iter pause.
-  if (step && initialState) {
-    const { restore } = armStepAfter(initialState as DebugTarget);
-    pendingRestore = restore;
-    stepPending = true;
-  }
-
   let truncated = false;
 
-  // Always provide the hook so the runtime-toggle (setDebug) can flip behavior
-  // mid-run. The hook self-gates on `debugEnabled` and resolves immediately
-  // when off — engine continues without pausing — UNLESS the user just
-  // clicked Step, in which case the next break always pauses.
+  // onPause: engine fires this when a user-authored `state.debug[when]`
+  // matches. The worker has nothing to "arm" here anymore — onIter is
+  // where our Step/Pause coordination lives. We just surface (or
+  // suppress) the user's break.
   const onPauseFn = async (m: OnPausePayload) => {
-        // Restore the synthesized one-shot before the user observes the break.
-        // (Done unconditionally — clean up even when debug is currently off,
-        // so a Step-armed mutation doesn't leak past a debug toggle.)
-        if (pendingRestore) {
-          pendingRestore();
-          pendingRestore = null;
-        }
-        if (debugEnabled) {
-          // Debug on: pause at every break.
-          stepPending = false;
-        } else {
-          // Debug off: Step pauses only at after-fires (= one iteration's
-          // command applied). Before-fires are skipped — they signal the
-          // start of an iteration, not its result.
-          if (!stepPending || !m.debugBreak?.after) return;
-          stepPending = false;
-        }
-        await dispatchPause({
-          state: m.state.name ?? '',
-          currentSymbols: [...m.currentSymbols],
-          debugBreak: { ...m.debugBreak },
-          rearmFrom: m,
-        });
-      };
-
-  // PostMachine.run() uses `__onPause` and does not accept `initialState`
-  // (uses its own #initialState). TuringMachine.run() uses `onPause` and
-  // requires `initialState`. Branch on the machine class to route correctly.
-  const runOpts: Parameters<AnyMachine['run']>[0] = {
-    stepsLimit: maxSteps,
-    onStep: async (m: MachineYield) => {
-      runCommandBuffer.push(commandsFromYield(m));
-      stepsApplied += 1;
-
-      // Throttle: idle/busy bracket lets the runner suspend WORKER_TIMEOUT_MS
-      // while the worker is just waiting for the next setTimeout to fire. The
-      // idle message also drains the per-iter command buffer so the main
-      // thread can animate the belt and log each iter at the cadence — the
-      // RUNNING_CONTINUOUS path (no throttle) skips this and just buffers up
-      // through to `ran`. The throttle Promise is also the only way click-
-      // pause can interrupt a running auto-step — the pause handler clears
-      // the timer and resolves it.
-      if (runIntervalMs !== null && runIntervalMs > 0) {
-        const drained = runCommandBuffer;
-        runCommandBuffer = [];
-        send({ type: 'idle', commands: drained, stepsApplied });
-        await new Promise<void>((resolve) => {
-          pendingTimerResolve = resolve;
-          pendingTimerId = _setTimeout(() => {
-            pendingTimerId = null;
-            pendingTimerResolve = null;
-            resolve();
-          }, runIntervalMs as number);
-        });
-        send({ type: 'busy' });
-      }
-
-      // Click-pause: dispatch a synthetic `paused` (debugBreak={}) at the
-      // same boundary as the throttle. After the user clicks Continue, the
-      // engine proceeds to the next iter; if intervalMs is still non-null, the
-      // throttle resumes on subsequent iters.
-      if (pauseRequested) {
-        pauseRequested = false;
-        // Engine passes a full MachineState to onStep (superset of MachineYield —
-        // includes state, nextState, debugBreak). We narrow to MachineYield
-        // for buffering's sake; widen locally here for state.name + rearmFrom.
-        const ms = m as unknown as OnPausePayload;
-        await dispatchPause({
-          state: ms.state.name ?? '',
-          currentSymbols: [...m.currentSymbols],
-          debugBreak: {},
-          // Step-from-click-pause uses the same boundary as Step-from-engine-
-          // break: arm `m.nextState.debug.after` so the next iter pauses at
-          // its after-fire. dispatchPause's existing armStepAfter path handles
-          // it via the `else` of the `before`-branch (no debugBreak.before set
-          // on a click-pause, so it picks `nextState`).
-          rearmFrom: ms,
-        });
-      }
-    },
+    if (!debugEnabled) return;
+    await dispatchPause({
+      state: m.state.name ?? '',
+      currentSymbols: [...m.currentSymbols],
+      debugBreak: { ...m.debugBreak },
+    });
   };
 
-  if (machine instanceof post.PostMachine) {
-    // PostMachine.run() uses `__onPause` and ignores `initialState`
-    // (it carries its own #initialState internally).
-    runOpts.__onPause = onPauseFn;
-  } else {
-    // TuringMachine.run() uses `onPause` and requires `initialState`.
+  // onIter: engine v6.4.0+ fires this awaited callback at end of every
+  // iter, AFTER both onPause dispatches on the same yield. Our per-iter
+  // coordination lives here:
+  //
+  // - Throttle (RUNNING_AUTO): drain command buffer → idle (suspends
+  //   runner's WORKER_TIMEOUT_MS) → setTimeout(intervalMs) → busy.
+  //   Cancellable mid-throttle via `cancelThrottle()` from the pause
+  //   handler.
+  //
+  // - Click-pause: `pauseRequested` is checked AFTER the throttle block
+  //   so it also works in continuous mode (where there's no throttle to
+  //   cancel — the flag is just consumed on the next iter). Currently
+  //   the Pause button is hidden in RUNNING_CONTINUOUS, but the worker-
+  //   side capability is wired for future use.
+  //
+  // - Step boundary: `stepRequested` is checked after pauseRequested. If
+  //   set, dispatch a synthetic paused. `stepRequested` is set by the
+  //   `run`/`resume` request handler from `req.step` — no engine-graph
+  //   mutation needed.
+  const onIterFn = async (m: OnPausePayload) => {
+    if (runIntervalMs !== null && runIntervalMs > 0) {
+      const drained = runCommandBuffer;
+      runCommandBuffer = [];
+      send({ type: 'idle', commands: drained, stepsApplied });
+      await new Promise<void>((resolve) => {
+        pendingTimerResolve = resolve;
+        pendingTimerId = _setTimeout(() => {
+          pendingTimerId = null;
+          pendingTimerResolve = null;
+          resolve();
+        }, runIntervalMs as number);
+      });
+      send({ type: 'busy' });
+    }
+
+    if (pauseRequested) {
+      pauseRequested = false;
+      await dispatchPause({
+        state: m.state.name ?? '',
+        currentSymbols: [...m.currentSymbols],
+        debugBreak: {},
+      });
+      return; // don't also fire stepRequested on the same iter
+    }
+
+    if (stepRequested) {
+      stepRequested = false;
+      await dispatchPause({
+        state: m.state.name ?? '',
+        currentSymbols: [...m.currentSymbols],
+        debugBreak: {},
+      });
+    }
+  };
+
+  const runOpts: Parameters<AnyMachine['run']>[0] = {
+    stepsLimit: maxSteps,
+    onStep: (m: MachineYield) => {
+      runCommandBuffer.push(commandsFromYield(m));
+      stepsApplied += 1;
+    },
+    onPause: onPauseFn,
+    onIter: onIterFn,
+  };
+
+  // TuringMachine.run() requires initialState; PostMachine.run() ignores
+  // it (carries its own #initialState internally). Branch only here.
+  if (!(machine instanceof post.PostMachine)) {
     runOpts.initialState = initialState;
-    runOpts.onPause = onPauseFn;
   }
 
   try {
@@ -587,17 +537,22 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
       // Explicit `undefined` keeps the existing policy (cold-start Step's
       // resume calls don't pass intervalMs).
       if (req.intervalMs !== undefined) runIntervalMs = req.intervalMs;
-      r({ step: req.step ?? false });
+      // `step` controls whether onIter pauses again at the end of the next
+      // iter — set the flag here (was previously inside dispatchPause via
+      // armStepAfter; now a direct flag flip).
+      stepRequested = req.step ?? false;
+      r();
       return;
     }
 
     if (req.type === 'pause') {
-      // Click-pause from RUNNING_AUTO. The throttle Promise (if any) is the
-      // synchronization point; cancelling it unblocks onStep which then sees
-      // `pauseRequested` and dispatches the synthetic `paused` from inside
-      // its own scope (where it can read `m.currentSymbols`). If the worker
-      // is already paused or building, this is a no-op — main-thread guards
-      // it anyway via the runner.
+      // Click-pause. The throttle Promise (if any) is the synchronization
+      // point; cancelling it unblocks `onIter` which then sees
+      // `pauseRequested` and dispatches the synthetic `paused`. In
+      // continuous mode there's no throttle to cancel — the flag is just
+      // consumed on the next iter. If the worker is already paused or
+      // building, this is a no-op — main-thread guards it anyway via
+      // the runner.
       if (phase.kind !== 'running') return;
       pauseRequested = true;
       cancelThrottle();
