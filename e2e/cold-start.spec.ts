@@ -35,6 +35,27 @@ test.describe('cold-start', () => {
     await expect(page.getByRole('button', { name: /^continue$/i })).toBeVisible();
   });
 
+  test('E-cold-start-step-with-pause-on: Step ignores intervalMs (manual action)', async ({ page }) => {
+    // With-pause on + a deliberately slow interval (5s). If Step were
+    // throttled, the paused log line would not appear for ~5s. The user's
+    // intent: clicking Step is manual, the iter applies immediately, the
+    // pause materializes right after. The interval matters only in
+    // RUNNING_AUTO mode (between consecutive auto iters), not on the
+    // Step iter.
+    await page.getByRole('checkbox', { name: /^with pause$/i }).check();
+    await page.getByPlaceholder('1s').fill('5s');
+    const t0 = Date.now();
+    await page.getByRole('button', { name: /^step$/i }).click();
+    await expect(
+      page.getByTestId('log-line').filter({ hasText: /^paused at state / }),
+    ).toBeVisible({ timeout: 3_000 });
+    const elapsed = Date.now() - t0;
+    // Hard ceiling: 2s is generous (worker-roundtrip + render budget). If
+    // Step starts throttling, this would be ≥5s and the test fails.
+    expect(elapsed).toBeLessThan(2_000);
+    await expect(page.getByRole('button', { name: /^continue$/i })).toBeVisible();
+  });
+
   test('E-continue-from-step: Continue (debug=off) runs to halt without further pauses', async ({ page }) => {
     // Reach the paused state via the same flow as the previous test.
     await page.getByRole('checkbox', { name: /^debug$/i }).check();

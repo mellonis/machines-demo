@@ -378,24 +378,36 @@ async function run(
 
   // onIter: engine v6.4.0+ fires this awaited callback at end of every
   // iter, AFTER both onPause dispatches on the same yield. Our per-iter
-  // coordination lives here:
+  // coordination lives here, checked in priority order:
   //
-  // - Throttle (RUNNING_AUTO): drain command buffer → idle (suspends
-  //   runner's WORKER_TIMEOUT_MS) → setTimeout(intervalMs) → busy.
-  //   Cancellable mid-throttle via `cancelThrottle()` from the pause
-  //   handler.
+  // 1. Step boundary FIRST. Step is a manual user action; the iter
+  //    happens IMMEDIATELY and pauses. The auto-step `intervalMs` is the
+  //    cadence between consecutive auto iters, not a Step-click latency.
+  //    Skipping the throttle block here means clicking Step in
+  //    RUNNING_PAUSED with `withPause=on` doesn't make the user wait
+  //    intervalMs before the next pause materializes.
   //
-  // - Click-pause: `pauseRequested` is checked AFTER the throttle block
-  //   so it also works in continuous mode (where there's no throttle to
-  //   cancel — the flag is just consumed on the next iter). Currently
-  //   the Pause button is hidden in RUNNING_CONTINUOUS, but the worker-
-  //   side capability is wired for future use.
+  // 2. Throttle (RUNNING_AUTO): drain command buffer → idle (suspends
+  //    runner's WORKER_TIMEOUT_MS) → setTimeout(intervalMs) → busy.
+  //    Cancellable mid-throttle via `cancelThrottle()` from the pause
+  //    handler.
   //
-  // - Step boundary: `stepRequested` is checked after pauseRequested. If
-  //   set, dispatch a synthetic paused. `stepRequested` is set by the
-  //   `run`/`resume` request handler from `req.step` — no engine-graph
-  //   mutation needed.
+  // 3. Click-pause: `pauseRequested` is checked AFTER the throttle block
+  //    so it also works in continuous mode (where there's no throttle
+  //    to cancel — the flag is just consumed on the next iter).
+  //    Currently the Pause button is hidden in RUNNING_CONTINUOUS, but
+  //    the worker-side capability is wired for future use.
   const onIterFn = async (m: OnPausePayload) => {
+    if (stepRequested) {
+      stepRequested = false;
+      await dispatchPause({
+        state: m.state.name ?? '',
+        currentSymbols: [...m.currentSymbols],
+        debugBreak: {},
+      });
+      return;
+    }
+
     if (runIntervalMs !== null && runIntervalMs > 0) {
       const drained = runCommandBuffer;
       runCommandBuffer = [];
@@ -413,16 +425,6 @@ async function run(
 
     if (pauseRequested) {
       pauseRequested = false;
-      await dispatchPause({
-        state: m.state.name ?? '',
-        currentSymbols: [...m.currentSymbols],
-        debugBreak: {},
-      });
-      return; // don't also fire stepRequested on the same iter
-    }
-
-    if (stepRequested) {
-      stepRequested = false;
       await dispatchPause({
         state: m.state.name ?? '',
         currentSymbols: [...m.currentSymbols],
