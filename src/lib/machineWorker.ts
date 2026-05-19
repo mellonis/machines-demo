@@ -167,7 +167,7 @@ let stepRequested = false;
 // at run-start (from the `run` request) and at every `resume` (from the
 // `resume` request — withPause is re-read at Continue per spec §3).
 let runIntervalMs: number | null = null;
-let pendingTimerId: ReturnType<typeof setTimeout> | null = null;
+let pendingTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let pendingTimerResolve: (() => void) | null = null;
 
 // Click-pause: set by the `pause` request handler; consumed in onIter after
@@ -189,7 +189,7 @@ function reset(): void {
   debugEnabled = false;
   stepRequested = false;
   runIntervalMs = null;
-  pendingTimerId = null;
+  pendingTimeoutId = null;
   pendingTimerResolve = null;
   pauseRequested = false;
 }
@@ -198,9 +198,9 @@ function reset(): void {
  * the onStep await unwinds immediately. No-op if the worker is not currently
  * idle in a throttle. */
 function cancelThrottle(): void {
-  if (pendingTimerId !== null) {
-    _clearTimeout(pendingTimerId);
-    pendingTimerId = null;
+  if (pendingTimeoutId !== null) {
+    _clearTimeout(pendingTimeoutId);
+    pendingTimeoutId = null;
   }
   if (pendingTimerResolve !== null) {
     const r = pendingTimerResolve;
@@ -414,8 +414,8 @@ async function run(
       send({ type: 'idle', commands: drained, stepsApplied });
       await new Promise<void>((resolve) => {
         pendingTimerResolve = resolve;
-        pendingTimerId = _setTimeout(() => {
-          pendingTimerId = null;
+        pendingTimeoutId = _setTimeout(() => {
+          pendingTimeoutId = null;
           pendingTimerResolve = null;
           resolve();
         }, runIntervalMs as number);
