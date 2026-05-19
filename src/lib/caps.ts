@@ -25,6 +25,18 @@ export const WORKER_TIMEOUT_MS = 5_000;
  *  have at least this many entries; the worker rejects loads with more. */
 export const MAX_TAPES = 5;
 
+/** Belt-slide threshold for RUNNING_AUTO rendering: when the user picks an
+ *  auto interval shorter than this, `MachineView.svelte#renderFromMirror`
+ *  calls into `Tape.svelte#setFromTape` with `animate=false` so the animations
+ *  don't queue (the slide takes ~400ms in CSS; iterating faster than that just
+ *  means each new frame snaps in mid-animation, which looks worse than no
+ *  animation at all).
+ *
+ *  Coupling — keep in sync: this value mirrors the `--anim-belt-slide-ms`
+ *  custom property in `app.css`. If you raise the belt animation, raise this
+ *  alongside it; same direction for lowering. */
+export const BELT_ANIMATION_MIN_INTERVAL_MS = 400;
+
 /** Render-view cap: `Log.svelte` only ever renders this many entries.
  *  Anything older lives in the LogStore's non-reactive buffer and is
  *  summarized by a synthetic overflow header. Bounds the DOM cost of a

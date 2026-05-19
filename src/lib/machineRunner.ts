@@ -2,6 +2,7 @@ import { MAX_STEPS, WORKER_TIMEOUT_MS } from './caps.ts';
 import {
   type BuiltResponse,
   type Engine,
+  type IdleResponse,
   type PausedResponse,
   type RanResponse,
   type SteppedResponse,
@@ -46,6 +47,7 @@ type RunPending = {
   reject: (err: Error) => void;
   timeoutId: ReturnType<typeof setTimeout> | null;
   onPaused: ((data: PausedResponse) => void) | null;
+  onIter: ((data: IdleResponse) => void) | null;
 };
 
 export class MachineRunner {
@@ -107,11 +109,26 @@ export class MachineRunner {
   }
 
   private onMessage(data: WorkerResponse): void {
-    // `paused` is the only response that doesn't complete a Promise.
+    // `paused` / `idle` / `busy` are run-channel notifications that don't
+    // complete the run Promise. `paused` parks the run pending a `resume`;
+    // `idle` / `busy` bracket each per-step throttle so the timer doesn't
+    // fire while the worker is just waiting in setTimeout (intervals well
+    // above WORKER_TIMEOUT_MS are a normal user choice).
     if (data.type === 'paused') {
       if (!this.runPending) return;
       this.stopRunTimer();
       this.runPending.onPaused?.(data);
+      return;
+    }
+    if (data.type === 'idle') {
+      if (!this.runPending) return;
+      this.stopRunTimer();
+      this.runPending.onIter?.(data);
+      return;
+    }
+    if (data.type === 'busy') {
+      if (!this.runPending) return;
+      this.startRunTimer();
       return;
     }
     // ran / error complete the run; stepped / built complete a simple request.
@@ -197,7 +214,17 @@ export class MachineRunner {
     /** When true the worker arms the initial state's `debug.after` so the run
      * pauses at iter 1's step-boundary — the cold-start path used by Step. */
     step?: boolean;
+    /** Per-iteration throttle inside the worker's `onStep`. `null`/omitted =
+     * continuous (no throttle); a positive number = ms between iters. The
+     * worker brackets each throttle with `idle`/`busy` so the per-segment
+     * timer suspends while the worker is just waiting. */
+    intervalMs?: number | null;
     onPaused?: (data: PausedResponse) => void;
+    /** Per-iter notification (RUNNING_AUTO throttle only — emitted on every
+     * `idle` message). Carries the just-applied iter's commands so the main
+     * thread can animate the belt, log the entry, and reflect on the panel
+     * at the cadence. Not called in continuous runs (no `idle` sent). */
+    onIter?: (data: IdleResponse) => void;
   } = {}): Promise<RanResponse> {
     if (!this.worker) throw new Error('worker not spawned — call build() first');
     if (this.simplePending || this.runPending) throw new Error('previous request still pending');
@@ -208,6 +235,7 @@ export class MachineRunner {
         reject,
         timeoutId: null,
         onPaused: opts.onPaused ?? null,
+        onIter: opts.onIter ?? null,
       };
       this.startRunTimer();
       this.worker!.postMessage({
@@ -215,16 +243,33 @@ export class MachineRunner {
         maxSteps: opts.maxSteps ?? MAX_STEPS,
         debug: opts.debug ?? false,
         step: opts.step ?? false,
+        intervalMs: opts.intervalMs ?? null,
       });
     });
   }
 
-  /** Send a `resume` to a paused worker. Reactivates the round-trip timer. */
-  resume(step: boolean = false): void {
+  /** Send a `resume` to a paused worker. Reactivates the round-trip timer.
+   * `intervalMs` updates the worker's throttle policy — withPause is re-read
+   * at Continue click time (spec §3), so the cold-start-Step → toggle-
+   * withPause-on → Continue path must convey the new policy. Pass `null` to
+   * drop the throttle, a positive number to set/replace it, or omit to keep
+   * the previous policy unchanged (cold-start Step→Step keeps no-throttle). */
+  resume(step: boolean = false, intervalMs?: number | null): void {
     if (!this.runPending) throw new Error('resume: no pending run');
     if (!this.worker) throw new Error('resume: worker terminated');
     this.startRunTimer();
-    this.worker.postMessage({ type: 'resume', step });
+    const msg: WorkerRequest = { type: 'resume', step };
+    if (intervalMs !== undefined) msg.intervalMs = intervalMs;
+    this.worker.postMessage(msg);
+  }
+
+  /** Click-pause from RUNNING_AUTO. Worker cancels the in-flight throttle and
+   * dispatches a synthetic `paused` from inside its next `onStep`. No-op if
+   * the worker isn't currently in a run; throws if the runner is idle. */
+  pause(): void {
+    if (!this.runPending) throw new Error('pause: no pending run');
+    if (!this.worker) throw new Error('pause: worker terminated');
+    this.worker.postMessage({ type: 'pause' });
   }
 
   /**

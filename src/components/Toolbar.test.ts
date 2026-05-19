@@ -7,8 +7,8 @@ import type { Snippets } from '../lib/persist';
 
 type Mode =
   | 'DEMO' | 'MANUAL'
-  | 'RUNNING_STEP' | 'RUNNING_AUTO' | 'RUNNING_CONTINUOUS'
-  | 'RUNNING_PAUSED_AT_BREAK'
+  | 'RUNNING_AUTO' | 'RUNNING_CONTINUOUS'
+  | 'RUNNING_PAUSED'
   | 'HALTED';
 
 function defaultProps() {
@@ -48,8 +48,8 @@ describe('Toolbar', () => {
       expect(screen.getByRole('button', { name: /^run$/i })).toBeInTheDocument();
     });
 
-    it('C-toolbar-run-label-paused: shows "Continue" in RUNNING_PAUSED_AT_BREAK', () => {
-      render(Toolbar, { props: { ...defaultProps(), executionMode: 'RUNNING_PAUSED_AT_BREAK' } });
+    it('C-toolbar-run-label-paused: shows "Continue" in RUNNING_PAUSED', () => {
+      render(Toolbar, { props: { ...defaultProps(), executionMode: 'RUNNING_PAUSED' } });
       expect(screen.getByRole('button', { name: /^continue$/i })).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /^run$/i })).not.toBeInTheDocument();
     });
@@ -98,8 +98,8 @@ describe('Toolbar', () => {
       expect(screen.queryByRole('checkbox', { name: /^debug$/i })).not.toBeInTheDocument();
     });
 
-    it('C-toolbar-stop-visible-running-step: Stop button renders in RUNNING_STEP', () => {
-      render(Toolbar, { props: { ...defaultProps(), executionMode: 'RUNNING_STEP' } });
+    it('C-toolbar-stop-visible-running-paused: Stop button renders in RUNNING_PAUSED', () => {
+      render(Toolbar, { props: { ...defaultProps(), executionMode: 'RUNNING_PAUSED' } });
       expect(screen.getByRole('button', { name: /^stop$/i })).toBeInTheDocument();
     });
 
@@ -139,14 +139,14 @@ describe('Toolbar', () => {
       expect(props.onStep).toHaveBeenCalledTimes(1);
     });
 
-    it('C-toolbar-callback-run-stop: Run invokes onRun; Stop (in RUNNING_STEP) invokes onStop', async () => {
+    it('C-toolbar-callback-run-stop: Run invokes onRun; Stop (in RUNNING_PAUSED) invokes onStop', async () => {
       const propsA = defaultProps();
       const { unmount } = render(Toolbar, { props: propsA });
       await fireEvent.click(screen.getByRole('button', { name: /^run$/i }));
       expect(propsA.onRun).toHaveBeenCalledTimes(1);
       unmount();
 
-      const propsB = { ...defaultProps(), executionMode: 'RUNNING_STEP' as Mode };
+      const propsB = { ...defaultProps(), executionMode: 'RUNNING_PAUSED' as Mode };
       render(Toolbar, { props: propsB });
       await fireEvent.click(screen.getByRole('button', { name: /^stop$/i }));
       expect(propsB.onStop).toHaveBeenCalledTimes(1);

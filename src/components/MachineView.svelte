@@ -8,10 +8,10 @@
   import MachineWorker from '../lib/machineWorker.ts?worker';
   import { MachineRunner, WorkerError } from '../lib/machineRunner.ts';
   import * as turing from '@turing-machine-js/machine';
-  import { MAX_TAPES, VIEWPORT_WIDTH } from '../lib/caps.ts';
-  import { type Alphabets, type Command, type Engine, type PausedResponse, type TapeSnapshot } from '../lib/types.ts';
+  import { BELT_ANIMATION_MIN_INTERVAL_MS, MAX_TAPES, VIEWPORT_WIDTH } from '../lib/caps.ts';
+  import { type Alphabets, type Command, type Engine, type IdleResponse, type PausedResponse, type TapeSnapshot } from '../lib/types.ts';
   import { startDemoLoop } from '../lib/demoLoop.ts';
-  import { startAutoStep, parseInterval } from '../lib/autoStep.ts';
+  import { parseInterval } from '../lib/interval.ts';
   import { parse as parseSnapshot, serialize as serializeSnapshot } from '../lib/tapeSnapshot.ts';
   import { commandsEntry, tapesEntry } from '../lib/format.ts';
   import {
@@ -53,10 +53,9 @@
   type ExecutionMode =
     | 'DEMO'
     | 'MANUAL'
-    | 'RUNNING_STEP'
     | 'RUNNING_AUTO'
     | 'RUNNING_CONTINUOUS'
-    | 'RUNNING_PAUSED_AT_BREAK'
+    | 'RUNNING_PAUSED'
     | 'HALTED';
 
   /* ───── state ───── */
@@ -69,7 +68,6 @@
   const log = new LogStore();
   let lastSnapshots = $state<TapeSnapshot[] | null>(null);
   let pendingOp = $state<'load' | 'run' | null>(null);
-  let stepInFlight = $state(false);
   let mirrorMachine: turing.TuringMachine | null = null;
   let mirrorTapeBlock: turing.TapeBlock | null = null;
   let codeChangedWarned = false;
@@ -158,14 +156,14 @@
   const takeControlVisible = $derived(
     executionMode !== 'MANUAL' &&
     executionMode !== 'RUNNING_CONTINUOUS' &&
-    executionMode !== 'RUNNING_PAUSED_AT_BREAK',
+    executionMode !== 'RUNNING_PAUSED',
   );
   const pasteEnabled = $derived(
     executionMode === 'MANUAL' || executionMode === 'DEMO',
   );
   const beltTransitionsOn = $derived(
     executionMode !== 'RUNNING_CONTINUOUS' &&
-    executionMode !== 'RUNNING_PAUSED_AT_BREAK',
+    executionMode !== 'RUNNING_PAUSED',
   );
 
   // The code Reset would restore to: the loaded snippet's saved code, or the
@@ -184,20 +182,17 @@
   );
 
   const loadDisabled = $derived(
-    pendingOp !== null && executionMode !== 'RUNNING_PAUSED_AT_BREAK',
+    pendingOp !== null && executionMode !== 'RUNNING_PAUSED',
   );
   // Step/Run stay enabled in HALTED — they reload-from-code on entry, which
   // also clears `halted`. Disabling would just force an extra Build click.
   const stepDisabled = $derived(
-    (pendingOp !== null && executionMode !== 'RUNNING_PAUSED_AT_BREAK') ||
+    (pendingOp !== null && executionMode !== 'RUNNING_PAUSED') ||
       !workerLive ||
       executionMode === 'RUNNING_CONTINUOUS',
   );
-  // stepInFlight is intentionally NOT in the disabled state — the worker call
-  // is fast (~ms), and we don't want the user to see flicker on rapid clicks.
-  // Soft-debounced inside doStep() instead.
   const runDisabled = $derived(
-    (pendingOp !== null && executionMode !== 'RUNNING_PAUSED_AT_BREAK') ||
+    (pendingOp !== null && executionMode !== 'RUNNING_PAUSED') ||
       !workerLive ||
       executionMode === 'RUNNING_AUTO' ||
       executionMode === 'RUNNING_CONTINUOUS' ||
@@ -218,9 +213,15 @@
     // sync the mirror + display to it so the user sees where execution stuck
     // (otherwise we'd strand them on the loaded tape).
     if (err instanceof WorkerError && err.tapes && err.tapes.length > 0) {
-      lastSnapshots = err.tapes;
-      _buildMirrorMachine(err.tapes, alphabets);
-      setAllFromMirror();
+      // Queue mirror rebuild behind any in-flight RUNNING_AUTO render chain so
+      // the partial tape state lands after the last animated iter — otherwise
+      // a stale render could overwrite the error snap.
+      const tapesAtError = err.tapes;
+      renderChain = renderChain.then(() => {
+        lastSnapshots = tapesAtError;
+        _buildMirrorMachine(tapesAtError, alphabets);
+        setAllFromMirror();
+      });
     }
     log.report(`error: ${msg}`, 'error');
     halted = true;
@@ -274,6 +275,13 @@
     });
   }
 
+  // RUNNING_AUTO renders one iter per worker `idle`; consecutive idles can
+  // arrive faster than `_runMirrorStep` can finish at low intervals (the
+  // mirror locks the tapeBlock during `mirrorMachine.run()` and would throw
+  // "Lock check failed" on concurrent calls). Serialize through a chained
+  // Promise so the cadence stays correct even at 80ms.
+  let renderChain: Promise<void> = Promise.resolve();
+
   // Per-step render path — used in DEMO, MANUAL Apply, and RUNNING_*
   // (except RUNNING_CONTINUOUS, which rebuilds in one shot). Advances the
   // mirror with `commands`, then has each <Tape> read its updated mirror
@@ -320,7 +328,11 @@
   }
 
   function stopMachine(): void {
-    if (executionMode === 'RUNNING_PAUSED_AT_BREAK') {
+    if (
+      executionMode === 'RUNNING_PAUSED' ||
+      executionMode === 'RUNNING_AUTO' ||
+      executionMode === 'RUNNING_CONTINUOUS'
+    ) {
       // Pending run Promise will reject when we terminate; failHalted in the
       // caller's catch is suppressed via stopRequested. We don't clear
       // workerLive — Run/Step from HALTED reload-from-code (same as halt-via-
@@ -366,55 +378,23 @@
   }
 
   async function doStep(): Promise<void> {
-    // RUNNING_PAUSED_AT_BREAK → Step click means "advance one iteration in the
+    // RUNNING_PAUSED → Step click means "advance one iteration in the
     // run, then re-pause". Send resume with step flag; worker arms next
-    // state's debug.after.
-    if (executionMode === 'RUNNING_PAUSED_AT_BREAK') {
-      runner.resume(true);
+    // state's debug.after (for an engine-fired pause) or just unblocks one
+    // iter (for a click-pause synthetic). Preserve the throttle on Step:
+    // a Step within RUNNING_AUTO's pause cycle shouldn't reset to continuous.
+    if (executionMode === 'RUNNING_PAUSED') {
+      runner.resume(true, withPause ? (intervalMs ?? null) : null);
       // Phase will be set by the next `paused` (or `ran` if the synthesized
       // step happens to land on halt).
       return;
     }
 
-    // Step button doubles as "Pause" while RUNNING_AUTO.
+    // Step button doubles as "Pause" while RUNNING_AUTO — send a click-pause
+    // to the worker; the next onStep dispatches a synthetic `paused` which
+    // routes through onPausedHandler.
     if (executionMode === 'RUNNING_AUTO') {
-      executionMode = 'RUNNING_STEP';
-      log.report('paused');
-      return;
-    }
-
-    // RUNNING_STEP (auto-step paused) keeps the legacy `runner.step()` path —
-    // each Step click advances one iteration with no run-mode pause cycle.
-    // The full Step+pause experience lives on the cold-start path below.
-    // (RUNNING_AUTO → run-mode is tracked in #43.)
-    if (executionMode === 'RUNNING_STEP') {
-      if (stepInFlight) return;
-      stepInFlight = true;
-      let res;
-      try {
-        res = await runner.step();
-      } catch (err) {
-        failHalted(err);
-        return;
-      } finally {
-        stepInFlight = false;
-      }
-      halted = res.halted;
-      if (res.commands) {
-        // Always log the iter's command — even on the halting iter — so the
-        // legacy step path matches the run-mode Step path. The halt entry
-        // follows separately when applicable.
-        log.report(commandsEntry(res.commands, { stepNumber: res.stepsApplied }, CARET_COLORS));
-      }
-      if (res.halted) {
-        log.report(`halted after ${res.stepsApplied} step(s)`, 'ok');
-        executionMode = 'HALTED';
-      }
-      if (res.commands) {
-        await renderFromMirror(res.commands, true);
-        if (res.nextCommands) reflectToActivePanel(res.nextCommands);
-        else reflectNeutral();
-      }
+      runner.pause();
       return;
     }
 
@@ -422,7 +402,6 @@
     // Worker arms the initial state's debug.after so iter 1's after-fire is
     // the step boundary; user-authored state.debug.before still fires naturally.
     // onPausedHandler takes over; subsequent Step clicks resume(step: true).
-    if (stepInFlight) return;
     log.reportSeparator();
     log.report('loading…');
     const ok = await reloadWorker();
@@ -475,8 +454,28 @@
     }
   }
 
+  // RUNNING_AUTO per-iter handler — fires on every worker `idle`. Renders the
+  // belt + reflects the panel + logs, mirroring what the old `runner.step()`-
+  // driven auto-step loop did per tick. Animation is skipped when intervalMs
+  // is below the belt-slide duration so animations don't queue up (they'd
+  // start and never settle before the next iter snaps them).
+  function onIterHandler(data: IdleResponse): void {
+    const animate =
+      intervalMs !== null && intervalMs >= BELT_ANIMATION_MIN_INTERVAL_MS;
+    const startStep = data.stepsApplied - data.commands.length;
+    for (let i = 0; i < data.commands.length; i++) {
+      const commands = data.commands[i];
+      reflectToActivePanel(commands);
+      log.report(commandsEntry(commands, { stepNumber: startStep + i + 1 }, CARET_COLORS));
+      renderChain = renderChain.then(() => renderFromMirror(commands, animate));
+    }
+  }
+
   function onPausedHandler(paused: PausedResponse): void {
-    // Replay buffered per-step commands so the trace leading to the break is visible.
+    // Replay buffered per-step commands so the trace leading to the break is
+    // visible. In RUNNING_AUTO the buffer is drained per iter via `idle` and
+    // this batch is normally empty; cold-start Step / RUNNING_CONTINUOUS use
+    // the buffer as they have no idle channel.
     if (paused.commands.length > 0) {
       const startStep = paused.stepsApplied - paused.commands.length;
       log.appendBatch(
@@ -485,10 +484,16 @@
         ),
       );
     }
-    // Snap mirror to break-time tapes (no animation).
-    lastSnapshots = paused.tapes;
-    _buildMirrorMachine(paused.tapes, alphabets);
-    setAllFromMirror();
+    // Snap mirror to break-time tapes (no animation). RUNNING_AUTO has a
+    // render chain in flight that may still be advancing the mirror for the
+    // last few iters; queue the rebuild behind it so the snap is the final
+    // word, not a midway state that gets overwritten by a stale render.
+    const tapesAtBreak = paused.tapes;
+    renderChain = renderChain.then(() => {
+      lastSnapshots = tapesAtBreak;
+      _buildMirrorMachine(tapesAtBreak, alphabets);
+      setAllFromMirror();
+    });
     // Always log the full break-state description. Reads as "we made a step,
     // here's the result": after-arming means iter K just ran, and the pause
     // surfaces iter K's state and just-executed symbols. (debug toggle gates
@@ -497,32 +502,16 @@
     const symbols = paused.currentSymbols.map((s) => `'${s}'`).join(', ');
     const stateRef = paused.state ? `state ${paused.state}` : 'unnamed state';
     log.report(`paused at ${stateRef} ${when} applying command for symbols: [${symbols}]`, 'ok');
-    executionMode = 'RUNNING_PAUSED_AT_BREAK';
+    executionMode = 'RUNNING_PAUSED';
   }
 
   async function doRun(): Promise<void> {
-    // RUNNING_PAUSED_AT_BREAK → treat Run click as Continue.
-    if (executionMode === 'RUNNING_PAUSED_AT_BREAK') {
-      runner.resume(false);
-      executionMode = 'RUNNING_CONTINUOUS';
-      return;
-    }
-
-    if (withPause) {
-      // Resume auto-stepping from current RUNNING_STEP position without reload.
-      if (executionMode !== 'RUNNING_STEP') {
-        log.reportSeparator();
-        log.report('loading…');
-        const ok = await reloadWorker();
-        if (!ok) {
-          executionMode = userTookControl ? 'MANUAL' : 'DEMO';
-          return;
-        }
-      }
-      executionMode = 'RUNNING_AUTO';
-      codeChangedWarned = false;
-      log.report(`running, auto-stepping every ${intervalMs}ms`);
-      // Auto-step loop is started by the $effect that watches executionMode.
+    // RUNNING_PAUSED → treat Run click as Continue. Convey the *current*
+    // withPause to the worker (spec §3 reads it at click time, not run-start),
+    // so toggling withPause between pause and Continue actually changes mode.
+    if (executionMode === 'RUNNING_PAUSED') {
+      runner.resume(false, withPause ? (intervalMs ?? null) : null);
+      executionMode = withPause ? 'RUNNING_AUTO' : 'RUNNING_CONTINUOUS';
       return;
     }
 
@@ -534,18 +523,33 @@
       return;
     }
     reflectNeutral();
-    executionMode = 'RUNNING_CONTINUOUS';
-    log.report('running…');
+    executionMode = withPause ? 'RUNNING_AUTO' : 'RUNNING_CONTINUOUS';
+    codeChangedWarned = false;
+    if (withPause) {
+      log.report(`running, auto-stepping every ${intervalMs}ms`);
+    } else {
+      log.report('running…');
+    }
     pendingOp = 'run';
     try {
       const res = await runner.run({
         maxSteps: undefined,
         debug: debugMode,
+        intervalMs: withPause ? (intervalMs ?? null) : null,
         onPaused: onPausedHandler,
+        onIter: onIterHandler,
       });
-      lastSnapshots = res.tapes;
-      _buildMirrorMachine(res.tapes, alphabets);
-      setAllFromMirror();
+      // Snap mirror to halt-time tapes. RUNNING_AUTO has a render chain in
+      // flight; queue the rebuild behind it so iters that haven't yet
+      // animated finish first, then the final state lands. Continuous run
+      // has no chain in flight (renderChain resolved long ago) and snaps
+      // immediately.
+      const tapesAtHalt = res.tapes;
+      renderChain = renderChain.then(() => {
+        lastSnapshots = tapesAtHalt;
+        _buildMirrorMachine(tapesAtHalt, alphabets);
+        setAllFromMirror();
+      });
       halted = true;
       reflectNeutral();
       if (res.commands.length > 0) {
@@ -744,37 +748,17 @@
   });
 
   $effect(() => {
-    if (executionMode === 'RUNNING_AUTO' && intervalMs !== null) {
-      return startAutoStep(intervalMs, async () => {
-        try {
-          const res = await runner.step();
-          halted = res.halted;
-          if (executionMode !== 'RUNNING_AUTO') return;
-          if (res.commands) {
-            reflectToActivePanel(res.commands);
-            await renderFromMirror(res.commands, true);
-            // Always log the iter's command (incl. halting iter), then halt.
-            log.report(commandsEntry(res.commands, { stepNumber: res.stepsApplied }, CARET_COLORS));
-          }
-          if (res.halted) {
-            log.report(`halted after ${res.stepsApplied} step(s)`, 'ok');
-            executionMode = 'HALTED';
-          }
-        } catch (err) {
-          failHalted(err);
-        }
-      });
-    }
-  });
-
-  $effect(() => {
     tapesStackRef?.setTransitionsEnabled(beltTransitionsOn);
   });
 
   $effect(() => {
     void code;  // subscribe; value unused (read happens via untrack below)
     untrack(() => {
-      if (executionMode === 'RUNNING_STEP' || executionMode === 'RUNNING_AUTO' || executionMode === 'RUNNING_PAUSED_AT_BREAK') {
+      if (
+        executionMode === 'RUNNING_AUTO' ||
+        executionMode === 'RUNNING_CONTINUOUS' ||
+        executionMode === 'RUNNING_PAUSED'
+      ) {
         if (!codeChangedWarned) {
           codeChangedWarned = true;
           log.report('code changed — current execution continues from loaded state', 'warn');

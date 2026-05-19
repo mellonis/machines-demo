@@ -47,7 +47,7 @@ src/
     ├── logStore.svelte.ts      per-MachineView log store — non-reactive #buffer + setTimeout-throttled $state view, LOG_RENDER_CAP slice with synthetic overflow header, buffer-sourced reactive `latest` getter
     ├── logStore.test.ts        Vitest suite for LogStore — buffer-append / cap / separator / latest / clear / dispose / flush-* (cites R-logstore-...)
     ├── demoLoop.ts             idle-mode random-command loop
-    ├── autoStep.ts             paused-auto-step controller + parseInterval
+    ├── interval.ts             parseInterval + MIN_AUTO_INTERVAL_MS for the RUNNING_AUTO throttle
     ├── completions.ts          CodeMirror autocomplete: machine namespace + locals
     ├── syntaxLinter.ts         Lezer-based syntax-error markers
     ├── persist.ts              localStorage helpers per engine — code, example, snippets (UUID-keyed)

@@ -48,8 +48,9 @@ export type TapeSnapshot = {
 export type WorkerRequest =
   | { type: 'build'; engine: Engine; code: string }
   | { type: 'step' }
-  | { type: 'run'; maxSteps?: number; debug?: boolean; step?: boolean } // step?: true → arm initial state's debug.after so iter 1 pauses at the step-boundary (preserves user-authored debug.before)
-  | { type: 'resume'; step?: boolean } // step?: true → advance one iteration, then re-pause
+  | { type: 'run'; maxSteps?: number; debug?: boolean; step?: boolean; intervalMs?: number | null } // step?: true → arm initial state's debug.after so iter 1 pauses at the step-boundary (preserves user-authored debug.before); intervalMs: per-step throttle inside onStep (null/omitted = continuous)
+  | { type: 'resume'; step?: boolean; intervalMs?: number | null } // step?: true → advance one iteration, then re-pause; intervalMs: convey the current withPause at Continue time (spec §3 reads withPause at click, not at run-start)
+  | { type: 'pause' } // click-pause from RUNNING_AUTO — worker cancels throttle and dispatches a synthetic `paused` from the next onStep
   | { type: 'setDebug'; on: boolean }; // runtime-toggle debug-break pausing during a run
 
 /* Multi-tape: every shape is per-tape arrays. N=1 for single-tape machines,
@@ -108,10 +109,31 @@ export type PausedResponse = {
   state: string;
   /** Symbol currently under each tape head — per-tape array, length = tape count. */
   currentSymbols: string[];
-  /** At least one of `before` / `after` is `true`. Field shape mirrors the
-   * upstream `m.debugBreak` type (omitted-key = false, never `undefined`). */
+  /** At least one of `before` / `after` is `true` for user-authored breaks
+   * and cold-start step (the armed `.after`). A click-pause from RUNNING_AUTO
+   * lands a synthetic `paused` with `debugBreak = {}` — no engine-fired break,
+   * the worker dispatched it from inside `onStep` when the user clicked Pause. */
   debugBreak: { before?: true; after?: true };
 };
+
+/**
+ * Bracket notifications the worker sends around each per-step throttle in
+ * RUNNING_AUTO. They suspend `WORKER_TIMEOUT_MS` while the worker is idle in
+ * `setTimeout(intervalMs)` (intervals above the 5s timeout are normal), AND
+ * carry the iter's just-applied commands so the main thread can animate the
+ * belt, reflect on the control panel, and log per-iter entries at the cadence
+ * (matching the old `runner.step()`-driven path). Neither completes the run
+ * Promise; they only toggle the timer + drive per-iter UI.
+ *
+ * `commands` is `Command[][]` for protocol consistency with `paused.commands`
+ * and `ran.commands`; in steady state the outer array has length 1.
+ */
+export type IdleResponse = {
+  type: 'idle';
+  commands: Command[][];
+  stepsApplied: number;
+};
+export type BusyResponse = { type: 'busy' };
 
 export type ErrorResponse = {
   type: 'error';
@@ -131,4 +153,6 @@ export type WorkerResponse =
   | SteppedResponse
   | RanResponse
   | PausedResponse
+  | IdleResponse
+  | BusyResponse
   | ErrorResponse;
