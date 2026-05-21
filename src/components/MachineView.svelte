@@ -449,7 +449,13 @@
       if (res.commands.length > 0) {
         log.appendBatch(
           res.commands.map((commands, i) =>
-            commandsEntry(commands, { stepNumber: res.startStep + i + 1 }, CARET_COLORS),
+            commandsEntry(
+              res.reads[i] ?? null,
+              commands,
+              alphabets,
+              { stepNumber: res.startStep + i + 1 },
+              CARET_COLORS,
+            ),
           ),
         );
       }
@@ -477,8 +483,11 @@
     const startStep = data.stepsApplied - data.commands.length;
     for (let i = 0; i < data.commands.length; i++) {
       const commands = data.commands[i];
+      const reads = data.reads[i] ?? null;
       reflectToActivePanel(commands);
-      log.report(commandsEntry(commands, { stepNumber: startStep + i + 1 }, CARET_COLORS));
+      log.report(
+        commandsEntry(reads, commands, alphabets, { stepNumber: startStep + i + 1 }, CARET_COLORS),
+      );
       renderChain = renderChain.then(() => renderFromMirror(commands, animate));
     }
   }
@@ -492,7 +501,13 @@
       const startStep = paused.stepsApplied - paused.commands.length;
       log.appendBatch(
         paused.commands.map((commands, i) =>
-          commandsEntry(commands, { stepNumber: startStep + i + 1 }, CARET_COLORS),
+          commandsEntry(
+            paused.reads[i] ?? null,
+            commands,
+            alphabets,
+            { stepNumber: startStep + i + 1 },
+            CARET_COLORS,
+          ),
         ),
       );
     }
@@ -567,7 +582,13 @@
       if (res.commands.length > 0) {
         log.appendBatch(
           res.commands.map((commands, i) =>
-            commandsEntry(commands, { stepNumber: res.startStep + i + 1 }, CARET_COLORS),
+            commandsEntry(
+              res.reads[i] ?? null,
+              commands,
+              alphabets,
+              { stepNumber: res.startStep + i + 1 },
+              CARET_COLORS,
+            ),
           ),
         );
       }
@@ -669,8 +690,13 @@
   }
 
   async function onApply(commands: Command[]): Promise<void> {
+    // Capture pre-apply head symbols so the log entry mirrors a regular
+    // step's `[reads] → [writes]/[moves]` notation. Reads come from the
+    // main-thread mirror (source of truth for tape state in MANUAL mode).
+    const reads: string[] | null =
+      mirrorTapeBlock?.tapes.map((t) => t.symbols[t.position] ?? '') ?? null;
     await renderFromMirror(commands, true);
-    log.report(commandsEntry(commands, 'applied', CARET_COLORS));
+    log.report(commandsEntry(reads, commands, alphabets, 'applied', CARET_COLORS));
   }
 
   function resetCodeToSelected(): void {

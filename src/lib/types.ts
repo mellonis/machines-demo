@@ -74,6 +74,13 @@ export type SteppedResponse = {
   type: 'stepped';
   halted: boolean;
   commands: Command[] | null;
+  /**
+   * Per-tape symbols read at each head BEFORE this step applied. Parallel to
+   * `commands`; one entry per tape. Drives `[reads] → [writes]/[moves]`
+   * edge-label-style log rendering (machines-demo#69). `null` when
+   * `commands` is `null` (halted, no step ran).
+   */
+  reads: string[] | null;
   nextCommands: Command[] | null;
   stepsApplied: number;
 };
@@ -83,6 +90,8 @@ export type RanResponse = {
   tapes: TapeSnapshot[];
   truncated: boolean;
   commands: Command[][];
+  /** Per-step, per-tape reads captured before each step. Parallel to `commands`. */
+  reads: string[][];
   startStep: number;
   stepsApplied: number;
 };
@@ -104,6 +113,8 @@ export type PausedResponse = {
    * from `tapes` (snap, no animation), same path as `ran`.
    */
   commands: Command[][];
+  /** Per-step, per-tape reads captured before each step. Parallel to `commands`. */
+  reads: string[][];
   stepsApplied: number;
   /** `m.state.name` — the user's State instance does not cross the boundary. */
   state: string;
@@ -131,6 +142,8 @@ export type PausedResponse = {
 export type IdleResponse = {
   type: 'idle';
   commands: Command[][];
+  /** Per-step, per-tape reads captured before each step. Parallel to `commands`. */
+  reads: string[][];
   stepsApplied: number;
 };
 export type BusyResponse = { type: 'busy' };

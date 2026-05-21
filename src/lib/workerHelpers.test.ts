@@ -3,6 +3,7 @@ import * as turing from '@turing-machine-js/machine';
 import {
   movementCode,
   commandsFromYield,
+  readsFromYield,
   snapshotTapes,
   snapshotAlphabets,
   expectPhase,
@@ -62,6 +63,28 @@ describe('workerHelpers', () => {
         { movement: 'S', symbol: 'B' },
         { movement: 'L', symbol: null },
       ]);
+    });
+  });
+
+  describe('reads', () => {
+    it('R-reads-single-tape: returns the pre-step head symbol', () => {
+      const yieldVal: MachineYield = {
+        movements: [turing.movements.right],
+        currentSymbols: ['a'],
+        nextSymbols: ['b'],
+      };
+      expect(readsFromYield(yieldVal)).toEqual(['a']);
+    });
+
+    it('R-reads-defensive-copy: mutating the returned array does not affect the yield', () => {
+      const yieldVal: MachineYield = {
+        movements: [turing.movements.stay],
+        currentSymbols: ['a', 'b'],
+        nextSymbols: ['a', 'b'],
+      };
+      const reads = readsFromYield(yieldVal);
+      reads.push('z');
+      expect(yieldVal.currentSymbols).toEqual(['a', 'b']);
     });
   });
 
