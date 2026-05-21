@@ -46,6 +46,7 @@ describe('MachineRunner', () => {
         type: 'stepped' as const,
         halted: false,
         commands: null,
+        reads: null,
         nextCommands: null,
         stepsApplied: 1,
       };
@@ -79,6 +80,7 @@ describe('MachineRunner', () => {
         tapes: [],
         truncated: false,
         commands: [],
+        reads: [],
         startStep: 0,
         stepsApplied: 5,
       };
@@ -110,6 +112,7 @@ describe('MachineRunner', () => {
         tapes: [],
         truncated: false,
         commands: [],
+        reads: [],
         startStep: 0,
         stepsApplied: 0,
       });
@@ -138,6 +141,7 @@ describe('MachineRunner', () => {
         type: 'paused',
         tapes: [],
         commands: [],
+        reads: [],
         stepsApplied: 1,
         state: 'q1',
         currentSymbols: ['a'],
@@ -169,6 +173,7 @@ describe('MachineRunner', () => {
         tapes: [],
         truncated: false,
         commands: [],
+        reads: [],
         startStep: 0,
         stepsApplied: 1,
       });
@@ -219,6 +224,7 @@ describe('MachineRunner', () => {
         type: 'paused' as const,
         tapes: [],
         commands: [],
+        reads: [],
         stepsApplied: 1,
         state: 'q1',
         currentSymbols: ['a'],
@@ -244,6 +250,7 @@ describe('MachineRunner', () => {
         tapes: [],
         truncated: false,
         commands: [],
+        reads: [],
         startStep: 0,
         stepsApplied: 5,
       };
@@ -269,6 +276,7 @@ describe('MachineRunner', () => {
         tapes: [],
         truncated: false,
         commands: [],
+        reads: [],
         startStep: 0,
         stepsApplied: 0,
       });
@@ -288,6 +296,7 @@ describe('MachineRunner', () => {
         type: 'paused',
         tapes: [],
         commands: [],
+        reads: [],
         stepsApplied: 1,
         state: 'q1',
         currentSymbols: ['a'],
@@ -305,6 +314,7 @@ describe('MachineRunner', () => {
         tapes: [],
         truncated: false,
         commands: [],
+        reads: [],
         startStep: 0,
         stepsApplied: 1,
       });
@@ -324,6 +334,7 @@ describe('MachineRunner', () => {
         type: 'paused',
         tapes: [],
         commands: [],
+        reads: [],
         stepsApplied: 1,
         state: 'q1',
         currentSymbols: ['a'],
@@ -341,6 +352,7 @@ describe('MachineRunner', () => {
         tapes: [],
         truncated: false,
         commands: [],
+        reads: [],
         startStep: 0,
         stepsApplied: 1,
       });
@@ -365,6 +377,7 @@ describe('MachineRunner', () => {
         tapes: [],
         truncated: false,
         commands: [],
+        reads: [],
         startStep: 0,
         stepsApplied: 1,
       });
@@ -399,12 +412,14 @@ describe('MachineRunner', () => {
       current().respond({
         type: 'idle',
         commands: [[{ movement: 'R', symbol: null }]],
+        reads: [['_']],
         stepsApplied: 1,
       });
       current().respond({ type: 'busy' });
       current().respond({
         type: 'idle',
         commands: [[{ movement: 'L', symbol: null }]],
+        reads: [['_']],
         stepsApplied: 2,
       });
       current().respond({ type: 'busy' });
@@ -425,6 +440,7 @@ describe('MachineRunner', () => {
         tapes: [],
         truncated: false,
         commands: [],
+        reads: [],
         startStep: 2,
         stepsApplied: 2,
       });
@@ -453,6 +469,7 @@ describe('MachineRunner', () => {
         tapes: [],
         truncated: false,
         commands: [],
+        reads: [],
         startStep: 0,
         stepsApplied: 0,
       });
@@ -529,6 +546,7 @@ describe('MachineRunner', () => {
         type: 'paused',
         tapes: [],
         commands: [],
+        reads: [],
         stepsApplied: 1,
         state: 'q1',
         currentSymbols: ['a'],
@@ -553,6 +571,7 @@ describe('MachineRunner', () => {
         tapes: [],
         truncated: false,
         commands: [],
+        reads: [],
         startStep: 0,
         stepsApplied: 1,
       });
@@ -572,6 +591,7 @@ describe('MachineRunner', () => {
         type: 'paused',
         tapes: [],
         commands: [],
+        reads: [],
         stepsApplied: 1,
         state: 'q1',
         currentSymbols: ['a'],
@@ -598,6 +618,7 @@ describe('MachineRunner', () => {
       current().respond({
         type: 'idle',
         commands: [[{ movement: 'R', symbol: null }]],
+        reads: [['_']],
         stepsApplied: 1,
       });
 
@@ -618,6 +639,7 @@ describe('MachineRunner', () => {
         tapes: [],
         truncated: false,
         commands: [],
+        reads: [],
         startStep: 1,
         stepsApplied: 1,
       });
@@ -636,6 +658,7 @@ describe('MachineRunner', () => {
       current().respond({
         type: 'idle',
         commands: [[{ movement: 'R', symbol: null }]],
+        reads: [['_']],
         stepsApplied: 1,
       });
       current().respond({ type: 'busy' });
@@ -660,6 +683,7 @@ describe('MachineRunner', () => {
         tapes: [],
         truncated: false,
         commands: [],
+        reads: [],
         startStep: 0,
         stepsApplied: 0,
       });
@@ -705,6 +729,7 @@ describe('MachineRunner', () => {
         tapes: [],
         truncated: false,
         commands: [],
+        reads: [],
         startStep: 0,
         stepsApplied: 0,
       });
@@ -728,6 +753,7 @@ describe('MachineRunner', () => {
         tapes: [],
         truncated: false,
         commands: [],
+        reads: [],
         startStep: 0,
         stepsApplied: 0,
       });

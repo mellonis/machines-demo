@@ -27,6 +27,13 @@ export function commandsFromYield(y: MachineYield): Command[] {
   });
 }
 
+/** Per-tape read symbols at the heads BEFORE the yielded step applied.
+ *  Parallel to `commandsFromYield`; defensive-copies so the caller can
+ *  mutate without aliasing the engine's array (machines-demo#69). */
+export function readsFromYield(y: MachineYield): string[] {
+  return [...y.currentSymbols];
+}
+
 // --- Tape / alphabet snapshots ---
 
 export type TapeLike = {

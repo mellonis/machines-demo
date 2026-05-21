@@ -15,6 +15,7 @@ import * as turing from '@turing-machine-js/machine';
 import * as post from '@post-machine-js/machine';
 import {
   commandsFromYield,
+  readsFromYield,
   snapshotTapes,
   snapshotAlphabets,
   expectPhase,
@@ -144,8 +145,10 @@ let resumeResolve: (() => void) | null = null;
 
 // Per-run buffer of commands captured by onStep. Drained on `paused` (sent
 // in the response), on `idle` per-iter (auto mode), and on `ran` (sent in
-// the response).
+// the response). `runReadsBuffer` is the parallel array of pre-step head
+// symbols (machines-demo#69) — same length, same per-step index.
 let runCommandBuffer: Command[][] = [];
+let runReadsBuffer: string[][] = [];
 let runStartStep = 0;
 
 // Runtime-mutable gate consulted inside onPause. Initialized from the
@@ -185,6 +188,7 @@ function reset(): void {
   pendingCommand = null;
   resumeResolve = null;
   runCommandBuffer = [];
+  runReadsBuffer = [];
   runStartStep = 0;
   debugEnabled = false;
   stepRequested = false;
@@ -272,13 +276,19 @@ function build(engine: Engine, code: string): void {
   }
 }
 
-function step(): { commands: Command[] | null; nextCommands: Command[] | null; halted: boolean } {
+function step(): {
+  commands: Command[] | null;
+  reads: string[] | null;
+  nextCommands: Command[] | null;
+  halted: boolean;
+} {
   expectPhase(phase.kind, ['built']);
   const built = phase as Extract<WorkerPhase, { kind: 'built' }>;
   if (built.halted || !pendingCommand || !generator) {
-    return { commands: null, nextCommands: null, halted: true };
+    return { commands: null, reads: null, nextCommands: null, halted: true };
   }
   const commands = commandsFromYield(pendingCommand);
+  const reads = readsFromYield(pendingCommand);
   const r = generator.next();
   stepsApplied += 1;
   let halted: boolean;
@@ -291,7 +301,7 @@ function step(): { commands: Command[] | null; nextCommands: Command[] | null; h
   }
   phase = { kind: 'built', halted };
   const nextCommands = pendingCommand ? commandsFromYield(pendingCommand) : null;
-  return { commands, nextCommands, halted };
+  return { commands, reads, nextCommands, halted };
 }
 
 /**
@@ -312,12 +322,15 @@ async function dispatchPause(info: {
   debugBreak: { before?: true; after?: true };
 }): Promise<void> {
   const commandsBatch = runCommandBuffer;
+  const readsBatch = runReadsBuffer;
   runCommandBuffer = [];
+  runReadsBuffer = [];
   phase = { kind: 'paused' };
   send({
     type: 'paused',
     tapes: snapshotTapes(tapes),
     commands: commandsBatch,
+    reads: readsBatch,
     stepsApplied,
     state: info.state,
     currentSymbols: info.currentSymbols,
@@ -355,6 +368,7 @@ async function run(
 
   runStartStep = stepsApplied;
   runCommandBuffer = [];
+  runReadsBuffer = [];
   phase = { kind: 'running' };
   debugEnabled = debug;
   stepRequested = step;
@@ -410,8 +424,10 @@ async function run(
 
     if (runIntervalMs !== null && runIntervalMs > 0) {
       const drained = runCommandBuffer;
+      const drainedReads = runReadsBuffer;
       runCommandBuffer = [];
-      send({ type: 'idle', commands: drained, stepsApplied });
+      runReadsBuffer = [];
+      send({ type: 'idle', commands: drained, reads: drainedReads, stepsApplied });
       await new Promise<void>((resolve) => {
         pendingTimeoutResolve = resolve;
         pendingTimeoutId = _setTimeout(() => {
@@ -437,6 +453,7 @@ async function run(
     stepsLimit: maxSteps,
     onStep: (m: MachineYield) => {
       runCommandBuffer.push(commandsFromYield(m));
+      runReadsBuffer.push(readsFromYield(m));
       stepsApplied += 1;
     },
     onPause: onPauseFn,
@@ -500,11 +517,12 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
     }
 
     if (req.type === 'step') {
-      const { commands, nextCommands, halted } = step();
+      const { commands, reads, nextCommands, halted } = step();
       send({
         type: 'stepped',
         halted,
         commands,
+        reads,
         nextCommands,
         stepsApplied,
       });
@@ -523,10 +541,12 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
         tapes: snapshotTapes(tapes),
         truncated,
         commands: runCommandBuffer,
+        reads: runReadsBuffer,
         startStep,
         stepsApplied,
       });
       runCommandBuffer = [];
+      runReadsBuffer = [];
       return;
     }
 

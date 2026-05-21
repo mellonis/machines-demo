@@ -1,25 +1,47 @@
 import type { Alphabets, Command, TapeSnapshot } from './types.ts';
 import type { LogEntry } from './log.ts';
 
-function describeAppliedCommand(command: Command): string {
-  // Display symbol — literal char from the alphabet (no UI substitution; the
-  // user controls what their blank looks like via the alphabet definition).
-  // Single-quote-wrap so an invisible blank (e.g. literal space) still reads
-  // as something on a log line. `sym` (not `symbol`) avoids shadowing the
-  // built-in TS/JS `symbol` type used by the upstream library's movement
-  // primitives.
-  const sym = command.symbol === null ? 'kept' : `wrote '${command.symbol}'`;
-  const movement = command.movement === 'L' ? 'moved left' : command.movement === 'R' ? 'moved right' : 'stayed';
-  // Paper-style shorthand: `<sym>/<mvmt>`. Actual symbols wrap in single
-  // quotes so a literal `*` (valid alphabet symbol) reads as `'*'` and stays
-  // distinct from the bare `*` wildcard used for "kept" (no write).
-  const shortSym = command.symbol === null ? '*' : `'${command.symbol}'`;
-  return `${sym} + ${movement} (${shortSym}/${command.movement})`;
-}
+/** Engine edge-label format (machines-demo#69) — matches turing-machine-js's
+ *  `toMermaid` emit so a logged step's notation lines up byte-for-byte with
+ *  the same transition's edge label in the rendered state graph.
+ *
+ *  Format: `[reads] → [writes]/[moves]` (writes/moves omit the `[reads] →`
+ *  prefix when `reads === null`, e.g. manual Apply where no transition
+ *  matched).
+ *
+ *  Per-cell encoding:
+ *  - Read cell: `'X'` (literal symbol, always single-quoted) or `B` (blank).
+ *    `*` (the engine's `ifOtherSymbol` catch-all) never appears at runtime —
+ *    the head reads a concrete symbol on every step.
+ *  - Write cell: `'X'` (literal) | `K` (keep, no write — `command.symbol`
+ *    is null because the resolved symbol matched current) | `E` (erase,
+ *    write equals blank).
+ *  - Move cell: `L` | `R` | `S`.
+ *
+ *  Multi-tape: per-tape entries are comma-separated inside one outer
+ *  bracket per role: `['1','a'] → ['0','b']/[R,L]`.
+ */
+function formatStepNotation(
+  reads: readonly string[] | null,
+  commands: readonly Command[],
+  blanks: readonly string[],
+): string {
+  const writes = commands
+    .map((c, i) => {
+      if (c.symbol === null) return 'K';
+      if (c.symbol === blanks[i]) return 'E';
+      return `'${c.symbol}'`;
+    })
+    .join(',');
+  const moves = commands.map((c) => c.movement).join(',');
+  const writesPart = `[${writes}]/[${moves}]`;
 
-/** Quoted, comma-separated rest-of-alphabet (excludes the blank at index 0). */
-function alphabetRest(alphabet: readonly string[]): string {
-  return alphabet.slice(1).map((s) => `'${s}'`).join(', ');
+  if (reads === null) return writesPart;
+
+  const readsStr = reads
+    .map((r, i) => (r === blanks[i] ? 'B' : `'${r}'`))
+    .join(',');
+  return `[${readsStr}] → ${writesPart}`;
 }
 
 export function formatTape(tape: TapeSnapshot): string {
@@ -29,6 +51,11 @@ export function formatTape(tape: TapeSnapshot): string {
   return tape.symbols
     .map((sym, i) => (i === tape.position ? `[${sym}]` : sym))
     .join('');
+}
+
+/** Quoted, comma-separated rest-of-alphabet (excludes the blank at index 0). */
+function alphabetRest(alphabet: readonly string[]): string {
+  return alphabet.slice(1).map((s) => `'${s}'`).join(', ');
 }
 
 /* ───── log entries ─────
@@ -79,26 +106,63 @@ export function tapesEntry(
 export type CommandsApplication = { stepNumber: number } | 'applied';
 
 /**
- * One log entry describing applied commands — replaces the previous
- * `stepEntry` / `appliedEntry` split. Single-tape: header followed by inline
- * description (`step 3: wrote 'a' + moved right ('a'/R)`). Multi-tape:
- * header on its own line and `- Tape N: …` rows per tape.
+ * One log entry rendering an applied step in engine edge-label notation
+ * (`[reads] → [writes]/[moves]`, machines-demo#69). Single-tape gets a
+ * one-line header + inline notation; multi-tape gets a header line with
+ * `- Tape N: …` rows per tape.
+ *
+ * `reads` parallels `commands` (per-tape symbols read at each head before
+ * the step applied). Manual `'applied'` from the control panel doesn't
+ * have a transition match in the engine sense; callers pass the symbols
+ * at the heads at apply-time when available, or `null` to render just
+ * `[writes]/[moves]`.
+ *
+ * `alphabets[i][0]` is the per-tape blank symbol — used to choose `B` over
+ * `'<literal>'` for reads and `E` over `'<literal>'` for writes when the
+ * symbol matches the blank.
  */
 export function commandsEntry(
+  reads: readonly string[] | readonly string[][] | null,
   commands: readonly Command[] | null,
+  alphabets: Alphabets,
   application: CommandsApplication,
   colors?: readonly string[],
 ): LogEntry {
   const prefix = application === 'applied' ? 'applied' : `step ${application.stepNumber}`;
   if (!commands || commands.length === 0) return { text: `${prefix}:` };
+
+  const blanks = alphabets.map((a) => a[0] ?? '');
+  // Single-tape: `reads` and `commands` are flat per-tape arrays.
   if (commands.length === 1) {
-    return { text: `${prefix}: ${describeAppliedCommand(commands[0])}`, color: colors?.[0] };
+    const tapeRead =
+      reads === null
+        ? null
+        : ((reads as readonly string[])[0] ?? null);
+    const notation = formatStepNotation(
+      tapeRead === null ? null : [tapeRead],
+      commands,
+      blanks,
+    );
+    return { text: `${prefix}: ${notation}`, color: colors?.[0] };
   }
+
+  // Multi-tape: one bracketed group per tape on its own row.
   return {
     text: `${prefix}:`,
-    rows: commands.map((command, i) => ({
-      text: `- Tape ${i + 1}: ${describeAppliedCommand(command)}`,
-      color: colors?.[i],
-    })),
+    rows: commands.map((command, i) => {
+      const tapeRead =
+        reads === null
+          ? null
+          : ((reads as readonly string[])[i] ?? null);
+      const notation = formatStepNotation(
+        tapeRead === null ? null : [tapeRead],
+        [command],
+        [blanks[i] ?? ''],
+      );
+      return {
+        text: `- Tape ${i + 1}: ${notation}`,
+        color: colors?.[i],
+      };
+    }),
   };
 }
