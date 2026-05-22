@@ -4,12 +4,13 @@
   import Toolbar from './Toolbar.svelte';
   import ControlPanel from './ControlPanel.svelte';
   import Log from './Log.svelte';
+  import MachineGraph from './MachineGraph.svelte';
   import { LogStore } from '../lib/logStore.svelte.ts';
   import MachineWorker from '../lib/machineWorker.ts?worker';
   import { MachineRunner, WorkerError } from '../lib/machineRunner.ts';
   import * as turing from '@turing-machine-js/machine';
   import { BELT_ANIMATION_MIN_INTERVAL_MS, MAX_TAPES, VIEWPORT_WIDTH } from '../lib/caps.ts';
-  import { type Alphabets, type Command, type Engine, type IdleResponse, type PausedResponse, type TapeSnapshot } from '../lib/types.ts';
+  import { type Alphabets, type Command, type Engine, type GraphHighlight, type IdleResponse, type PausedResponse, type TapeSnapshot, type TuringGraph } from '../lib/types.ts';
   import { startDemoLoop } from '../lib/demoLoop.ts';
   import { parseInterval } from '../lib/interval.ts';
   import { parse as parseSnapshot, serialize as serializeSnapshot } from '../lib/tapeSnapshot.ts';
@@ -30,6 +31,8 @@
     renameSnippet,
     loadDebugMode,
     saveDebugMode,
+    loadGraphCollapsed,
+    saveGraphCollapsed,
     type Snippets,
   } from '../lib/persist.ts';
   import { icons } from '../lib/icons.ts';
@@ -67,6 +70,37 @@
   let alphabets = $state<Alphabets>([]);
   const log = new LogStore();
   let lastSnapshots = $state<TapeSnapshot[] | null>(null);
+  // State-graph panel (machines-demo#9). `graph` is the engine-v7 Graph
+  // snapshot captured at Build via State.toGraph; null pre-Build.
+  // `graphCollapsed` defaults to "open on desktop, closed on mobile" per
+  // the issue's UX note; `graphModalOpen` drives the expand-to-modal view.
+  let graph = $state<TuringGraph | null>(null);
+  let graphCollapsed = $state(untrack(() => initialGraphCollapsed(engine)));
+  let graphModalOpen = $state(false);
+
+  // Persist the user's expand/collapse choice per engine. Skip the initial
+  // value (it already came from localStorage or the viewport default) so we
+  // don't write back the default the first time around — useful when the
+  // user has nothing saved yet and we'd otherwise pin them to whichever
+  // viewport they happened to load on.
+  $effect(() => {
+    saveGraphCollapsed(engine, graphCollapsed);
+  });
+  // Highlight state (#10). Carried through from the paused response:
+  //   - `prevStateId` is the state we just left (= FROM of the just-fired
+  //     transition that brought us to `currentStateId`). Null only at the
+  //     very first iter's before-pause; treated as the synthetic `idle`
+  //     sentinel in the highlight derivation.
+  //   - `currentStateId` is m.state at pause (the "you are here" anchor).
+  //   - `nextStateId` is m.state.getNextState(symbol) — the state the
+  //     ABOUT-TO-FIRE transition would land on. Used for after / iter-end
+  //     pauses where the just-fired transition is current → next.
+  //   - `pauseBefore` selects which triple is the just-fired one:
+  //       before → (prev, current); after / iter-end → (current, next).
+  let prevStateId = $state<number | null>(null);
+  let currentStateId = $state<number | null>(null);
+  let nextStateId = $state<number | null>(null);
+  let pauseBefore = $state(false);
   let pendingOp = $state<'load' | 'run' | null>(null);
   let mirrorMachine: turing.TuringMachine | null = null;
   let mirrorTapeBlock: turing.TapeBlock | null = null;
@@ -166,6 +200,41 @@
     executionMode !== 'RUNNING_PAUSED',
   );
 
+  // State-graph highlight (#10): mirrors the LAST FIRED transition (so the
+  // graph stays in lockstep with the most recent log entry). Strong on
+  // m.state in all cases — "you are here". Only fires on RUNNING_PAUSED.
+  //
+  //   before pause at X (came from Y):
+  //       triple = (Y, edge, X), strong on TO (= X = m.state)
+  //   after / iter-end pause at X (next will be Z):
+  //       triple = (X, edge, Z), strong on FROM (= X = m.state)
+  //
+  // First iter's before pause has no prior state — `prevStateId` is null;
+  // we use the synthetic `idle` sentinel as FROM (matches the idle-enter
+  // arrow in the rendered graph, so the "transition that brought us here"
+  // is the start-arrow itself).
+  //
+  // Other modes return null:
+  //  - DEMO/MANUAL: no truth value (random / user-chosen commands).
+  //  - RUNNING_AUTO/CONTINUOUS: too fast to read; would strobe.
+  //  - HALTED: follow-up sub-branch (highlight last edge + halt node).
+  const graphHighlight = $derived.by<GraphHighlight | null>(() => {
+    if (!graph) return null;
+    if (executionMode !== 'RUNNING_PAUSED' || currentStateId === null) return null;
+    if (pauseBefore) {
+      return {
+        fromId: prevStateId ?? 'idle',
+        toId: currentStateId,
+        strong: 'to',
+      };
+    }
+    return {
+      fromId: currentStateId,
+      toId: nextStateId,
+      strong: 'from',
+    };
+  });
+
   // The code Reset would restore to: the loaded snippet's saved code, or the
   // selected bundled example's code, or null when the loaded snippet was
   // deleted (no target — Reset is hidden in that branch).
@@ -209,6 +278,20 @@
   /* See LogStore (lib/logStore.svelte.ts) — methods live there. */
 
   /* ───── side-effect handlers (one source of truth on error) ───── */
+
+  // Initial state-graph collapse policy: prefer the user's persisted choice
+  // (per engine), else fall back to viewport-derived default — open on
+  // desktop (>=720px viewport), closed on mobile so the panel doesn't
+  // push the editor below the fold on first view. SSR-safe: defaults to
+  // open if `matchMedia` is unavailable.
+  function initialGraphCollapsed(engine: Engine): boolean {
+    const persisted = loadGraphCollapsed(engine);
+    if (persisted !== null) return persisted;
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return false;
+    }
+    return window.matchMedia('(max-width: 719px)').matches;
+  }
 
   function failHalted(err: unknown): void {
     if (stopRequested) {
@@ -316,6 +399,7 @@
       alphabets = res.alphabets;
       lastSnapshots = res.tapes;
       halted = res.halted;
+      graph = res.graph;
       _buildMirrorMachine(res.tapes, res.alphabets);
       await tick();
       setAllFromMirror();
@@ -326,6 +410,7 @@
       tapesStackRef?.clearAll();
       lastSnapshots = null;
       halted = true;
+      graph = null;
       const msg = err instanceof Error ? err.message : String(err);
       log.report(`error: ${msg}`, 'error');
       return false;
@@ -493,6 +578,14 @@
   }
 
   function onPausedHandler(paused: PausedResponse): void {
+    // Highlight (#10): capture prev / current / next so the graph can light
+    // up the JUST-FIRED transition triple (matching the last logged step).
+    // `pauseBefore` selects which triple to use — see graphHighlight derived.
+    prevStateId = paused.prevStateId;
+    currentStateId = paused.currentStateId;
+    nextStateId = paused.nextStateId;
+    pauseBefore = paused.debugBreak.before === true;
+
     // Replay buffered per-step commands so the trace leading to the break is
     // visible. In RUNNING_AUTO the buffer is drained per iter via `idle` and
     // this batch is normally empty; cold-start Step / RUNNING_CONTINUOUS use
@@ -822,6 +915,46 @@
   <div class="panel-tape">
     <TapesStack bind:this={tapesStackRef} {tapeCount} caretColors={CARET_COLORS} />
 
+    {#if graphModalOpen}
+      <!-- Modal expansion of the same state graph (#9). Backdrop click +
+           Esc both dismiss; the inner card stops propagation so clicks on
+           the SVG host stay scoped. The modal's MachineGraph instance is
+           rendered with collapsed={false} unconditionally — the modal IS
+           the expanded view, no further toggle. The expand button on the
+           inner header is hidden via a never-fires onExpand prop. -->
+      <div
+        class="graph-modal-backdrop"
+        role="presentation"
+        onclick={() => { graphModalOpen = false; }}
+        onkeydown={(e) => { if (e.key === 'Escape') graphModalOpen = false; }}
+      >
+        <div
+          class="graph-modal-card"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Machine graph (expanded)"
+          onclick={(e) => e.stopPropagation()}
+          onkeydown={(e) => e.stopPropagation()}
+          tabindex="-1"
+        >
+          <button
+            type="button"
+            class="graph-modal-close"
+            onclick={() => { graphModalOpen = false; }}
+            aria-label="Close machine graph"
+            title="Close (Esc)"
+          >{@html icons.xSmall}</button>
+          <MachineGraph
+            {graph}
+            highlight={graphHighlight}
+            collapsed={false}
+            onToggleCollapsed={() => { graphModalOpen = false; }}
+            onRenderError={(msg: string) => log.report(msg, 'error')}
+          />
+        </div>
+      </div>
+    {/if}
+
     <div class="panel-enter-clip">
       <ControlPanel
         bind:this={panelRef}
@@ -860,6 +993,17 @@
       >
         {@html icons.clipboard}
       </button>
+    </div>
+
+    <div class="machine-graph-row">
+      <MachineGraph
+        {graph}
+        highlight={graphHighlight}
+        collapsed={graphCollapsed}
+        onToggleCollapsed={() => { graphCollapsed = !graphCollapsed; }}
+        onExpand={() => { graphModalOpen = true; }}
+        onRenderError={(msg: string) => log.report(msg, 'error')}
+      />
     </div>
 
     <Log entries={log.entries} onClear={() => log.clear()} />
@@ -939,6 +1083,68 @@
       padding: 16px 16px 24px;
       border-right: none;
       border-bottom: 1px solid var(--cell-border);
+    }
+  }
+
+  /* State-graph row (machines-demo#9) — sits between TapesStack and the
+     control panel. Just a top-margin spacer so the collapsible card has
+     air around it; the card owns its own border/background. */
+  .machine-graph-row {
+    margin-top: 12px;
+  }
+
+  /* Expand-to-modal view of the state graph (#9). Fixed-position overlay,
+     dimmed backdrop, centered card with most of the viewport available. */
+  .graph-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    padding: 24px;
+  }
+
+  .graph-modal-card {
+    position: relative;
+    background: var(--bg);
+    border-radius: 8px;
+    width: min(1200px, 95vw);
+    max-height: 90vh;
+    overflow: auto;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  }
+
+  .graph-modal-close {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: var(--editor-bg);
+    border: 1px solid var(--cell-border);
+    border-radius: 4px;
+    color: var(--muted);
+    cursor: pointer;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1;
+    transition:
+      background var(--anim-button-hover-ms),
+      color var(--anim-button-hover-ms);
+
+    &:hover {
+      background: var(--hover-bg);
+      color: var(--fg);
+    }
+
+    :global(svg) {
+      width: 16px;
+      height: 16px;
+      display: block;
     }
   }
 

@@ -16,6 +16,7 @@ import * as post from '@post-machine-js/machine';
 import {
   commandsFromYield,
   readsFromYield,
+  nextStateIdFromYield,
   snapshotTapes,
   snapshotAlphabets,
   expectPhase,
@@ -41,7 +42,12 @@ import {
 
 // onPause payload subset we read. Engine's full type carries more.
 type OnPausePayload = {
-  state: { name?: string };
+  state: {
+    id: number;
+    name?: string;
+    getSymbol: (tapeBlock: unknown) => symbol;
+    getNextState: (sym: symbol) => { ref: { id: number } };
+  };
   currentSymbols: string[];
   nextState: { debug: { before?: true; after?: true } | null };
   debugBreak?: { before?: true; after?: true };
@@ -151,6 +157,15 @@ let runCommandBuffer: Command[][] = [];
 let runReadsBuffer: string[][] = [];
 let runStartStep = 0;
 
+// Engine State.id of the most recently yielded state, captured in onStep.
+// At the moment a BEFORE-pause fires for iter K, this holds iter K-1's
+// state.id — i.e. the source of the transition that just brought us into
+// iter K's state. That's the FROM of the "just-fired" triple the demo
+// highlights on the graph (machines-demo#10). Cleared on reset / run-
+// start so the very first iter's before-pause sees null → main thread
+// uses the synthetic `idle` sentinel as FROM.
+let prevYieldedStateId: number | null = null;
+
 // Runtime-mutable gate consulted inside onPause. Initialized from the
 // `run` request's `debug` flag; toggled mid-run via the `setDebug` message
 // so the user can flip the checkbox without restarting.
@@ -189,6 +204,7 @@ function reset(): void {
   resumeResolve = null;
   runCommandBuffer = [];
   runReadsBuffer = [];
+  prevYieldedStateId = null;
   runStartStep = 0;
   debugEnabled = false;
   stepRequested = false;
@@ -280,12 +296,17 @@ function step(): {
   commands: Command[] | null;
   reads: string[] | null;
   nextCommands: Command[] | null;
+  currentStateId: number | null;
+  nextStateId: number | null;
   halted: boolean;
 } {
   expectPhase(phase.kind, ['built']);
   const built = phase as Extract<WorkerPhase, { kind: 'built' }>;
   if (built.halted || !pendingCommand || !generator) {
-    return { commands: null, reads: null, nextCommands: null, halted: true };
+    return {
+      commands: null, reads: null, nextCommands: null,
+      currentStateId: null, nextStateId: null, halted: true,
+    };
   }
   const commands = commandsFromYield(pendingCommand);
   const reads = readsFromYield(pendingCommand);
@@ -301,7 +322,15 @@ function step(): {
   }
   phase = { kind: 'built', halted };
   const nextCommands = pendingCommand ? commandsFromYield(pendingCommand) : null;
-  return { commands, reads, nextCommands, halted };
+  // Highlight data (machines-demo#10). After the step, `pendingCommand` (if
+  // not halted) is the NEXT yield — its `state` is the state about to fire
+  // on the next Step click. That's our `from`; nextStateId is computed via
+  // engine `getNextState(getSymbol(tapeBlock))`.
+  const currentStateId = pendingCommand ? pendingCommand.state.id : null;
+  const nextStateId = pendingCommand && machine?.tapeBlock
+    ? nextStateIdFromYield(pendingCommand, machine.tapeBlock)
+    : null;
+  return { commands, reads, nextCommands, currentStateId, nextStateId, halted };
 }
 
 /**
@@ -320,6 +349,9 @@ async function dispatchPause(info: {
   state: string;
   currentSymbols: string[];
   debugBreak: { before?: true; after?: true };
+  currentStateId: number | null;
+  nextStateId: number | null;
+  prevStateId: number | null;
 }): Promise<void> {
   const commandsBatch = runCommandBuffer;
   const readsBatch = runReadsBuffer;
@@ -331,6 +363,9 @@ async function dispatchPause(info: {
     tapes: snapshotTapes(tapes),
     commands: commandsBatch,
     reads: readsBatch,
+    currentStateId: info.currentStateId,
+    nextStateId: info.nextStateId,
+    prevStateId: info.prevStateId,
     stepsApplied,
     state: info.state,
     currentSymbols: info.currentSymbols,
@@ -369,6 +404,7 @@ async function run(
   runStartStep = stepsApplied;
   runCommandBuffer = [];
   runReadsBuffer = [];
+  prevYieldedStateId = null;
   phase = { kind: 'running' };
   debugEnabled = debug;
   stepRequested = step;
@@ -387,6 +423,11 @@ async function run(
       state: m.state.name ?? '',
       currentSymbols: [...m.currentSymbols],
       debugBreak: { ...m.debugBreak },
+      currentStateId: m.state.id,
+      nextStateId: machine?.tapeBlock
+        ? nextStateIdFromYield(m as unknown as MachineYield, machine.tapeBlock)
+        : null,
+      prevStateId: prevYieldedStateId,
     });
   };
 
@@ -418,6 +459,11 @@ async function run(
         state: m.state.name ?? '',
         currentSymbols: [...m.currentSymbols],
         debugBreak: {},
+        currentStateId: m.state.id,
+        nextStateId: machine?.tapeBlock
+          ? nextStateIdFromYield(m as unknown as MachineYield, machine.tapeBlock)
+          : null,
+        prevStateId: prevYieldedStateId,
       });
       return;
     }
@@ -427,7 +473,13 @@ async function run(
       const drainedReads = runReadsBuffer;
       runCommandBuffer = [];
       runReadsBuffer = [];
-      send({ type: 'idle', commands: drained, reads: drainedReads, stepsApplied });
+      send({
+        type: 'idle',
+        commands: drained,
+        reads: drainedReads,
+        currentStateId: m.state.id,
+        stepsApplied,
+      });
       await new Promise<void>((resolve) => {
         pendingTimeoutResolve = resolve;
         pendingTimeoutId = _setTimeout(() => {
@@ -445,6 +497,11 @@ async function run(
         state: m.state.name ?? '',
         currentSymbols: [...m.currentSymbols],
         debugBreak: {},
+        currentStateId: m.state.id,
+        nextStateId: machine?.tapeBlock
+          ? nextStateIdFromYield(m as unknown as MachineYield, machine.tapeBlock)
+          : null,
+        prevStateId: prevYieldedStateId,
       });
     }
   };
@@ -454,6 +511,11 @@ async function run(
     onStep: (m: MachineYield) => {
       runCommandBuffer.push(commandsFromYield(m));
       runReadsBuffer.push(readsFromYield(m));
+      // After this onStep, iter K's transition has effectively "fired"
+      // (the runner advances state after onStep returns). Stash this
+      // state.id so iter K+1's before-pause has the prior state available
+      // as the FROM of the just-fired triple.
+      prevYieldedStateId = m.state.id;
       stepsApplied += 1;
     },
     onPause: onPauseFn,
@@ -507,23 +569,34 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
     if (req.type === 'build') {
       build(req.engine, req.code);
       const built = phase as Extract<WorkerPhase, { kind: 'built' }>;
+      // Compute the engine-v7 Graph snapshot once at Build (machines-demo#9).
+      // JSON-serializable; safe across the worker boundary. Main thread feeds
+      // this to `toMermaid(graph)` for SVG rendering and uses the per-edge
+      // `GraphTransition.id`s for future highlight + breakpoint work (#10, #37).
+      const graph = turing.State.toGraph(
+        initialState as turing.State,
+        machine!.tapeBlock as unknown as turing.TapeBlock,
+      );
       send({
         type: 'built',
         tapes: snapshotTapes(tapes),
         alphabets: snapshotAlphabets(tapes),
         halted: built.halted,
+        graph,
       });
       return;
     }
 
     if (req.type === 'step') {
-      const { commands, reads, nextCommands, halted } = step();
+      const { commands, reads, nextCommands, currentStateId, nextStateId, halted } = step();
       send({
         type: 'stepped',
         halted,
         commands,
         reads,
         nextCommands,
+        currentStateId,
+        nextStateId,
         stepsApplied,
       });
       return;
@@ -536,12 +609,16 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
         req.step ?? false,
         req.intervalMs ?? null,
       );
+      // After run completion, pendingCommand is null (halted). The "final
+      // state" for highlight purposes IS halt — but we don't surface a
+      // halt-node highlight in v1 (HALTED-mode highlight is a follow-up).
       send({
         type: 'ran',
         tapes: snapshotTapes(tapes),
         truncated,
         commands: runCommandBuffer,
         reads: runReadsBuffer,
+        currentStateId: pendingCommand ? pendingCommand.state.id : null,
         startStep,
         stepsApplied,
       });

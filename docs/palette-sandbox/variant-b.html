@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Machine-graph palette sandbox</title>
+<style id="tokens">
+/* ────────────────────────────────────────────────────────────────────────
+   Tweak the values below and reload. Both themes coexist — toggle with
+   the button (or your OS color scheme). The two `:root` blocks are the
+   only place colors live; the rules under PALETTE further down derive
+   everything from these tokens via var()/color-mix(). Try edits like:
+
+     --graph-node-fill: #f0f0f5;
+     --graph-node-stroke: var(--accent);
+
+   and see them apply instantly to every shape in the sample SVG below.
+   ──────────────────────────────────────────────────────────────────── */
+
+:root,
+:root[data-theme='dark'] {
+  /* base site tokens — mirror src/app.css :root */
+  --bg: #1a1b1e;
+  --fg: #e6e6e6;
+  --muted: #8a8d93;
+  --accent: #6ea8fe;
+  --cell-bg: #2a2c30;
+  --cell-border: #3a3d42;
+  --head: #ffd166;
+  --editor-bg: #282c34;
+  --surface-bg: rgba(0, 0, 0, 0.18);
+  --surface-border: var(--cell-border);
+
+  /* graph palette — branded / vibrant: lean into --accent (blue) for flow,
+     --head (amber) for terminal / runtime, with saturated edges. */
+  --graph-node-fill: color-mix(in srgb, var(--accent) 10%, var(--cell-bg));
+  --graph-node-stroke: color-mix(in srgb, var(--accent) 65%, var(--cell-border));
+  --graph-node-main-fill: color-mix(in srgb, var(--accent) 32%, var(--cell-bg));
+  --graph-node-main-stroke: var(--accent);
+  --graph-node-halt-stroke: var(--head);
+  --graph-node-halt-inner-fill: color-mix(in srgb, var(--head) 18%, var(--graph-node-fill));
+  --graph-text: var(--fg);
+  --graph-edge: color-mix(in srgb, var(--accent) 55%, var(--muted));
+  --graph-edge-thick: var(--accent);
+  --graph-edge-dotted: color-mix(in srgb, var(--head) 55%, var(--muted));
+  --graph-edge-label-text: var(--fg);
+  --graph-edge-label-bg: color-mix(in srgb, var(--accent) 5%, var(--bg));
+  --graph-cluster-fill: color-mix(in srgb, var(--accent) 12%, transparent);
+  --graph-cluster-stroke: color-mix(in srgb, var(--accent) 45%, var(--cell-border));
+  --graph-highlight: var(--head);
+  --graph-highlight-soft-fill: color-mix(in srgb, var(--head) 30%, var(--graph-node-fill));
+  --graph-highlight-strong-fill: color-mix(in srgb, var(--head) 55%, var(--graph-node-fill));
+}
+
+:root[data-theme='light'] {
+  --bg: #ffffff;
+  --fg: #1a1b1e;
+  --muted: #5a5d63;
+  --accent: #2563eb;
+  --cell-bg: #f5f5f7;
+  --cell-border: #d0d0d4;
+  --head: #d97706;
+  --editor-bg: #ffffff;
+  --surface-bg: rgba(0, 0, 0, 0.04);
+  --surface-border: var(--cell-border);
+
+  --graph-node-fill: color-mix(in srgb, var(--accent) 6%, #ffffff);
+  --graph-node-stroke: var(--accent);
+  --graph-node-main-fill: color-mix(in srgb, var(--accent) 22%, #ffffff);
+  --graph-node-main-stroke: var(--accent);
+  --graph-node-halt-stroke: var(--head);
+  --graph-node-halt-inner-fill: color-mix(in srgb, var(--head) 16%, var(--graph-node-fill));
+  --graph-text: var(--fg);
+  --graph-edge: color-mix(in srgb, var(--accent) 60%, var(--muted));
+  --graph-edge-thick: var(--accent);
+  --graph-edge-dotted: color-mix(in srgb, var(--head) 70%, var(--muted));
+  --graph-edge-label-text: var(--fg);
+  --graph-edge-label-bg: color-mix(in srgb, var(--accent) 4%, var(--bg));
+  --graph-cluster-fill: color-mix(in srgb, var(--accent) 8%, transparent);
+  --graph-cluster-stroke: color-mix(in srgb, var(--accent) 50%, var(--cell-border));
+  --graph-highlight: var(--head);
+  --graph-highlight-soft-fill: color-mix(in srgb, var(--head) 22%, var(--graph-node-fill));
+  --graph-highlight-strong-fill: color-mix(in srgb, var(--head) 45%, var(--graph-node-fill));
+}
+
+/* ────────── PALETTE — selectors that turn tokens into rendered SVG ────────── */
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  margin: 0;
+  padding: 24px;
+}
+
+.toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  align-items: center;
+}
+
+.toolbar button {
+  background: var(--cell-bg);
+  color: var(--fg);
+  border: 1px solid var(--cell-border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.svg-host {
+  background: var(--editor-bg);
+  border: 1px solid var(--cell-border);
+  border-radius: 6px;
+  padding: 24px;
+  overflow: auto;
+  max-height: 70vh;
+}
+
+.svg-host svg {
+  zoom: 0.8;
+  display: block;
+  margin: 0 auto;
+  color: var(--graph-text);
+}
+
+/* All state shapes share node-fill; outline + bg paths get themed via
+   the same two declarations. Preserve `fill="none"` / `stroke="none"`
+   intent so the bg path stays stroke-less and outline stays fill-less. */
+.svg-host svg g.node rect,
+.svg-host svg g.node polygon,
+.svg-host svg g.node circle,
+.svg-host svg g.node path {
+  fill: var(--graph-node-fill) !important;
+  stroke: var(--graph-node-stroke) !important;
+}
+.svg-host svg g.node path[fill='none'] { fill: none !important; }
+.svg-host svg g.node path[stroke='none'] { stroke: none !important; }
+
+/* Entry-point tag — subtle fill tint + saturated stroke */
+.svg-host svg g.node.tag_main rect,
+.svg-host svg g.node.tag_main polygon,
+.svg-host svg g.node.tag_main circle,
+.svg-host svg g.node.tag_main path {
+  fill: var(--graph-node-main-fill) !important;
+  stroke: var(--graph-node-main-stroke) !important;
+  stroke-width: 1.5px !important;
+}
+.svg-host svg g.node.tag_main path[fill='none'] { fill: none !important; }
+.svg-host svg g.node.tag_main path[stroke='none'] { stroke: none !important; }
+
+/* Halt node — preserve the double-stroke "terminal" affordance:
+   outer-circle is a hollow ring (fill: none, stroke: --halt-stroke),
+   inner-circle is a solid disc using node-fill. */
+.svg-host svg g.node .outer-circle {
+  fill: none !important;
+  stroke: var(--graph-node-halt-stroke) !important;
+  stroke-width: 1.5px !important;
+}
+.svg-host svg g.node .inner-circle {
+  fill: var(--graph-node-halt-inner-fill) !important;
+  stroke: var(--graph-node-halt-stroke) !important;
+}
+
+/* Node + edge label text */
+.svg-host svg .nodeLabel,
+.svg-host svg .nodeLabel p,
+.svg-host svg .edgeLabel,
+.svg-host svg .edgeLabel p,
+.svg-host svg .label,
+.svg-host svg .label p {
+  color: var(--graph-text) !important;
+  fill: var(--graph-text) !important;
+}
+
+/* Edge paths + arrow markers */
+.svg-host svg .flowchart-link,
+.svg-host svg path.flowchart-link {
+  stroke: var(--graph-edge) !important;
+}
+.svg-host svg .marker {
+  fill: var(--graph-edge) !important;
+  stroke: var(--graph-edge) !important;
+}
+.svg-host svg .marker.cross {
+  stroke: var(--graph-edge) !important;
+}
+/* thick `==>` edges */
+.svg-host svg .edge-thickness-thick.flowchart-link,
+.svg-host svg path.edge-thickness-thick {
+  stroke: var(--graph-edge-thick) !important;
+}
+/* dotted `-. enter / onHalt .->` edges */
+.svg-host svg .edge-pattern-dotted.flowchart-link,
+.svg-host svg path.edge-pattern-dotted,
+.svg-host svg .edge-pattern-dashed.flowchart-link,
+.svg-host svg path.edge-pattern-dashed {
+  stroke: var(--graph-edge-dotted) !important;
+}
+
+/* Edge-label background — labels floating on the page bg, distinct
+   from node surface so they don't merge with adjacent nodes. */
+.svg-host svg g.edgeLabel foreignObject div,
+.svg-host svg g.edgeLabel span.edgeLabel,
+.svg-host svg g.edgeLabel .labelBkg,
+.svg-host svg g.edgeLabel p {
+  background-color: var(--graph-edge-label-bg) !important;
+}
+.svg-host svg rect.labelBkg {
+  fill: var(--graph-edge-label-bg) !important;
+}
+.svg-host svg g.edgeLabel {
+  background-color: transparent !important;
+}
+
+/* Subgraphs (v7 callable subtrees). Force dashed stroke so the cluster
+   container reads as "structural wrapper", not "another state node". */
+.svg-host svg g.cluster rect {
+  fill: var(--graph-cluster-fill) !important;
+  stroke: var(--graph-cluster-stroke) !important;
+  stroke-dasharray: 6 4 !important;
+  stroke-width: 1px !important;
+}
+</style>
+</head>
+<body>
+  <div class="toolbar">
+    <button onclick="document.documentElement.setAttribute('data-theme', document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light')">Toggle theme</button>
+    <span id="theme-readout"></span>
+    <span style="margin-left:auto;opacity:.6">Edit the &lt;style id="tokens"&gt; block at the top of this file and reload to iterate.</span>
+  </div>
+  <div class="svg-host" id="host">Loading sample.svg…</div>
+  <script>
+    // Inline the SVG so external CSS can style its internals.
+    fetch('sample.svg').then(r => r.text()).then(t => {
+      document.getElementById('host').innerHTML = t;
+    });
+    // Default theme = light (close to what the user sees in light mode).
+    document.documentElement.setAttribute('data-theme', 'light');
+    new MutationObserver(() => {
+      document.getElementById('theme-readout').textContent =
+        'data-theme="' + document.documentElement.getAttribute('data-theme') + '"';
+    }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    document.getElementById('theme-readout').textContent = 'data-theme="light"';
+  </script>
+</body>
+</html>

@@ -61,6 +61,26 @@ export function saveExampleId(engine: Engine, id: string): void {
   }
 }
 
+// State-graph fold state, persisted per engine. Returns null when nothing
+// is saved so the caller can fall back to its viewport-based default
+// (open on desktop, closed on mobile).
+export function loadGraphCollapsed(engine: Engine): boolean | null {
+  try {
+    const v = localStorage.getItem(engineKey(engine, 'graphCollapsed'));
+    return v === 'true' ? true : v === 'false' ? false : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveGraphCollapsed(engine: Engine, collapsed: boolean): void {
+  try {
+    localStorage.setItem(engineKey(engine, 'graphCollapsed'), collapsed ? 'true' : 'false');
+  } catch {
+    /* quota or private mode — ignore */
+  }
+}
+
 export function loadDebugMode(engine: Engine): boolean {
   try {
     return localStorage.getItem(engineKey(engine, 'debugMode')) === 'true';

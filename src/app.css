@@ -38,6 +38,45 @@
   --anim-button-hover-ms: 120ms;
   --anim-cell-write-ms: 320ms;
 
+  /* state-graph palette (machines-demo#9 / #10). The demo owns the look
+     of the rendered diagram — engine-emitted classDefs are stripped at
+     render time so these tokens drive everything. Generic `--graph-tag-*`
+     covers any `tag_<name>` class; `--graph-tag-main-*` overrides for the
+     auto-tagged entry-point. Fills are derived from `--accent` via
+     `color-mix`, so the palette tracks the theme without per-theme
+     overrides. `--graph-highlight` aliases `--head` so the graph
+     highlight matches the tape head marker — same accent, same visual
+     identity across surfaces. */
+  /* All state nodes share --cell-bg as the fill so the graph reads as
+     one visual family with the rest of panel-tape. Tagged states (any
+     `tag_*` from the engine, including the auto-emitted `tag_main`)
+     share a single accent-stroke + tinted-fill treatment — the engine
+     can emit per-tag hash colors but the demo overrides with one
+     coherent style. The runtime debugger highlight is its own warm
+     hue (#f59e0b dark / #f97316 light), decoupled from --head so the
+     tape-head marker stays a separate visual identity. Edges + thick
+     + dotted all share the same color in dark; mermaid's per-pattern
+     class drives stroke-dasharray + stroke-width for differentiation.
+     Edge labels float on a slightly-lifted bg so they don't merge
+     into adjacent nodes. */
+  --graph-node-fill: var(--cell-bg);
+  --graph-node-stroke: color-mix(in srgb, var(--muted) 85%, var(--fg));
+  --graph-node-tagged-fill: color-mix(in srgb, var(--accent) 14%, var(--graph-node-fill));
+  --graph-node-tagged-stroke: var(--accent);
+  --graph-node-halt-stroke: var(--fg);
+  --graph-node-halt-inner-fill: var(--graph-node-fill);
+  --graph-text: var(--fg);
+  --graph-edge: color-mix(in srgb, var(--muted) 60%, var(--fg));
+  --graph-edge-thick: var(--graph-edge);
+  --graph-edge-dotted: var(--graph-edge);
+  --graph-edge-label-text: var(--fg);
+  --graph-edge-label-bg: color-mix(in srgb, var(--fg) 12%, var(--bg));
+  --graph-cluster-fill: color-mix(in srgb, var(--fg) 4%, transparent);
+  --graph-cluster-stroke: color-mix(in srgb, var(--muted) 35%, var(--cell-border));
+  --graph-highlight: #f59e0b;
+  --graph-highlight-soft-fill: color-mix(in srgb, #f59e0b 22%, var(--graph-node-fill));
+  --graph-highlight-strong-fill: color-mix(in srgb, #f59e0b 40%, var(--graph-node-fill));
+
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   color-scheme: dark;
 }
@@ -65,6 +104,22 @@
   --divider: rgba(0, 0, 0, 0.06);
   --shadow: rgba(0, 0, 0, 0.12);
 
+  /* Light-theme graph palette overrides. Default node fill is still
+     --cell-bg (inherited). Stroke + edges + tagged + highlight all
+     differ from dark; particularly the runtime highlight uses a vivid
+     orange (#f97316) — punchier than the dark theme's amber (#f59e0b)
+     against a white page. */
+  --graph-node-stroke: color-mix(in srgb, var(--muted) 40%, var(--cell-border));
+  --graph-node-tagged-fill: color-mix(in srgb, var(--accent) 9%, var(--graph-node-fill));
+  --graph-edge: var(--muted);
+  --graph-edge-dotted: color-mix(in srgb, var(--muted) 60%, transparent);
+  --graph-edge-label-bg: color-mix(in srgb, var(--fg) 10%, var(--bg));
+  --graph-cluster-fill: color-mix(in srgb, var(--fg) 3%, transparent);
+  --graph-cluster-stroke: color-mix(in srgb, var(--muted) 30%, var(--cell-border));
+  --graph-highlight: #f97316;
+  --graph-highlight-soft-fill: color-mix(in srgb, #f97316 16%, var(--graph-node-fill));
+  --graph-highlight-strong-fill: color-mix(in srgb, #f97316 32%, var(--graph-node-fill));
+
   color-scheme: light;
 }
 
@@ -90,6 +145,9 @@
     --hover-bg: rgba(0, 0, 0, 0.06);
     --divider: rgba(0, 0, 0, 0.06);
     --shadow: rgba(0, 0, 0, 0.12);
+
+    --graph-node-stroke: color-mix(in srgb, var(--accent) 55%, var(--cell-border));
+    --graph-edge: color-mix(in srgb, var(--accent) 60%, var(--muted));
 
     color-scheme: light;
   }

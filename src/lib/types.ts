@@ -1,5 +1,29 @@
 /* Shared types across worker boundary and UI. Single source of truth. */
 
+import type { Graph as TuringGraph } from '@turing-machine-js/machine';
+
+export type { TuringGraph };
+
+/**
+ * State-graph highlight descriptor (machines-demo#10). MachineView derives it
+ * from `executionMode` + the latest pause-response data; MachineGraph reads
+ * it to light up the `from → edge → to` triple in the rendered SVG.
+ *
+ * - `fromId: 'idle'` represents the synthetic `idle([idle])` sentinel that
+ *   `toMermaid` emits at the entry point. Used in IDLE mode to mark "where
+ *   execution would start".
+ * - `fromId: number` is an engine `GraphNode.id` — the source state.
+ * - `toId: number | null` is the destination state's id (or `null` at halt).
+ * - `strong` selects which end of the triple gets the bolder/stronger
+ *   accent. Per the (B) rule: `from` strong at `before` pause; `to` strong
+ *   at `after` / iter-end pause / IDLE (destination feels current).
+ */
+export type GraphHighlight = {
+  fromId: number | 'idle';
+  toId: number | null;
+  strong: 'from' | 'to';
+};
+
 export const ENGINES = ['turing', 'post'] as const;
 export type Engine = (typeof ENGINES)[number];
 
@@ -61,6 +85,15 @@ export type BuiltResponse = {
   tapes: TapeSnapshot[];
   alphabets: string[][];
   halted: boolean;
+  /**
+   * Engine-v7 `Graph` snapshot for the assembled state graph, computed once
+   * at Build via `State.toGraph(initialState, tapeBlock)` (machines-demo#9).
+   * Main thread feeds this to `toMermaid(graph)` for SVG rendering. The
+   * Graph type is JSON-serializable — safe to send across the worker
+   * boundary. `null` when build failed (the `error` response is used in
+   * that case, but typing it as nullable keeps the field uniform).
+   */
+  graph: TuringGraph;
 };
 
 /**
@@ -82,6 +115,19 @@ export type SteppedResponse = {
    */
   reads: string[] | null;
   nextCommands: Command[] | null;
+  /**
+   * Engine State.id of the state the machine is currently in AFTER this step
+   * (i.e., the state that will fire on the next Step click). Drives current-
+   * state highlighting in the rendered graph (machines-demo#10). `null` at
+   * halt (no further step possible).
+   */
+  currentStateId: number | null;
+  /**
+   * Engine State.id of the state that will follow `currentStateId` on the
+   * next step. Drives `from + edge + to` triple highlight in the graph
+   * (machines-demo#10). `null` at halt or when `currentStateId` is `null`.
+   */
+  nextStateId: number | null;
   stepsApplied: number;
 };
 
@@ -92,6 +138,12 @@ export type RanResponse = {
   commands: Command[][];
   /** Per-step, per-tape reads captured before each step. Parallel to `commands`. */
   reads: string[][];
+  /**
+   * Engine State.id of the final state at run end (typically the halt state).
+   * Drives the snap-to-result current-state highlight in `RUNNING_CONTINUOUS`
+   * mode (machines-demo#10). `null` if the run produced no steps.
+   */
+  currentStateId: number | null;
   startStep: number;
   stepsApplied: number;
 };
@@ -115,6 +167,26 @@ export type PausedResponse = {
   commands: Command[][];
   /** Per-step, per-tape reads captured before each step. Parallel to `commands`. */
   reads: string[][];
+  /**
+   * Engine State.id at the moment of pause — m.state per the engine
+   * (machines-demo#10). The "you are here" anchor.
+   */
+  currentStateId: number | null;
+  /**
+   * Engine State.id of the state that will follow `currentStateId` on resume.
+   * Used to draw the "about-to-fire" outgoing transition triple in `after`-
+   * and iter-end pauses (where the last-fired transition is current → next).
+   */
+  nextStateId: number | null;
+  /**
+   * Engine State.id of the state the machine was IN BEFORE the current iter
+   * began — i.e. the source of the transition that brought us to
+   * `currentStateId`. Used to draw the "just-fired" incoming transition
+   * triple in `before` pauses (last-fired = prev → current).
+   * `null` at the very first iter's before-pause (no prior step) — main
+   * thread treats this as the synthetic `idle` sentinel.
+   */
+  prevStateId: number | null;
   stepsApplied: number;
   /** `m.state.name` — the user's State instance does not cross the boundary. */
   state: string;
@@ -144,6 +216,12 @@ export type IdleResponse = {
   commands: Command[][];
   /** Per-step, per-tape reads captured before each step. Parallel to `commands`. */
   reads: string[][];
+  /**
+   * Engine State.id of the state about to fire on the next iteration
+   * (post-throttle resume). Updates the current-state highlight per iter
+   * during `RUNNING_AUTO` (machines-demo#10). `null` if the run halted.
+   */
+  currentStateId: number | null;
   stepsApplied: number;
 };
 export type BusyResponse = { type: 'busy' };
