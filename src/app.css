@@ -38,6 +38,20 @@
   --anim-button-hover-ms: 120ms;
   --anim-cell-write-ms: 320ms;
 
+  /* state-graph palette (machines-demo#9 / #10). The demo owns the look
+     of the rendered diagram — engine-emitted classDefs are stripped at
+     render time so these tokens drive everything. Generic `--graph-tag-*`
+     covers any `tag_<name>` class; `--graph-tag-main-*` overrides for the
+     auto-tagged entry-point. `--graph-highlight` aliases `--head` so the
+     graph highlight matches the tape head marker — same accent, same
+     visual identity across surfaces. Decoupled token lets a future
+     Settings UI swap palettes without re-binding to --head. */
+  --graph-tag-fill: rgba(110, 168, 254, 0.18);
+  --graph-tag-stroke: var(--accent);
+  --graph-tag-main-fill: rgba(110, 168, 254, 0.18);
+  --graph-tag-main-stroke: var(--accent);
+  --graph-highlight: var(--head);
+
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   color-scheme: dark;
 }

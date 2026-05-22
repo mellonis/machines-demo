@@ -49,6 +49,9 @@ describe('MachineRunner', () => {
         commands: null,
         reads: null,
         nextCommands: null,
+        currentStateId: null,
+        nextStateId: null,
+        prevStateId: null,
         stepsApplied: 1,
       };
       current().respond(steppedPayload);
@@ -82,6 +85,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        currentStateId: null,
         startStep: 0,
         stepsApplied: 5,
       };
@@ -114,6 +118,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        currentStateId: null,
         startStep: 0,
         stepsApplied: 0,
       });
@@ -147,6 +152,9 @@ describe('MachineRunner', () => {
         state: 'q1',
         currentSymbols: ['a'],
         debugBreak: { before: true as const },
+        currentStateId: null,
+        nextStateId: null,
+        prevStateId: null,
       });
       expect(pausedSeen).toBe(true);
 
@@ -175,6 +183,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        currentStateId: null,
         startStep: 0,
         stepsApplied: 1,
       });
@@ -230,6 +239,9 @@ describe('MachineRunner', () => {
         state: 'q1',
         currentSymbols: ['a'],
         debugBreak: { before: true as const },
+        currentStateId: null,
+        nextStateId: null,
+        prevStateId: null,
       };
       current().respond(pausedPayload);
 
@@ -252,6 +264,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        currentStateId: null,
         startStep: 0,
         stepsApplied: 5,
       };
@@ -278,6 +291,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        currentStateId: null,
         startStep: 0,
         stepsApplied: 0,
       });
@@ -302,6 +316,9 @@ describe('MachineRunner', () => {
         state: 'q1',
         currentSymbols: ['a'],
         debugBreak: { before: true as const },
+        currentStateId: null,
+        nextStateId: null,
+        prevStateId: null,
       });
 
       runner.resume(false, 500);
@@ -316,6 +333,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        currentStateId: null,
         startStep: 0,
         stepsApplied: 1,
       });
@@ -340,6 +358,9 @@ describe('MachineRunner', () => {
         state: 'q1',
         currentSymbols: ['a'],
         debugBreak: { before: true as const },
+        currentStateId: null,
+        nextStateId: null,
+        prevStateId: null,
       });
 
       runner.resume(true);
@@ -354,6 +375,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        currentStateId: null,
         startStep: 0,
         stepsApplied: 1,
       });
@@ -379,6 +401,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        currentStateId: null,
         startStep: 0,
         stepsApplied: 1,
       });
@@ -414,6 +437,7 @@ describe('MachineRunner', () => {
         type: 'idle',
         commands: [[{ movement: 'R', symbol: null }]],
         reads: [['_']],
+        currentStateId: null,
         stepsApplied: 1,
       });
       current().respond({ type: 'busy' });
@@ -421,6 +445,7 @@ describe('MachineRunner', () => {
         type: 'idle',
         commands: [[{ movement: 'L', symbol: null }]],
         reads: [['_']],
+        currentStateId: null,
         stepsApplied: 2,
       });
       current().respond({ type: 'busy' });
@@ -442,6 +467,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        currentStateId: null,
         startStep: 2,
         stepsApplied: 2,
       });
@@ -471,6 +497,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        currentStateId: null,
         startStep: 0,
         stepsApplied: 0,
       });
@@ -552,6 +579,9 @@ describe('MachineRunner', () => {
         state: 'q1',
         currentSymbols: ['a'],
         debugBreak: { before: true as const },
+        currentStateId: null,
+        nextStateId: null,
+        prevStateId: null,
       });
 
       // Advance time well past the timeout — paused should have cleared it.
@@ -573,6 +603,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        currentStateId: null,
         startStep: 0,
         stepsApplied: 1,
       });
@@ -597,6 +628,9 @@ describe('MachineRunner', () => {
         state: 'q1',
         currentSymbols: ['a'],
         debugBreak: { before: true as const },
+        currentStateId: null,
+        nextStateId: null,
+        prevStateId: null,
       });
 
       runner.resume(false);
@@ -620,6 +654,7 @@ describe('MachineRunner', () => {
         type: 'idle',
         commands: [[{ movement: 'R', symbol: null }]],
         reads: [['_']],
+        currentStateId: null,
         stepsApplied: 1,
       });
 
@@ -641,6 +676,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        currentStateId: null,
         startStep: 1,
         stepsApplied: 1,
       });
@@ -660,6 +696,7 @@ describe('MachineRunner', () => {
         type: 'idle',
         commands: [[{ movement: 'R', symbol: null }]],
         reads: [['_']],
+        currentStateId: null,
         stepsApplied: 1,
       });
       current().respond({ type: 'busy' });
@@ -685,6 +722,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        currentStateId: null,
         startStep: 0,
         stepsApplied: 0,
       });
@@ -731,6 +769,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        currentStateId: null,
         startStep: 0,
         stepsApplied: 0,
       });
@@ -755,6 +794,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        currentStateId: null,
         startStep: 0,
         stepsApplied: 0,
       });

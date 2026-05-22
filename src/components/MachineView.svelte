@@ -10,7 +10,7 @@
   import { MachineRunner, WorkerError } from '../lib/machineRunner.ts';
   import * as turing from '@turing-machine-js/machine';
   import { BELT_ANIMATION_MIN_INTERVAL_MS, MAX_TAPES, VIEWPORT_WIDTH } from '../lib/caps.ts';
-  import { type Alphabets, type Command, type Engine, type IdleResponse, type PausedResponse, type TapeSnapshot, type TuringGraph } from '../lib/types.ts';
+  import { type Alphabets, type Command, type Engine, type GraphHighlight, type IdleResponse, type PausedResponse, type TapeSnapshot, type TuringGraph } from '../lib/types.ts';
   import { startDemoLoop } from '../lib/demoLoop.ts';
   import { parseInterval } from '../lib/interval.ts';
   import { parse as parseSnapshot, serialize as serializeSnapshot } from '../lib/tapeSnapshot.ts';
@@ -75,6 +75,21 @@
   let graph = $state<TuringGraph | null>(null);
   let graphCollapsed = $state(initialGraphCollapsed());
   let graphModalOpen = $state(false);
+  // Highlight state (#10). Carried through from the paused response:
+  //   - `prevStateId` is the state we just left (= FROM of the just-fired
+  //     transition that brought us to `currentStateId`). Null only at the
+  //     very first iter's before-pause; treated as the synthetic `idle`
+  //     sentinel in the highlight derivation.
+  //   - `currentStateId` is m.state at pause (the "you are here" anchor).
+  //   - `nextStateId` is m.state.getNextState(symbol) — the state the
+  //     ABOUT-TO-FIRE transition would land on. Used for after / iter-end
+  //     pauses where the just-fired transition is current → next.
+  //   - `pauseBefore` selects which triple is the just-fired one:
+  //       before → (prev, current); after / iter-end → (current, next).
+  let prevStateId = $state<number | null>(null);
+  let currentStateId = $state<number | null>(null);
+  let nextStateId = $state<number | null>(null);
+  let pauseBefore = $state(false);
   let pendingOp = $state<'load' | 'run' | null>(null);
   let mirrorMachine: turing.TuringMachine | null = null;
   let mirrorTapeBlock: turing.TapeBlock | null = null;
@@ -173,6 +188,56 @@
     executionMode !== 'RUNNING_CONTINUOUS' &&
     executionMode !== 'RUNNING_PAUSED',
   );
+
+  // State-graph highlight (#10): mirrors the LAST FIRED transition (so the
+  // graph stays in lockstep with the most recent log entry). Strong on
+  // m.state in all cases — "you are here". Only fires on RUNNING_PAUSED.
+  //
+  //   before pause at X (came from Y):
+  //       triple = (Y, edge, X), strong on TO (= X = m.state)
+  //   after / iter-end pause at X (next will be Z):
+  //       triple = (X, edge, Z), strong on FROM (= X = m.state)
+  //
+  // First iter's before pause has no prior state — `prevStateId` is null;
+  // we use the synthetic `idle` sentinel as FROM (matches the idle-enter
+  // arrow in the rendered graph, so the "transition that brought us here"
+  // is the start-arrow itself).
+  //
+  // Other modes return null:
+  //  - DEMO/MANUAL: no truth value (random / user-chosen commands).
+  //  - RUNNING_AUTO/CONTINUOUS: too fast to read; would strobe.
+  //  - HALTED: follow-up sub-branch (highlight last edge + halt node).
+  const graphHighlight = $derived.by<GraphHighlight | null>(() => {
+    if (!graph) return null;
+    if (executionMode !== 'RUNNING_PAUSED' || currentStateId === null) return null;
+    if (pauseBefore) {
+      // Special case: `haltState.debug.before = true` triggers a beforeMatch
+      // via the engine's `nextState.isHalt && nextState.debug.before` rule
+      // (engine runStepByStep). At that pause m.state is the PREDECESSOR
+      // of halt, not halt itself — so the literal "last fired" view would
+      // show `(prev → predecessor)`, missing the "about to enter halt"
+      // intent the user expressed. Flip to the about-to-fire view here so
+      // the highlight matches the mental model: `(predecessor → halt)`,
+      // strong on halt (where we're heading).
+      if (nextStateId !== null && graph.nodes[nextStateId]?.isHalt) {
+        return {
+          fromId: currentStateId,
+          toId: nextStateId,
+          strong: 'to',
+        };
+      }
+      return {
+        fromId: prevStateId ?? 'idle',
+        toId: currentStateId,
+        strong: 'to',
+      };
+    }
+    return {
+      fromId: currentStateId,
+      toId: nextStateId,
+      strong: 'from',
+    };
+  });
 
   // The code Reset would restore to: the loaded snippet's saved code, or the
   // selected bundled example's code, or null when the loaded snippet was
@@ -513,6 +578,14 @@
   }
 
   function onPausedHandler(paused: PausedResponse): void {
+    // Highlight (#10): capture prev / current / next so the graph can light
+    // up the JUST-FIRED transition triple (matching the last logged step).
+    // `pauseBefore` selects which triple to use — see graphHighlight derived.
+    prevStateId = paused.prevStateId;
+    currentStateId = paused.currentStateId;
+    nextStateId = paused.nextStateId;
+    pauseBefore = paused.debugBreak.before === true;
+
     // Replay buffered per-step commands so the trace leading to the break is
     // visible. In RUNNING_AUTO the buffer is drained per iter via `idle` and
     // this batch is normally empty; cold-start Step / RUNNING_CONTINUOUS use
@@ -845,9 +918,11 @@
     <div class="machine-graph-row">
       <MachineGraph
         {graph}
+        highlight={graphHighlight}
         collapsed={graphCollapsed}
         onToggleCollapsed={() => { graphCollapsed = !graphCollapsed; }}
         onExpand={() => { graphModalOpen = true; }}
+        onRenderError={(msg: string) => log.report(msg, 'error')}
       />
     </div>
 
@@ -882,9 +957,11 @@
           >×</button>
           <MachineGraph
             {graph}
+            highlight={graphHighlight}
             collapsed={false}
             onToggleCollapsed={() => { graphModalOpen = false; }}
             onExpand={() => { /* already expanded */ }}
+            onRenderError={(msg: string) => log.report(msg, 'error')}
           />
         </div>
       </div>

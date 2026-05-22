@@ -11,6 +11,18 @@ import {
   type TapeLike,
 } from './workerHelpers';
 
+// Helper: minimal stub for MachineYield.state — only id matters for tests
+// that don't exercise the state graph; the `getSymbol` / `getNextState`
+// methods are present so the type satisfies but they're not called from
+// commandsFromYield / readsFromYield.
+function stubState(id: number = 0): MachineYield['state'] {
+  return {
+    id,
+    getSymbol: () => Symbol('test'),
+    getNextState: () => ({ ref: { id: 0 } }),
+  };
+}
+
 describe('workerHelpers', () => {
   describe('movement-code', () => {
     it('R-movement-code-mappings: maps left/right/stay symbols to L/R/S', () => {
@@ -26,6 +38,7 @@ describe('workerHelpers', () => {
         movements: [turing.movements.right],
         currentSymbols: ['a'],
         nextSymbols: ['a'],
+        state: stubState(),
       };
       expect(commandsFromYield(yieldVal)).toEqual([{ movement: 'R', symbol: null }]);
     });
@@ -35,6 +48,7 @@ describe('workerHelpers', () => {
         movements: [turing.movements.left],
         currentSymbols: ['a'],
         nextSymbols: ['b'],
+        state: stubState(),
       };
       expect(commandsFromYield(yieldVal)).toEqual([{ movement: 'L', symbol: 'b' }]);
     });
@@ -44,6 +58,7 @@ describe('workerHelpers', () => {
         movements: [turing.movements.left, turing.movements.right, turing.movements.stay],
         currentSymbols: ['a', 'b', 'c'],
         nextSymbols: ['x', 'y', 'z'],
+        state: stubState(),
       };
       expect(commandsFromYield(yieldVal)).toEqual([
         { movement: 'L', symbol: 'x' },
@@ -57,6 +72,7 @@ describe('workerHelpers', () => {
         movements: [turing.movements.right, turing.movements.stay, turing.movements.left],
         currentSymbols: ['a', 'b', 'c'],
         nextSymbols: ['a', 'B', 'c'], // tape 0 keeps, tape 1 writes 'B', tape 2 keeps
+        state: stubState(),
       };
       expect(commandsFromYield(yieldVal)).toEqual([
         { movement: 'R', symbol: null },
@@ -72,6 +88,7 @@ describe('workerHelpers', () => {
         movements: [turing.movements.right],
         currentSymbols: ['a'],
         nextSymbols: ['b'],
+        state: stubState(),
       };
       expect(readsFromYield(yieldVal)).toEqual(['a']);
     });
@@ -81,6 +98,7 @@ describe('workerHelpers', () => {
         movements: [turing.movements.stay],
         currentSymbols: ['a', 'b'],
         nextSymbols: ['a', 'b'],
+        state: stubState(),
       };
       const reads = readsFromYield(yieldVal);
       reads.push('z');
