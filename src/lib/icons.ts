@@ -1,10 +1,13 @@
 import apply from '@tabler/icons/outline/corner-down-left.svg?raw';
 import build from '@tabler/icons/outline/hammer.svg?raw';
+import chevronDown from '@tabler/icons/outline/chevron-down.svg?raw';
+import chevronRight from '@tabler/icons/outline/chevron-right.svg?raw';
 import clipboard from '@tabler/icons/outline/clipboard.svg?raw';
 import copy from '@tabler/icons/outline/copy.svg?raw';
 import deviceDesktop from '@tabler/icons/outline/device-desktop.svg?raw';
 import eraser from '@tabler/icons/outline/eraser.svg?raw';
 import examples from '@tabler/icons/outline/file-code.svg?raw';
+import expand from '@tabler/icons/outline/arrows-maximize.svg?raw';
 import github from '@tabler/icons/outline/brand-github.svg?raw';
 import keep from '@tabler/icons/outline/keyframe-align-vertical.svg?raw';
 import left from '@tabler/icons/outline/arrow-narrow-left.svg?raw';
@@ -25,11 +28,14 @@ import xSmall from '@tabler/icons/outline/x.svg?raw';
 export const icons = {
   apply,
   build,
+  chevronDown,
+  chevronRight,
   clipboard,
   copy,
   deviceDesktop,
   eraser,
   examples,
+  expand,
   github,
   keep,
   left,

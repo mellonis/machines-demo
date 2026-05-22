@@ -32,14 +32,14 @@ const STUB_GRAPH = {
 describe('MachineGraph (component smoke)', () => {
   afterEach(() => cleanup());
 
-  it('C-graph-header: renders the "State graph" title in the header', () => {
+  it('C-graph-header: renders the "Machine graph" title in the header', () => {
     render(MachineGraph, {
       graph: null,
       collapsed: false,
       onToggleCollapsed: () => {},
       onExpand: () => {},
     });
-    expect(screen.getByText('State graph')).toBeInTheDocument();
+    expect(screen.getByText('Machine graph')).toBeInTheDocument();
   });
 
   it('C-graph-empty: shows the empty-state hint when graph is null', () => {
@@ -70,7 +70,7 @@ describe('MachineGraph (component smoke)', () => {
       onToggleCollapsed,
       onExpand: () => {},
     });
-    await fireEvent.click(screen.getByText('State graph'));
+    await fireEvent.click(screen.getByText('Machine graph'));
     expect(onToggleCollapsed).toHaveBeenCalledOnce();
   });
 
@@ -82,7 +82,7 @@ describe('MachineGraph (component smoke)', () => {
       onToggleCollapsed: () => {},
       onExpand,
     });
-    await fireEvent.click(screen.getByLabelText('Open state graph in modal'));
+    await fireEvent.click(screen.getByLabelText('Open machine graph in modal'));
     expect(onExpand).toHaveBeenCalledOnce();
   });
 
@@ -93,6 +93,6 @@ describe('MachineGraph (component smoke)', () => {
       onToggleCollapsed: () => {},
       onExpand: () => {},
     });
-    expect(screen.queryByLabelText('Open state graph in modal')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Open machine graph in modal')).not.toBeInTheDocument();
   });
 });

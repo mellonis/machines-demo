@@ -31,6 +31,8 @@
     renameSnippet,
     loadDebugMode,
     saveDebugMode,
+    loadGraphCollapsed,
+    saveGraphCollapsed,
     type Snippets,
   } from '../lib/persist.ts';
   import { icons } from '../lib/icons.ts';
@@ -73,8 +75,17 @@
   // `graphCollapsed` defaults to "open on desktop, closed on mobile" per
   // the issue's UX note; `graphModalOpen` drives the expand-to-modal view.
   let graph = $state<TuringGraph | null>(null);
-  let graphCollapsed = $state(initialGraphCollapsed());
+  let graphCollapsed = $state(untrack(() => initialGraphCollapsed(engine)));
   let graphModalOpen = $state(false);
+
+  // Persist the user's expand/collapse choice per engine. Skip the initial
+  // value (it already came from localStorage or the viewport default) so we
+  // don't write back the default the first time around — useful when the
+  // user has nothing saved yet and we'd otherwise pin them to whichever
+  // viewport they happened to load on.
+  $effect(() => {
+    saveGraphCollapsed(engine, graphCollapsed);
+  });
   // Highlight state (#10). Carried through from the paused response:
   //   - `prevStateId` is the state we just left (= FROM of the just-fired
   //     transition that brought us to `currentStateId`). Null only at the
@@ -211,21 +222,6 @@
     if (!graph) return null;
     if (executionMode !== 'RUNNING_PAUSED' || currentStateId === null) return null;
     if (pauseBefore) {
-      // Special case: `haltState.debug.before = true` triggers a beforeMatch
-      // via the engine's `nextState.isHalt && nextState.debug.before` rule
-      // (engine runStepByStep). At that pause m.state is the PREDECESSOR
-      // of halt, not halt itself — so the literal "last fired" view would
-      // show `(prev → predecessor)`, missing the "about to enter halt"
-      // intent the user expressed. Flip to the about-to-fire view here so
-      // the highlight matches the mental model: `(predecessor → halt)`,
-      // strong on halt (where we're heading).
-      if (nextStateId !== null && graph.nodes[nextStateId]?.isHalt) {
-        return {
-          fromId: currentStateId,
-          toId: nextStateId,
-          strong: 'to',
-        };
-      }
       return {
         fromId: prevStateId ?? 'idle',
         toId: currentStateId,
@@ -283,10 +279,14 @@
 
   /* ───── side-effect handlers (one source of truth on error) ───── */
 
-  // Initial state-graph collapse policy: open on desktop (>=720px viewport),
-  // closed on mobile so the panel doesn't push the editor below the fold on
-  // first view. SSR-safe: defaults to open if `matchMedia` is unavailable.
-  function initialGraphCollapsed(): boolean {
+  // Initial state-graph collapse policy: prefer the user's persisted choice
+  // (per engine), else fall back to viewport-derived default — open on
+  // desktop (>=720px viewport), closed on mobile so the panel doesn't
+  // push the editor below the fold on first view. SSR-safe: defaults to
+  // open if `matchMedia` is unavailable.
+  function initialGraphCollapsed(engine: Engine): boolean {
+    const persisted = loadGraphCollapsed(engine);
+    if (persisted !== null) return persisted;
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
       return false;
     }
@@ -915,17 +915,6 @@
   <div class="panel-tape">
     <TapesStack bind:this={tapesStackRef} {tapeCount} caretColors={CARET_COLORS} />
 
-    <div class="machine-graph-row">
-      <MachineGraph
-        {graph}
-        highlight={graphHighlight}
-        collapsed={graphCollapsed}
-        onToggleCollapsed={() => { graphCollapsed = !graphCollapsed; }}
-        onExpand={() => { graphModalOpen = true; }}
-        onRenderError={(msg: string) => log.report(msg, 'error')}
-      />
-    </div>
-
     {#if graphModalOpen}
       <!-- Modal expansion of the same state graph (#9). Backdrop click +
            Esc both dismiss; the inner card stops propagation so clicks on
@@ -943,7 +932,7 @@
           class="graph-modal-card"
           role="dialog"
           aria-modal="true"
-          aria-label="State graph (expanded)"
+          aria-label="Machine graph (expanded)"
           onclick={(e) => e.stopPropagation()}
           onkeydown={(e) => e.stopPropagation()}
           tabindex="-1"
@@ -952,15 +941,14 @@
             type="button"
             class="graph-modal-close"
             onclick={() => { graphModalOpen = false; }}
-            aria-label="Close state graph"
+            aria-label="Close machine graph"
             title="Close (Esc)"
-          >×</button>
+          >{@html icons.xSmall}</button>
           <MachineGraph
             {graph}
             highlight={graphHighlight}
             collapsed={false}
             onToggleCollapsed={() => { graphModalOpen = false; }}
-            onExpand={() => { /* already expanded */ }}
             onRenderError={(msg: string) => log.report(msg, 'error')}
           />
         </div>
@@ -1005,6 +993,17 @@
       >
         {@html icons.clipboard}
       </button>
+    </div>
+
+    <div class="machine-graph-row">
+      <MachineGraph
+        {graph}
+        highlight={graphHighlight}
+        collapsed={graphCollapsed}
+        onToggleCollapsed={() => { graphCollapsed = !graphCollapsed; }}
+        onExpand={() => { graphModalOpen = true; }}
+        onRenderError={(msg: string) => log.report(msg, 'error')}
+      />
     </div>
 
     <Log entries={log.entries} onClear={() => log.clear()} />
@@ -1121,23 +1120,32 @@
     position: absolute;
     top: 8px;
     right: 8px;
-    background: var(--bg);
-    border: 1px solid var(--border);
+    background: var(--editor-bg);
+    border: 1px solid var(--cell-border);
     border-radius: 4px;
-    color: inherit;
+    color: var(--muted);
     cursor: pointer;
-    font-size: 18px;
     width: 32px;
     height: 32px;
+    padding: 0;
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 1;
-    transition: background var(--anim-button-hover-ms);
-  }
+    transition:
+      background var(--anim-button-hover-ms),
+      color var(--anim-button-hover-ms);
 
-  .graph-modal-close:hover {
-    background: var(--bg-subtle, var(--border));
+    &:hover {
+      background: var(--hover-bg);
+      color: var(--fg);
+    }
+
+    :global(svg) {
+      width: 16px;
+      height: 16px;
+      display: block;
+    }
   }
 
   /* Clips the control-panel's enter animation so translateY(20px) can't

@@ -139,6 +139,29 @@ A `.head-thread` div sits behind the stack as the first child of `.tapes-stack` 
 
 **Coupling — keep in sync:** `TapesStack.svelte` duplicates `Tape.svelte`'s responsive `--cell-h` (40 / 36 / 34 px at the same breakpoints) on `.tapes-stack` so the gradient stops align with actual tape positions. Touching either file's cell-height values means touching both.
 
+## Machine graph (state diagram)
+
+`MachineGraph.svelte` renders the engine-v7 `Graph` snapshot (captured at Build via `State.toGraph`) as a Mermaid flowchart with ELK layout. The component lazy-loads both `mermaid` and `@mermaid-js/layout-elk` on mount to keep them off the initial bundle.
+
+**Rendering pipeline:**
+- `toMermaid(g)` → strip engine `classDef tag_*` (so the demo owns the palette) → `applyDirection(source, isNarrow ? 'TD' : 'LR')` → `mermaid.render(id, source, measureEl)`. The third arg is a hidden offscreen `<div>` we create in `onMount` — without it, mermaid v11's `render()` appends a temp `<div + svg>` to `document.body` for measurement, briefly extending page height and "jumping" the footer on every Build. The measureEl pattern keeps that temp DOM contained.
+- Render cache: `lastSource = ${theme.resolved}::${source}`. Skipped on cache hit (same machine + same theme + same direction) so back-to-back Builds don't re-paint identical SVG. Stale-render guard inside the async render kills races when the user mashes Build.
+- Responsive direction: `LR` ≥768px, `TD` <768px (watched via `matchMedia`, re-renders on change).
+- Fixed-height container (`.body { height: 360px }`) so the panel footprint stays stable across Builds even when the rendered SVG's intrinsic size varies (ELK layout isn't byte-stable). SVG is sized via `zoom: 0.8` (not `transform: scale`) so layout matches visual and `getBoundingClientRect` scroll-into-view math stays accurate.
+
+**Palette tokens** (declared in `src/app.css`, all under `:root` with `:root[data-theme='light']` overrides):
+- Defaults: `--graph-node-fill` (uses `--cell-bg`), `--graph-node-stroke`, `--graph-text` — neutral state-node visuals.
+- Tagged states: `--graph-node-tagged-fill` / `--graph-node-tagged-stroke`. The engine emits `tag_<name>` classes; demo overrides all tags with one unified accent treatment (so user tags don't get the engine's per-tag hash colors). Selector is `g.node[class*='tag_']`.
+- Halt: `--graph-node-halt-stroke`, `--graph-node-halt-inner-fill`. Restored as a double-stroke ring — `.outer-circle { fill: none; stroke: --halt-stroke }` + `.inner-circle { fill: --halt-inner-fill; stroke: --halt-stroke }`. Without per-class rules the two circles collapse into a single solid disc and halt loses its "terminal" affordance.
+- Edges: `--graph-edge` for `-->` solid; `--graph-edge-thick` for `==>` (the wrapper-to-bare call arrow, mermaid class `edge-thickness-thick`); `--graph-edge-dotted` for `-. enter / return / halt .->`. All three default to the same color in the current palette — mermaid's per-pattern stroke-dasharray / stroke-width does the differentiation.
+- Edge labels: `--graph-edge-label-bg` lifts a bit toward `--fg` so labels "float" over the surface rather than merging into adjacent node fills. Background is set on `g.edgeLabel foreignObject div`, `span.edgeLabel`, `.labelBkg` AND inner `p` — mermaid puts a hardcoded gray on the inner `<p>` that the outer rules don't reach.
+- Subgraph wrappers (v7 callable subtrees): `--graph-cluster-fill`/`--graph-cluster-stroke`, plus a forced `stroke-dasharray: 6 4` on `g.cluster rect` (mermaid's default emit leaves dasharray="none" so cluster containers visually merge with state nodes — the dashed border makes them read as structural wrappers).
+- Debugger pause highlight (`--graph-highlight`, `--graph-highlight-soft-fill`, `--graph-highlight-strong-fill`): **decoupled from `--head`** — the highlight uses `#f59e0b` (amber) in dark, `#f97316` (vivid orange) in light. The tape head marker keeps `--head` for itself; the graph highlight has its own visual identity as a runtime debugger cue. CSS classes (`mg-highlight-from`, `mg-highlight-to`, `mg-highlight-strong`, `mg-highlight-edge`) are added imperatively to cached SVG elements when `paused` arrives. The highlight-edge selector must qualify with `.flowchart-link` (`path.flowchart-link.mg-highlight-edge`) to beat the dotted/thick edge rules' two-class selectors on specificity.
+
+**Theme swap is live** — `getComputedStyle` follows CSS vars instantly, no re-render needed. Source-cache invalidates on theme change anyway as a safety net.
+
+**Palette sandbox** at `docs/palette-sandbox/` is a standalone HTML page (served by Vite at `/docs/palette-sandbox/variant-a.html`) for iterating on colors without rebuilding the demo. Dual-pane (light + dark side by side), color-picker per token, "Copy CSS (both themes)" button exports a snippet ready to paste into `src/app.css`. Edit `sample.svg` if you need a different machine shape to design against — re-export from the live demo by writing user code to localStorage + clicking Build (see `docs/palette-sandbox/README.md`).
+
 ## Conventions
 
 - **localStorage** keys follow `machines-demo:<engine>:<key>` hierarchy (non-engine key `machines-demo:theme` is the only exception): `code` persists editor contents, `example` the selected bundled example id, `snippets` the user snippet map (keyed by UUID → `{ title, code, savedAt }`). The currently loaded snippet's UUID is **not** stored here — it lives in the URL (`?snippet=<uuid>`) so it's bookmarkable / shareable. (Via `lib/persist.ts`, errors swallowed.)
