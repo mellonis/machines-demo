@@ -23,6 +23,7 @@ describe('MachineRunner', () => {
         tapes: [],
         alphabets: [],
         halted: false,
+        graph: { initialId: 0, alphabets: [], nodes: {} },
       };
       current().respond(builtPayload);
 
@@ -35,7 +36,7 @@ describe('MachineRunner', () => {
 
       // Build first to spawn the worker.
       const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
       await buildPromise;
 
       const stepPromise = runner.step();
@@ -61,7 +62,7 @@ describe('MachineRunner', () => {
 
       // Build first.
       const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
       await buildPromise;
 
       // Custom-arg run.
@@ -94,7 +95,7 @@ describe('MachineRunner', () => {
       const runner = new MachineRunner('turing', factory);
 
       const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
       await buildPromise;
 
       const runPromise = runner.run();
@@ -126,7 +127,7 @@ describe('MachineRunner', () => {
 
       // Build, then start a run with onPaused.
       const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
       await buildPromise;
 
       let pausedSeen = false;
@@ -186,7 +187,7 @@ describe('MachineRunner', () => {
 
       // Build first to spawn the worker (setDebug is a no-op without one).
       const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
       await buildPromise;
 
       runner.setDebug(true);
@@ -209,7 +210,7 @@ describe('MachineRunner', () => {
       const runner = new MachineRunner('turing', factory);
 
       const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
       await buildPromise;
 
       const pausedPayloads: PausedResponse[] = [];
@@ -264,7 +265,7 @@ describe('MachineRunner', () => {
       const runner = new MachineRunner('turing', factory);
 
       const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
       await buildPromise;
 
       const runPromise = runner.run({ intervalMs: 250 });
@@ -288,7 +289,7 @@ describe('MachineRunner', () => {
       const runner = new MachineRunner('turing', factory);
 
       const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
       await buildPromise;
 
       const runPromise = runner.run({ debug: true, onPaused: () => {} });
@@ -326,7 +327,7 @@ describe('MachineRunner', () => {
       const runner = new MachineRunner('turing', factory);
 
       const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
       await buildPromise;
 
       const runPromise = runner.run({ debug: true, onPaused: () => {} });
@@ -364,7 +365,7 @@ describe('MachineRunner', () => {
       const runner = new MachineRunner('turing', factory);
 
       const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
       await buildPromise;
 
       const runPromise = runner.run({ intervalMs: 250 });
@@ -389,7 +390,7 @@ describe('MachineRunner', () => {
       const runner = new MachineRunner('turing', factory);
 
       const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
       void buildPromise;
 
       expect(() => runner.pause()).toThrow('pause: no pending run');
@@ -400,7 +401,7 @@ describe('MachineRunner', () => {
       const runner = new MachineRunner('turing', factory);
 
       const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
       await buildPromise;
 
       const iters: { stepsApplied: number; len: number }[] = [];
@@ -452,7 +453,7 @@ describe('MachineRunner', () => {
       const runner = new MachineRunner('turing', factory);
 
       const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
       await buildPromise;
 
       const runPromise = runner.run({ step: true, debug: false });
@@ -506,7 +507,7 @@ describe('MachineRunner', () => {
       const runner = new MachineRunner('turing', factory);
 
       const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
       await buildPromise;
 
       const stepPromise = runner.step();
@@ -522,7 +523,7 @@ describe('MachineRunner', () => {
       const runner = new MachineRunner('turing', factory);
 
       const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
       await buildPromise;
 
       const runPromise = runner.run({ debug: true, onPaused: () => {} });
@@ -538,7 +539,7 @@ describe('MachineRunner', () => {
       const runner = new MachineRunner('turing', factory);
 
       const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
       await buildPromise;
 
       const runPromise = runner.run({ debug: true, onPaused: () => {} });
@@ -583,7 +584,7 @@ describe('MachineRunner', () => {
       const runner = new MachineRunner('turing', factory);
 
       const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
       await buildPromise;
 
       const runPromise = runner.run({ debug: true, onPaused: () => {} });
@@ -610,7 +611,7 @@ describe('MachineRunner', () => {
       const runner = new MachineRunner('turing', factory);
 
       const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
       await buildPromise;
 
       const runPromise = runner.run({ intervalMs: 60_000, onIter: () => {} });
@@ -651,7 +652,7 @@ describe('MachineRunner', () => {
       const runner = new MachineRunner('turing', factory);
 
       const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
       await buildPromise;
 
       const runPromise = runner.run({ intervalMs: 60_000, onIter: () => {} });
@@ -674,7 +675,7 @@ describe('MachineRunner', () => {
       const runner = new MachineRunner('turing', factory);
 
       const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
       await buildPromise;
 
       const runPromise = runner.run();
@@ -706,7 +707,7 @@ describe('MachineRunner', () => {
       await expect(runner.step()).rejects.toThrow('previous request still pending');
 
       // Settle the build.
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
       await buildPromise;
     });
 
@@ -715,7 +716,7 @@ describe('MachineRunner', () => {
       const runner = new MachineRunner('turing', factory);
 
       const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
       await buildPromise;
 
       const runPromise = runner.run();
@@ -741,7 +742,7 @@ describe('MachineRunner', () => {
       const runner = new MachineRunner('turing', factory);
 
       const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
       await buildPromise;
 
       const runPromise = runner.run();
@@ -774,7 +775,7 @@ describe('MachineRunner', () => {
       expect(all()[0].terminated).toBe(true);
 
       // Second build proceeds normally.
-      all()[1].respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      all()[1].respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
       await secondBuild;
     });
 
@@ -784,7 +785,7 @@ describe('MachineRunner', () => {
 
       // Pending run case.
       const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
       await buildPromise;
 
       const runPromise = runner.run();
@@ -845,7 +846,7 @@ describe('MachineRunner', () => {
       const runner = new MachineRunner('turing', factory);
 
       const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
       await buildPromise;
 
       const stepPromise = runner.step();
@@ -859,7 +860,7 @@ describe('MachineRunner', () => {
       const runner = new MachineRunner('turing', factory);
 
       const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
       await buildPromise;
 
       const runPromise = runner.run();
@@ -874,7 +875,7 @@ describe('MachineRunner', () => {
       const runner = new MachineRunner('turing', factory);
 
       const buildPromise = runner.build('// user code');
-      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false });
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
       await buildPromise;
 
       const stepPromise = runner.step();

@@ -507,11 +507,20 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
     if (req.type === 'build') {
       build(req.engine, req.code);
       const built = phase as Extract<WorkerPhase, { kind: 'built' }>;
+      // Compute the engine-v7 Graph snapshot once at Build (machines-demo#9).
+      // JSON-serializable; safe across the worker boundary. Main thread feeds
+      // this to `toMermaid(graph)` for SVG rendering and uses the per-edge
+      // `GraphTransition.id`s for future highlight + breakpoint work (#10, #37).
+      const graph = turing.State.toGraph(
+        initialState as turing.State,
+        machine!.tapeBlock as unknown as turing.TapeBlock,
+      );
       send({
         type: 'built',
         tapes: snapshotTapes(tapes),
         alphabets: snapshotAlphabets(tapes),
         halted: built.halted,
+        graph,
       });
       return;
     }

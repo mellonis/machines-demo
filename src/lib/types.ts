@@ -1,5 +1,9 @@
 /* Shared types across worker boundary and UI. Single source of truth. */
 
+import type { Graph as TuringGraph } from '@turing-machine-js/machine';
+
+export type { TuringGraph };
+
 export const ENGINES = ['turing', 'post'] as const;
 export type Engine = (typeof ENGINES)[number];
 
@@ -61,6 +65,15 @@ export type BuiltResponse = {
   tapes: TapeSnapshot[];
   alphabets: string[][];
   halted: boolean;
+  /**
+   * Engine-v7 `Graph` snapshot for the assembled state graph, computed once
+   * at Build via `State.toGraph(initialState, tapeBlock)` (machines-demo#9).
+   * Main thread feeds this to `toMermaid(graph)` for SVG rendering. The
+   * Graph type is JSON-serializable — safe to send across the worker
+   * boundary. `null` when build failed (the `error` response is used in
+   * that case, but typing it as nullable keeps the field uniform).
+   */
+  graph: TuringGraph;
 };
 
 /**

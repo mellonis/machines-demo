@@ -4,12 +4,13 @@
   import Toolbar from './Toolbar.svelte';
   import ControlPanel from './ControlPanel.svelte';
   import Log from './Log.svelte';
+  import MachineGraph from './MachineGraph.svelte';
   import { LogStore } from '../lib/logStore.svelte.ts';
   import MachineWorker from '../lib/machineWorker.ts?worker';
   import { MachineRunner, WorkerError } from '../lib/machineRunner.ts';
   import * as turing from '@turing-machine-js/machine';
   import { BELT_ANIMATION_MIN_INTERVAL_MS, MAX_TAPES, VIEWPORT_WIDTH } from '../lib/caps.ts';
-  import { type Alphabets, type Command, type Engine, type IdleResponse, type PausedResponse, type TapeSnapshot } from '../lib/types.ts';
+  import { type Alphabets, type Command, type Engine, type IdleResponse, type PausedResponse, type TapeSnapshot, type TuringGraph } from '../lib/types.ts';
   import { startDemoLoop } from '../lib/demoLoop.ts';
   import { parseInterval } from '../lib/interval.ts';
   import { parse as parseSnapshot, serialize as serializeSnapshot } from '../lib/tapeSnapshot.ts';
@@ -67,6 +68,13 @@
   let alphabets = $state<Alphabets>([]);
   const log = new LogStore();
   let lastSnapshots = $state<TapeSnapshot[] | null>(null);
+  // State-graph panel (machines-demo#9). `graph` is the engine-v7 Graph
+  // snapshot captured at Build via State.toGraph; null pre-Build.
+  // `graphCollapsed` defaults to "open on desktop, closed on mobile" per
+  // the issue's UX note; `graphModalOpen` drives the expand-to-modal view.
+  let graph = $state<TuringGraph | null>(null);
+  let graphCollapsed = $state(initialGraphCollapsed());
+  let graphModalOpen = $state(false);
   let pendingOp = $state<'load' | 'run' | null>(null);
   let mirrorMachine: turing.TuringMachine | null = null;
   let mirrorTapeBlock: turing.TapeBlock | null = null;
@@ -210,6 +218,16 @@
 
   /* ───── side-effect handlers (one source of truth on error) ───── */
 
+  // Initial state-graph collapse policy: open on desktop (>=720px viewport),
+  // closed on mobile so the panel doesn't push the editor below the fold on
+  // first view. SSR-safe: defaults to open if `matchMedia` is unavailable.
+  function initialGraphCollapsed(): boolean {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return false;
+    }
+    return window.matchMedia('(max-width: 719px)').matches;
+  }
+
   function failHalted(err: unknown): void {
     if (stopRequested) {
       stopRequested = false;
@@ -316,6 +334,7 @@
       alphabets = res.alphabets;
       lastSnapshots = res.tapes;
       halted = res.halted;
+      graph = res.graph;
       _buildMirrorMachine(res.tapes, res.alphabets);
       await tick();
       setAllFromMirror();
@@ -326,6 +345,7 @@
       tapesStackRef?.clearAll();
       lastSnapshots = null;
       halted = true;
+      graph = null;
       const msg = err instanceof Error ? err.message : String(err);
       log.report(`error: ${msg}`, 'error');
       return false;
@@ -822,6 +842,54 @@
   <div class="panel-tape">
     <TapesStack bind:this={tapesStackRef} {tapeCount} caretColors={CARET_COLORS} />
 
+    <div class="machine-graph-row">
+      <MachineGraph
+        {graph}
+        collapsed={graphCollapsed}
+        onToggleCollapsed={() => { graphCollapsed = !graphCollapsed; }}
+        onExpand={() => { graphModalOpen = true; }}
+      />
+    </div>
+
+    {#if graphModalOpen}
+      <!-- Modal expansion of the same state graph (#9). Backdrop click +
+           Esc both dismiss; the inner card stops propagation so clicks on
+           the SVG host stay scoped. The modal's MachineGraph instance is
+           rendered with collapsed={false} unconditionally — the modal IS
+           the expanded view, no further toggle. The expand button on the
+           inner header is hidden via a never-fires onExpand prop. -->
+      <div
+        class="graph-modal-backdrop"
+        role="presentation"
+        onclick={() => { graphModalOpen = false; }}
+        onkeydown={(e) => { if (e.key === 'Escape') graphModalOpen = false; }}
+      >
+        <div
+          class="graph-modal-card"
+          role="dialog"
+          aria-modal="true"
+          aria-label="State graph (expanded)"
+          onclick={(e) => e.stopPropagation()}
+          onkeydown={(e) => e.stopPropagation()}
+          tabindex="-1"
+        >
+          <button
+            type="button"
+            class="graph-modal-close"
+            onclick={() => { graphModalOpen = false; }}
+            aria-label="Close state graph"
+            title="Close (Esc)"
+          >×</button>
+          <MachineGraph
+            {graph}
+            collapsed={false}
+            onToggleCollapsed={() => { graphModalOpen = false; }}
+            onExpand={() => { /* already expanded */ }}
+          />
+        </div>
+      </div>
+    {/if}
+
     <div class="panel-enter-clip">
       <ControlPanel
         bind:this={panelRef}
@@ -940,6 +1008,59 @@
       border-right: none;
       border-bottom: 1px solid var(--cell-border);
     }
+  }
+
+  /* State-graph row (machines-demo#9) — sits between TapesStack and the
+     control panel. Just a top-margin spacer so the collapsible card has
+     air around it; the card owns its own border/background. */
+  .machine-graph-row {
+    margin-top: 12px;
+  }
+
+  /* Expand-to-modal view of the state graph (#9). Fixed-position overlay,
+     dimmed backdrop, centered card with most of the viewport available. */
+  .graph-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    padding: 24px;
+  }
+
+  .graph-modal-card {
+    position: relative;
+    background: var(--bg);
+    border-radius: 8px;
+    width: min(1200px, 95vw);
+    max-height: 90vh;
+    overflow: auto;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  }
+
+  .graph-modal-close {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: inherit;
+    cursor: pointer;
+    font-size: 18px;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1;
+    transition: background var(--anim-button-hover-ms);
+  }
+
+  .graph-modal-close:hover {
+    background: var(--bg-subtle, var(--border));
   }
 
   /* Clips the control-panel's enter animation so translateY(20px) can't
