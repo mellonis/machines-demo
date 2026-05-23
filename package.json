@@ -23,7 +23,7 @@
     "@mermaid-js/layout-elk": "^0.2.1",
     "@post-machine-js/machine": "^7.0.0-alpha.4",
     "@tabler/icons": "^3.44.0",
-    "@turing-machine-js/machine": "^7.0.0-alpha.3",
+    "@turing-machine-js/machine": "^7.0.0-alpha.4",
     "codemirror": "^6.0.2",
     "mermaid": "^11.15.0",
     "svelte-codemirror-editor": "^2.1.0"

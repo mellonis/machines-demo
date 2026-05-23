@@ -1,5 +1,6 @@
 import { MAX_STEPS, WORKER_TIMEOUT_MS } from './caps.ts';
 import {
+  type BreakpointToggledResponse,
   type BuiltResponse,
   type Engine,
   type IdleResponse,
@@ -56,6 +57,15 @@ export class MachineRunner {
   private workerFactory: WorkerFactory;
   private simplePending: SimplePending | null = null;
   private runPending: RunPending | null = null;
+  /**
+   * Caller-set callback that fires whenever the worker echoes a
+   * `breakpointToggled` response (machines-demo#37 layer 1). The toggle
+   * request itself is fire-and-forget on the runner side; the UI updates
+   * its indicator state on receipt of this echo rather than awaiting a
+   * Promise, because toggles can land mid-run (parallel to the run loop)
+   * and shouldn't share the simple-pending or run-pending tracking lanes.
+   */
+  onBreakpointToggled: ((data: BreakpointToggledResponse) => void) | null = null;
 
   constructor(engine: Engine, workerFactory: WorkerFactory) {
     this.engine = engine;
@@ -129,6 +139,13 @@ export class MachineRunner {
     if (data.type === 'busy') {
       if (!this.runPending) return;
       this.startRunTimer();
+      return;
+    }
+    if (data.type === 'breakpointToggled') {
+      // Side-channel echo — doesn't complete any pending Promise, just
+      // signals the UI to update its indicator state. May arrive at any
+      // point: between simple requests, mid-run, or while paused.
+      this.onBreakpointToggled?.(data);
       return;
     }
     // ran / error complete the run; stepped / built complete a simple request.
@@ -279,6 +296,18 @@ export class MachineRunner {
   setDebug(on: boolean): void {
     if (!this.worker) return;
     this.worker.postMessage({ type: 'setDebug', on });
+  }
+
+  /**
+   * Toggle the `state.debug.before` breakpoint on the State whose engine
+   * `GraphNode.id` matches `stateId` (machines-demo#37 layer 1). Fire-and-
+   * forget; the worker echoes a `breakpointToggled` response which routes
+   * to `onBreakpointToggled`. No-op if the worker hasn't been built — the
+   * UI's click handlers gate this anyway via the `graph != null` check.
+   */
+  toggleBreakpoint(stateId: number): void {
+    if (!this.worker) return;
+    this.worker.postMessage({ type: 'toggleBreakpoint', stateId, kind: 'before' });
   }
 
   terminate(): void {

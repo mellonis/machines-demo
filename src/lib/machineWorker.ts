@@ -670,6 +670,47 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
       return;
     }
 
+    if (req.type === 'toggleBreakpoint') {
+      // machines-demo#37 layer 1 — UI click on a state node toggles its
+      // `state.debug.before = true | null` via engine `State.collectStates`.
+      // Allowed in any phase except 'idle' (no machine built yet); paused
+      // explicitly OK so the user can set/clear a breakpoint mid-debug.
+      if (!machine || !initialState) {
+        send({
+          type: 'error',
+          message: 'toggleBreakpoint: no machine built (call Build first)',
+        });
+        return;
+      }
+      const stateMap = turing.State.collectStates(
+        initialState as turing.State,
+        machine.tapeBlock as unknown as turing.TapeBlock,
+      );
+      const entry = stateMap.get(req.stateId);
+      if (!entry) {
+        send({
+          type: 'error',
+          message: `toggleBreakpoint: no State for engine GraphNode.id ${req.stateId}`,
+        });
+        return;
+      }
+      // `state.debug` lazy-inits to a fresh DebugConfig on first read; reading
+      // `.before` first gives us a stable view of "was it set?".
+      const was = entry.state.debug.before === true;
+      if (was) {
+        entry.state.debug = null; // reset filters per engine v6.1+
+      } else {
+        entry.state.debug.before = true;
+      }
+      send({
+        type: 'breakpointToggled',
+        stateId: req.stateId,
+        kind: 'before',
+        value: was ? 'off' : 'on',
+      });
+      return;
+    }
+
     throw new Error(`unknown message type: ${(req as { type: string }).type}`);
   } catch (err) {
     // Carry the current tape state when present — a step/run that errors

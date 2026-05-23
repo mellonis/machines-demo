@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount, tick, untrack } from 'svelte';
+  import { SvelteSet } from 'svelte/reactivity';
   import TapesStack from './TapesStack.svelte';
   import Toolbar from './Toolbar.svelte';
   import ControlPanel from './ControlPanel.svelte';
@@ -85,6 +86,14 @@
   // re-fire — so the pulse animation would never restart. Bumping this
   // forces the effect to re-fire per event.
   let stepsApplied = $state(0);
+
+  // machines-demo#37 layer 1 — set of engine `GraphNode.id`s with an active
+  // `state.debug.before = true` breakpoint. Populated reactively by the
+  // worker's `breakpointToggled` echo (installed via runner.onBreakpointToggled
+  // below). Cleared on Build (a fresh worker means fresh State instances).
+  // SvelteSet so the equality the indicator effect reads off updates the
+  // rendered SVG without a manual reactivity tick.
+  const breakpoints = new SvelteSet<number>();
 
   // Persist the user's expand/collapse choice per engine. Skip the initial
   // value (it already came from localStorage or the viewport default) so we
@@ -173,6 +182,18 @@
   const editorPromise = import('./Editor.svelte').then((m) => m.default);
 
   const runner = new MachineRunner(untrack(() => engine), () => new MachineWorker());
+
+  // machines-demo#37 — install the breakpoint-echo callback once at runner
+  // construction. The worker emits `breakpointToggled` after each
+  // toggleBreakpoint mutation; the UI updates its indicator set in lockstep
+  // so click-to-toggle feels synchronous despite the worker round-trip.
+  runner.onBreakpointToggled = (data) => {
+    if (data.value === 'on') {
+      breakpoints.add(data.stateId);
+    } else {
+      breakpoints.delete(data.stateId);
+    }
+  };
 
   /* ───── derived ─────
    * Single source of truth for button-disabled state and panel visibility.
@@ -418,6 +439,10 @@
   // own that.
   async function reloadWorker(source: string = code): Promise<boolean> {
     pendingOp = 'load';
+    // A fresh worker means fresh State instances — any breakpoints toggled
+    // on the previous graph are stale and don't carry over. Clear here so
+    // the indicator set matches what the worker actually knows about.
+    breakpoints.clear();
     try {
       const res = await runner.build(source);
       workerLive = true;
@@ -443,6 +468,15 @@
     } finally {
       pendingOp = null;
     }
+  }
+
+  // machines-demo#37 layer 1 — toggle a state-level `before` breakpoint by
+  // clicked engine `GraphNode.id`. Fire-and-forget; the worker echoes a
+  // `breakpointToggled` response which updates the `breakpoints` set via
+  // the runner.onBreakpointToggled hook above.
+  function onToggleBreakpoint(stateId: number): void {
+    if (!workerLive) return;
+    runner.toggleBreakpoint(stateId);
   }
 
   function stopMachine(): void {
@@ -991,6 +1025,8 @@
             {graph}
             highlight={graphHighlight}
             {stepsApplied}
+            {breakpoints}
+            {onToggleBreakpoint}
             collapsed={false}
             onToggleCollapsed={() => { graphModalOpen = false; }}
             onRenderError={(msg: string) => log.report(msg, 'error')}
@@ -1044,6 +1080,8 @@
         {graph}
         highlight={graphHighlight}
         {stepsApplied}
+        {breakpoints}
+        {onToggleBreakpoint}
         collapsed={graphCollapsed}
         onToggleCollapsed={() => { graphCollapsed = !graphCollapsed; }}
         onExpand={() => { graphModalOpen = true; }}

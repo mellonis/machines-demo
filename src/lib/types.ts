@@ -87,7 +87,8 @@ export type WorkerRequest =
   | { type: 'run'; maxSteps?: number; debug?: boolean; step?: boolean; intervalMs?: number | null } // step?: true → arm initial state's debug.after so iter 1 pauses at the step-boundary (preserves user-authored debug.before); intervalMs: per-step throttle inside onStep (null/omitted = continuous)
   | { type: 'resume'; step?: boolean; intervalMs?: number | null } // step?: true → advance one iteration, then re-pause; intervalMs: convey the current withPause at Continue time (spec §3 reads withPause at click, not at run-start)
   | { type: 'pause' } // click-pause from RUNNING_AUTO — worker cancels throttle and dispatches a synthetic `paused` from the next onStep
-  | { type: 'setDebug'; on: boolean }; // runtime-toggle debug-break pausing during a run
+  | { type: 'setDebug'; on: boolean } // runtime-toggle debug-break pausing during a run
+  | { type: 'toggleBreakpoint'; stateId: number; kind: 'before' }; // machines-demo#37 layer 1: flip `state.debug.before = true | null` on the State whose engine GraphNode.id matches `stateId`. Worker resolves via `State.collectStates`; main thread reflects the new state in the UI via the `breakpointToggled` response.
 
 /* Multi-tape: every shape is per-tape arrays. N=1 for single-tape machines,
  * N=K for K-tape machines (TapeBlock.fromTapes([...K])). */
@@ -247,6 +248,21 @@ export type IdleResponse = {
 };
 export type BusyResponse = { type: 'busy' };
 
+/**
+ * Echo of a `toggleBreakpoint` request after the worker mutates
+ * `state.debug` (machines-demo#37 layer 1). `value` is the new state of the
+ * breakpoint on the targeted `stateId` — `'on'` after toggling a previously-
+ * absent breakpoint, `'off'` after toggling a previously-present one. The
+ * main thread updates its `breakpointsByStateId` registry on receipt so the
+ * indicator dot in the rendered graph reflects the engine's actual state.
+ */
+export type BreakpointToggledResponse = {
+  type: 'breakpointToggled';
+  stateId: number;
+  kind: 'before';
+  value: 'on' | 'off';
+};
+
 export type ErrorResponse = {
   type: 'error';
   message: string;
@@ -267,4 +283,5 @@ export type WorkerResponse =
   | PausedResponse
   | IdleResponse
   | BusyResponse
+  | BreakpointToggledResponse
   | ErrorResponse;

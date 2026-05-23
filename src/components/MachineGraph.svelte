@@ -27,6 +27,18 @@
      *  error in the main log (not just in this panel's own error slot).
      *  Optional — caller can omit if they don't need it. */
     onRenderError?: (message: string) => void;
+    /** Set of engine `GraphNode.id`s with an active `state.debug.before`
+     *  breakpoint (machines-demo#37 layer 1). Read by the indicator effect
+     *  to render a `●` on toggled nodes; reactive via SvelteSet. Empty /
+     *  omitted when the parent hasn't wired breakpoints yet. */
+    breakpoints?: ReadonlySet<number>;
+    /** Called with the clicked engine `GraphNode.id` when the user clicks a
+     *  state node in the rendered SVG (#37 layer 1). Halt-marker (negative
+     *  ids) and the halt singleton (id 0) are filtered out before this
+     *  fires — the consumer can assume `stateId` references a regular,
+     *  bare, or wrapper State. Omitted when the parent doesn't want clicks
+     *  routed (e.g., view-only contexts). */
+    onToggleBreakpoint?: (stateId: number) => void;
   };
 
   let {
@@ -37,6 +49,8 @@
     onToggleCollapsed,
     onExpand,
     onRenderError,
+    breakpoints,
+    onToggleBreakpoint,
   }: Props = $props();
 
   const instanceId = `mg-${nextInstanceCounter()}`;
@@ -313,6 +327,17 @@
         : null; // w_N skipped here — clusterCache handles those.
       if (key === null) return;
       if (!nodeCache.has(key)) nodeCache.set(key, el);
+      // machines-demo#37 layer 1 — attach a click listener for breakpoint-
+      // eligible nodes. Skip:
+      //   - 'idle' sentinel (entry marker; no underlying State)
+      //   - halt singleton (id 0; toggling its debug is global — surfaced
+      //     via a separate UI control in a later layer, not via node clicks)
+      //   - halt markers (negative ids — synthetic visualization nodes that
+      //     all collapse to the haltState singleton at runtime)
+      if (onToggleBreakpoint && typeof key === 'number' && key > 0) {
+        el.style.cursor = 'pointer';
+        el.addEventListener('click', () => onToggleBreakpoint(key));
+      }
     });
     root.querySelectorAll<SVGElement>('[data-id^="L_"]').forEach((el) => {
       const dataId = el.getAttribute('data-id');
@@ -397,6 +422,25 @@
   // `scrollIntoView` directly on the cached element.
   //
   // Reactivity gotcha: every reactive value the effect should re-fire on
+  // machines-demo#37 layer 1 — apply the `mg-breakpoint` class to each
+  // node whose engine id is in `breakpoints`, clear it from others. Runs
+  // independently of the highlight-apply effect below so a click-set
+  // breakpoint doesn't have to wait for a paused/idle event to render.
+  // Reads `breakpoints` and `svg` up front so both become tracked deps —
+  // Svelte 5 only subscribes to vars read during the effect run.
+  $effect(() => {
+    const bps = breakpoints;
+    void svg;
+    if (!svgHostEl) return;
+    for (const [key, el] of nodeCache) {
+      if (typeof key === 'number' && key > 0 && bps?.has(key)) {
+        el.classList.add('mg-breakpoint');
+      } else {
+        el.classList.remove('mg-breakpoint');
+      }
+    }
+  });
+
   // MUST be read in the effect body before any early `return`. Svelte 5
   // tracks deps by what's actually read during the run. If `highlight` is
   // read only after a `!svgHostEl` early-return, then a later change to
@@ -961,6 +1005,24 @@
   .svg-host :global(path.mg-highlight-edge),
   .svg-host :global(.mg-highlight-edge path) {
     stroke: var(--graph-highlight) !important;
+    stroke-width: 2.5px !important;
+    transition: stroke 150ms ease, stroke-width 150ms ease;
+  }
+
+  /* Breakpoint indicator (machines-demo#37 layer 1). A red stroke on the
+     node's outer shape signals an active `state.debug.before = true`
+     breakpoint. Decoupled from `--graph-highlight` (which is amber/orange
+     for the running-machine cue) and from `--head` (the tape head marker)
+     so the three runtime indicators stay visually distinct. The dot/●
+     glyph from the issue's UX proposal is layer 2 work — for layer 1 the
+     stroke-only indicator is enough to surface "this state has a
+     breakpoint" without DOM injection into mermaid's foreignObject
+     labels. */
+  .svg-host :global(g.node.mg-breakpoint rect),
+  .svg-host :global(g.node.mg-breakpoint polygon),
+  .svg-host :global(g.node.mg-breakpoint circle),
+  .svg-host :global(g.node.mg-breakpoint path[stroke]:not([stroke='none'])) {
+    stroke: var(--graph-breakpoint) !important;
     stroke-width: 2.5px !important;
     transition: stroke 150ms ease, stroke-width 150ms ease;
   }
