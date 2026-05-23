@@ -478,6 +478,9 @@ async function run(
         commands: drained,
         reads: drainedReads,
         currentStateId: m.state.id,
+        nextStateId: machine?.tapeBlock
+          ? nextStateIdFromYield(m as unknown as MachineYield, machine.tapeBlock)
+          : null,
         stepsApplied,
       });
       await new Promise<void>((resolve) => {

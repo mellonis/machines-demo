@@ -438,6 +438,7 @@ describe('MachineRunner', () => {
         commands: [[{ movement: 'R', symbol: null }]],
         reads: [['_']],
         currentStateId: null,
+        nextStateId: null,
         stepsApplied: 1,
       });
       current().respond({ type: 'busy' });
@@ -446,6 +447,7 @@ describe('MachineRunner', () => {
         commands: [[{ movement: 'L', symbol: null }]],
         reads: [['_']],
         currentStateId: null,
+        nextStateId: null,
         stepsApplied: 2,
       });
       current().respond({ type: 'busy' });
@@ -655,6 +657,7 @@ describe('MachineRunner', () => {
         commands: [[{ movement: 'R', symbol: null }]],
         reads: [['_']],
         currentStateId: null,
+        nextStateId: null,
         stepsApplied: 1,
       });
 
@@ -697,6 +700,7 @@ describe('MachineRunner', () => {
         commands: [[{ movement: 'R', symbol: null }]],
         reads: [['_']],
         currentStateId: null,
+        nextStateId: null,
         stepsApplied: 1,
       });
       current().respond({ type: 'busy' });
