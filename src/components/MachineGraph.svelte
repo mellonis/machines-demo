@@ -11,6 +11,13 @@
      *  active highlight. Driven by MachineView mode + pause-response data
      *  (machines-demo#10). */
     highlight?: GraphHighlight | null;
+    /** Monotonic per-event counter from the worker (machines-demo#10). Used
+     *  as a reactivity tick: when two consecutive paused events have
+     *  structurally identical highlights (Copy-tape step-mode looping on
+     *  id:1), the $derived wouldn't re-run and this $effect wouldn't
+     *  re-fire — so the pulse would never restart. Reading it in the effect
+     *  body subscribes the effect to per-event ticks. */
+    stepsApplied?: number;
     collapsed: boolean;
     onToggleCollapsed: () => void;
     /** When provided, the header shows an expand-to-modal button. Omit to
@@ -25,6 +32,7 @@
   let {
     graph,
     highlight = null,
+    stepsApplied = 0,
     collapsed,
     onToggleCollapsed,
     onExpand,
@@ -61,6 +69,32 @@
   const nodeCache = new Map<number | 'idle', SVGElement>();
   // eslint-disable-next-line svelte/prefer-svelte-reactivity
   const edgeCache = new Map<string, SVGElement>();
+  // GraphNode.id → containing callable-subtree frameId, derived from the
+  // engine's Graph (machines-demo#10). Drives the "frame active" border
+  // highlight when the strong state lives inside a subgraph.
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity
+  const nodeFrameMap = new Map<number, number>();
+  // frameId → corresponding `<g class="cluster">` element. Mermaid emits
+  // each subgraph as a cluster whose id contains the subgraph token
+  // (`w_<frameId>`), so we extract the number once at render time.
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity
+  const clusterCache = new Map<number, SVGElement>();
+  // frameId → list of wrappers calling into that frame, each with the
+  // wrapper's GraphNode id and the wrapper's override-target id (the
+  // post-return continuation; `null` if the override is the engine's halt
+  // singleton). Drives the "return chain" highlight when an in-frame
+  // transition halts the bare: light up the return arrow `w_N → wrapper`,
+  // the wrapper node, the wrapper-to-override edge, and the override
+  // target — so the user sees the full post-pop visual path.
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity
+  const frameWrappersMap = new Map<number, { wrapperId: number; overrideId: number | null }[]>();
+
+  // Strong-node id from the most recent PAUSED apply (machines-demo#10).
+  // The pulse condition is "paused on the same state as the previous
+  // paused event" — idles never trigger or update this. Reset to null on
+  // highlight-clear so a mode transition doesn't leave stale state matching
+  // the next paused event spuriously.
+  let lastPausedStrongId: number | 'idle' | null = null;
 
   // Local non-reactive counter for mermaid render-id uniqueness. mermaid.render
   // requires a unique id per call; reusing an id causes the call to fail or
@@ -231,20 +265,52 @@
   // `data-id` to sidestep the render-id prefix.
   $effect(() => {
     void svg; // re-run when svg changes
+    void graph; // re-run when graph changes (drives nodeFrameMap)
     nodeCache.clear();
     edgeCache.clear();
+    nodeFrameMap.clear();
+    clusterCache.clear();
+    frameWrappersMap.clear();
+    if (graph) {
+      for (const node of Object.values(graph.nodes)) {
+        if (node.frameId !== null) nodeFrameMap.set(node.id, node.frameId);
+      }
+      // For each wrapper, find which frame it calls into (via its bare's
+      // frameId) and append to frameWrappersMap[frameId]. Multiple wrappers
+      // can share the same bare with different overrides; we record them all
+      // and the apply-highlight effect highlights each — visually surfacing
+      // any ambiguity when the engine pops the stack at halt.
+      for (const node of Object.values(graph.nodes)) {
+        if (!node.isWrapper || node.bareStateId === null) continue;
+        const bare = graph.nodes[node.bareStateId];
+        if (!bare || bare.frameId === null) continue;
+        const entry = { wrapperId: node.id, overrideId: node.overriddenHaltStateId };
+        const arr = frameWrappersMap.get(bare.frameId);
+        if (arr) arr.push(entry);
+        else frameWrappersMap.set(bare.frameId, [entry]);
+      }
+    }
     if (!svgHostEl) return;
     const root = svgHostEl.querySelector('svg');
     if (!root) return;
     root.querySelectorAll<SVGElement>('g.node').forEach((el) => {
       // id shape: `${renderId}-flowchart-${nodeId}-${suffix}`. Extract `nodeId`.
+      // `sN` → numeric state id N. `cN` → halt marker for frame N, keyed as
+      // negative -N (engine doc: "halt marker id = -frameId"); the highlight
+      // effect retargets `toId === 0` (real halt) to `-frameId` when the
+      // source state lives inside frame N, so the visible edge ends at the
+      // in-frame marker rather than the outside real-halt singleton.
+      // `idle` → synthetic entry sentinel. `w_N` → subgraph wrapper (the
+      // cluster IS user-facing for #10 frame-active border, but that lookup
+      // uses clusterCache, not nodeCache).
       const m = el.id.match(/-flowchart-(s\d+|idle|c\d+|w_\d+)-/);
       if (!m) return;
       const tok = m[1];
       const key: number | 'idle' | null =
         tok === 'idle' ? 'idle'
         : tok.startsWith('s') ? Number(tok.slice(1))
-        : null; // cN / w_N skipped — not user-facing for #10.
+        : tok.startsWith('c') ? -Number(tok.slice(1))
+        : null; // w_N skipped here — clusterCache handles those.
       if (key === null) return;
       if (!nodeCache.has(key)) nodeCache.set(key, el);
     });
@@ -253,6 +319,76 @@
       if (!dataId) return;
       // Multiple elements (path + label) share a data-id; first one wins.
       if (!edgeCache.has(dataId)) edgeCache.set(dataId, el);
+    });
+    // Populate the per-frame cluster cache so the apply-highlight effect
+    // can light up the enclosing subgraph border when m.state lives inside
+    // a callable subtree. Mermaid v11 stringifies the subgraph's id object
+    // as the literal `[object Object]` in the DOM, so we can't extract
+    // `w_<n>` from `el.id`. Match by cluster-label text instead — the
+    // engine emits a deterministic label per frame (`callable subtree of
+    // NAME` for single-bare, `callable scope: A ∪ B …` for union, bare
+    // names sorted by id; see `graphFormats.ts`) so we can recompute the
+    // expected label from `graph` and map it back to frameId.
+    if (graph) {
+      // A frame-bare is a non-wrapper, non-halt-marker node that some
+      // wrapper points at via `bareStateId`. Build one set so the per-frame
+      // pass doesn't re-scan all nodes per check.
+      // eslint-disable-next-line svelte/prefer-svelte-reactivity
+      const bareIds = new Set<number>();
+      for (const n of Object.values(graph.nodes)) {
+        if (n.isWrapper && n.bareStateId !== null) bareIds.add(n.bareStateId);
+      }
+      // frameId → sorted-by-id bare names (engine sorts by id, see
+      // `graphFormats.ts`).
+      // eslint-disable-next-line svelte/prefer-svelte-reactivity
+      const frameToBareNames = new Map<number, string[]>();
+      for (const n of Object.values(graph.nodes).sort((a, b) => a.id - b.id)) {
+        if (n.isWrapper || n.isHaltMarker || n.frameId === null) continue;
+        if (!bareIds.has(n.id)) continue;
+        const arr = frameToBareNames.get(n.frameId) ?? [];
+        arr.push(n.name);
+        frameToBareNames.set(n.frameId, arr);
+      }
+      // eslint-disable-next-line svelte/prefer-svelte-reactivity
+      const labelToFrameId = new Map<string, number>();
+      for (const [frameId, names] of frameToBareNames) {
+        const label = names.length > 1
+          ? `callable scope: ${names.join(' ∪ ')}`
+          : `callable subtree of ${names[0] ?? frameId}`;
+        labelToFrameId.set(label, frameId);
+      }
+      root.querySelectorAll<SVGElement>('g.cluster').forEach((el) => {
+        // Cluster label is rendered into `.cluster-label` (a child `<g>`)
+        // which holds a `<foreignObject>` with the literal label text.
+        const labelText = el.querySelector('.cluster-label')?.textContent?.trim();
+        if (!labelText) return;
+        const frameId = labelToFrameId.get(labelText);
+        if (frameId === undefined) return;
+        if (!clusterCache.has(frameId)) clusterCache.set(frameId, el);
+      });
+    }
+    // Materialize highlight-color variants of mermaid's shared markers
+    // (machines-demo#10). Mermaid emits one `<marker>` per arrowhead shape
+    // and colors them all from `#mg-N .marker { fill: lightgrey; ... }`, so
+    // every arrowhead is grey regardless of its referencing edge's stroke.
+    // `context-stroke` would fix this declaratively but isn't reliable
+    // cross-browser yet; instead clone each marker into a sibling with id
+    // suffix `-mg-hl`, tag its inner shape with `mg-hl-arrow-shape` so CSS
+    // can fix fill/stroke to `--graph-highlight`, and swap a highlighted
+    // path's `marker-end` to the variant at apply-highlight time.
+    root.querySelectorAll<SVGMarkerElement>('marker.marker').forEach((marker) => {
+      // Skip our own clones from a prior pass through this effect — otherwise
+      // each re-fire (graph change + svg change in close succession) clones
+      // the clones, layering `-mg-hl-mg-hl-…` indefinitely.
+      if (marker.id.endsWith('-mg-hl')) return;
+      const hlId = marker.id + '-mg-hl';
+      if (root.querySelector(`#${CSS.escape(hlId)}`)) return; // already added
+      const clone = marker.cloneNode(true) as SVGMarkerElement;
+      clone.id = hlId;
+      clone.querySelectorAll('.arrowMarkerPath').forEach((shape) => {
+        shape.classList.add('mg-hl-arrow-shape');
+      });
+      marker.parentNode!.insertBefore(clone, marker.nextSibling);
     });
   });
 
@@ -271,19 +407,46 @@
   $effect(() => {
     const h = highlight;
     void svg; // track render output too — cache repopulates on re-render
+    void stepsApplied; // tick: re-fire on every worker event even when
+    // the highlight object is structurally identical to the previous one
+    // (Copy-tape step-mode looping on the same state — without this read,
+    // Svelte's fine-grained reactivity skips the apply).
     if (!svgHostEl) return;
     const root = svgHostEl.querySelector('svg');
     if (!root) return;
     // Clear previous highlight classes. No inline-style restore needed —
     // we strip the engine's classDef tags at render time so all visuals
     // are author-CSS-driven; toggling classes is enough.
-    root.querySelectorAll('.mg-highlight-from, .mg-highlight-to, .mg-highlight-strong, .mg-highlight-edge')
+    root.querySelectorAll('.mg-highlight-from, .mg-highlight-to, .mg-highlight-strong, .mg-highlight-edge, .mg-frame-active')
       .forEach((el) => {
-        el.classList.remove('mg-highlight-from', 'mg-highlight-to', 'mg-highlight-strong', 'mg-highlight-edge');
+        el.classList.remove('mg-highlight-from', 'mg-highlight-to', 'mg-highlight-strong', 'mg-highlight-edge', 'mg-frame-active');
+        // Restore the original `marker-end` if we swapped it for the
+        // highlight variant. Stored as a plain attribute (not dataset) so
+        // we don't need to narrow `Element` to `SVGElement` here.
+        if (el.tagName === 'path' && el.hasAttribute('data-mg-orig-marker-end')) {
+          el.setAttribute('marker-end', el.getAttribute('data-mg-orig-marker-end')!);
+          el.removeAttribute('data-mg-orig-marker-end');
+        }
       });
-    if (!h) return;
+    if (!h) {
+      lastPausedStrongId = null;
+      return;
+    }
+    // Retarget halt-bound transitions of in-frame states to that frame's
+    // halt-marker node (id = -frameId). The engine reports
+    // `nextStateId === 0` (real halt singleton) for any halt-bound
+    // transition, but `toGraph` rewrites in-frame halts to the frame's
+    // halt-marker (`cN`) and emits the visible edge ending there. Without
+    // this translation the highlight would land on the real-halt circle
+    // OUTSIDE the frame, and the edge lookup (`L_sX_s0_…`) would miss the
+    // actually-emitted edge (`L_sX_cN_…`).
+    let toId: number | null = h.toId;
+    if (toId === 0 && typeof h.fromId === 'number') {
+      const fromFrameId = nodeFrameMap.get(h.fromId);
+      if (fromFrameId !== undefined) toId = -fromFrameId;
+    }
     const fromEl = nodeCache.get(h.fromId);
-    const toEl = h.toId !== null ? nodeCache.get(h.toId) : undefined;
+    const toEl = toId !== null ? nodeCache.get(toId) : undefined;
     if (fromEl) {
       fromEl.classList.add('mg-highlight-from');
       if (h.strong === 'from') fromEl.classList.add('mg-highlight-strong');
@@ -296,23 +459,97 @@
     // ix fired (engine doesn't expose it); pick the first matching from→to
     // pair. For self-loops and multi-edge-to-same-target, this can
     // over-highlight — acceptable for v1.
-    const fromKey = h.fromId === 'idle' ? 'idle' : `s${h.fromId}`;
-    const toKey = h.toId !== null ? `s${h.toId}` : null;
-    if (toKey) {
+    //
+    // Mermaid emits multiple SVG elements with the same `data-id` for a
+    // single edge — at minimum the `<path>` under `g.edgePaths` and the
+    // `<g class="edgeLabel">` under `g.edgeLabels`. Walking via
+    // querySelectorAll instead of the (first-wins) edgeCache lets us tag
+    // both, so the CSS can color the label to match the highlighted edge.
+    const highlightEdgeByDataId = (fromTok: string, toTok: string): void => {
       for (let ix = 0; ix < 10; ix++) {
-        const el = edgeCache.get(`L_${fromKey}_${toKey}_${ix}`);
-        if (el) {
+        const els = root.querySelectorAll<SVGElement>(
+          `[data-id="L_${fromTok}_${toTok}_${ix}"]`,
+        );
+        if (els.length === 0) continue;
+        els.forEach((el) => {
           el.classList.add('mg-highlight-edge');
-          break;
+          // Swap the arrowhead on the `<path>` to its `-mg-hl` variant so
+          // the end-triangle picks up the highlight color (the variants
+          // are materialized in the cache-build effect above). Other
+          // matching elements (e.g. the `<g class="label">` edge label)
+          // have no `marker-end` and are skipped.
+          if (el.tagName === 'path') {
+            const orig = el.getAttribute('marker-end');
+            if (orig && !el.hasAttribute('data-mg-orig-marker-end')) {
+              el.setAttribute('data-mg-orig-marker-end', orig);
+              el.setAttribute('marker-end', orig.replace(/\)$/, '-mg-hl)'));
+            }
+          }
+        });
+        return;
+      }
+    };
+    const fromKey = h.fromId === 'idle' ? 'idle' : `s${h.fromId}`;
+    const toKey = toId === null ? null
+                : toId < 0 ? `c${-toId}` // halt-marker
+                : `s${toId}`;
+    if (toKey) highlightEdgeByDataId(fromKey, toKey);
+
+    // Return chain (machines-demo#10): when the just-fired transition lands
+    // on a frame's halt-marker (`toId < 0` means in-frame halt, set by the
+    // retarget above), the engine will pop the stack and resume at the
+    // wrapper's override. Light up the visual path so the user sees the
+    // post-pop trajectory before the next iter relocates the strong node:
+    //   return-arrow `w_N → wrapper` (dotted) + wrapper node
+    //   + wrapper-to-override edge + override target node.
+    // If multiple wrappers call into the frame (shared bare), we highlight
+    // each — the engine's runtime choice depends on stack state which the
+    // demo doesn't track, so surfacing the ambiguity beats picking one.
+    if (toId !== null && toId < 0) {
+      const frameId = -toId;
+      const wrappers = frameWrappersMap.get(frameId) ?? [];
+      for (const { wrapperId, overrideId } of wrappers) {
+        highlightEdgeByDataId(`w_${frameId}`, `s${wrapperId}`);
+        const wrapperEl = nodeCache.get(wrapperId);
+        if (wrapperEl) wrapperEl.classList.add('mg-highlight-to');
+        if (overrideId !== null) {
+          highlightEdgeByDataId(`s${wrapperId}`, `s${overrideId}`);
+          const overrideEl = nodeCache.get(overrideId);
+          if (overrideEl) overrideEl.classList.add('mg-highlight-to');
         }
       }
     }
+    // Frame highlight: when the strong state lives inside a callable-
+    // subtree subgraph, mark the enclosing cluster so its border lights
+    // up (CSS does border-only — fill stays unchanged so contained nodes
+    // don't gain extra visual weight from the frame).
+    const strongId = h.strong === 'from' ? h.fromId : h.toId;
+    if (typeof strongId === 'number') {
+      const frameId = nodeFrameMap.get(strongId);
+      if (frameId !== undefined) {
+        const clusterEl = clusterCache.get(frameId);
+        if (clusterEl) clusterEl.classList.add('mg-frame-active');
+      }
+    }
+    // Pulse only when THIS apply is a paused event AND lands on the same
+    // state as the previous paused event. Idles never pulse and never
+    // update lastPausedStrongId, so an idle that happens to report the
+    // same state doesn't interfere. Web Animations API restarts on each
+    // call without class-juggling.
+    const strongEl = h.strong === 'from' ? fromEl : toEl;
+    const pausedRevisit = h.paused && strongId !== null && strongId === lastPausedStrongId;
+    if (strongEl && pausedRevisit) {
+      strongEl.animate(
+        [{ opacity: 1 }, { opacity: 0.35 }, { opacity: 1 }],
+        { duration: 220, easing: 'ease-in-out' },
+      );
+    }
+    if (h.paused) lastPausedStrongId = strongId;
     // Scroll the strong node into view so users don't have to hunt for
     // it in large graphs. Manual offset math (vs Element.scrollIntoView)
     // keeps full control over the threshold + smooth scroll target and
     // is robust to whatever ancestor sizing/transform decisions the panel
     // adopts in the future.
-    const strongEl = h.strong === 'from' ? fromEl : toEl;
     if (strongEl) {
       void tick().then(() => {
         const scrollContainer = svgHostEl?.closest<HTMLElement>('.body');
@@ -605,14 +842,15 @@
   .svg-host :global(g.edgeLabel) {
     background-color: transparent !important;
   }
-  /* Subgraph (cluster) backgrounds. Force dashed stroke so the cluster
-     container reads as "structural wrapper", not "another state node" —
-     Mermaid's default emit leaves stroke-dasharray="none" on cluster
-     rects, making them visually identical to state rects. */
+  /* Subgraph (cluster) backgrounds. Mermaid's default emit gives clusters
+     the same stroke color as state-node rects, so we restate fill/stroke
+     here from our tokens to ensure the cluster reads distinctly from
+     contained nodes via fill + a different stroke color, not via a dashed
+     pattern. */
   .svg-host :global(g.cluster rect) {
     fill: var(--graph-cluster-fill) !important;
     stroke: var(--graph-cluster-stroke) !important;
-    stroke-dasharray: 6 4 !important;
+    stroke-dasharray: 0 !important;
     stroke-width: 1px !important;
   }
   .svg-host :global(g.cluster .cluster-label),
@@ -725,5 +963,73 @@
     stroke: var(--graph-highlight) !important;
     stroke-width: 2.5px !important;
     transition: stroke 150ms ease, stroke-width 150ms ease;
+  }
+
+  /* Arrowheads / cross / circle endcaps inherit the referencing path's
+     stroke color via `context-stroke`. Mermaid emits a single shared
+     marker per shape under `<defs>` and styles it with `#mg-N .marker
+     { fill: lightgrey; stroke: lightgrey }` — so without this override
+     every endcap stays grey, including on a highlighted edge (the
+     triangle reads as detached from its now-amber line). `context-stroke`
+     lets one shared marker render in each referencing path's stroke
+     color — also a bonus for the dotted enter / thick call edges, whose
+     bodies were already colored but whose triangles weren't.
+     Requires Chrome 123+ / Firefox / Safari 16.4+. In browsers without
+     support this rule is silently dropped — the explicit `.mg-hl-arrow-shape`
+     rule below still gives highlighted edges a colored triangle via the
+     materialized `-mg-hl` marker variant. */
+  .svg-host :global(.marker path.arrowMarkerPath),
+  .svg-host :global(.marker circle.arrowMarkerPath),
+  .svg-host :global(.marker polygon.arrowMarkerPath) {
+    fill: context-stroke !important;
+    stroke: context-stroke !important;
+  }
+
+  /* Explicit color for the inner shape of the materialized `-mg-hl` marker
+     clones. The cache-build effect adds this class to each cloned shape
+     so the highlighted edge's arrowhead is amber even in browsers without
+     `context-stroke` support. Lower specificity than the `.marker path.arrowMarkerPath`
+     rule above, but that rule's `context-stroke` is silently dropped where
+     unsupported, leaving this one to apply. */
+  .svg-host :global(.mg-hl-arrow-shape) {
+    fill: var(--graph-highlight) !important;
+    stroke: var(--graph-highlight) !important;
+  }
+
+  /* Edge label color when the edge is highlighted — pull text toward
+     the highlight stroke color so the label reads as part of the same
+     "this transition just fired" visual unit. Mermaid emits the edge
+     label as `<g class="edgeLabel"><g class="label" data-id="L_..."><foreignObject>…`
+     — the `data-id` lands on the INNER `g.label`, so that's what our
+     querySelectorAll sweep tags with `mg-highlight-edge`. `g.label` is
+     also used by node labels, but only edge labels carry `data-id` /
+     pick up our class, so this selector is safe. */
+  .svg-host :global(g.label.mg-highlight-edge),
+  .svg-host :global(g.label.mg-highlight-edge *) {
+    color: var(--graph-highlight) !important;
+    transition: color 150ms ease;
+  }
+
+  /* Active callable-subtree frame: when the strong state lives inside a
+     subgraph, the apply-highlight effect tags that subgraph's
+     `<g class="cluster">` with this class. Border-only — only stroke is
+     overridden, so the cluster's fill stays unchanged and contained
+     nodes don't gain extra visual weight from the frame. The default
+     `g.cluster rect` rule sets `stroke-dasharray: 0`, so the active
+     border inherits solid (no need to restate). */
+  .svg-host :global(g.cluster.mg-frame-active rect) {
+    stroke: var(--graph-highlight) !important;
+    stroke-width: 2px !important;
+    transition: stroke 150ms ease, stroke-width 150ms ease;
+  }
+
+  /* Dim the weak end of the highlighted triple (the node that is NOT
+     m.state) so the strong node reads as the focal point. Subtle —
+     soft-fill already mutes it; this just adds a slight transparency on
+     the whole node group. */
+  .svg-host :global(g.node.mg-highlight-from:not(.mg-highlight-strong)),
+  .svg-host :global(g.node.mg-highlight-to:not(.mg-highlight-strong)) {
+    opacity: 0.65;
+    transition: opacity 150ms ease;
   }
 </style>

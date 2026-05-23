@@ -77,6 +77,14 @@
   let graph = $state<TuringGraph | null>(null);
   let graphCollapsed = $state(untrack(() => initialGraphCollapsed(engine)));
   let graphModalOpen = $state(false);
+  // Monotonic iter counter, mirrored from worker responses (idle / paused /
+  // ran). Passed to MachineGraph purely as a reactivity tick: when two
+  // consecutive paused events have identical currentStateId / nextStateId /
+  // pauseBefore (e.g. Copy-tape step-mode looping on id:1), graphHighlight's
+  // $derived wouldn't re-run and MachineGraph's highlight effect wouldn't
+  // re-fire — so the pulse animation would never restart. Bumping this
+  // forces the effect to re-fire per event.
+  let stepsApplied = $state(0);
 
   // Persist the user's expand/collapse choice per engine. Skip the initial
   // value (it already came from localStorage or the viewport default) so we
@@ -202,36 +210,53 @@
 
   // State-graph highlight (#10): mirrors the LAST FIRED transition (so the
   // graph stays in lockstep with the most recent log entry). Strong on
-  // m.state in all cases — "you are here". Only fires on RUNNING_PAUSED.
+  // m.state in all cases — "you are here".
   //
+  // RUNNING_PAUSED:
   //   before pause at X (came from Y):
   //       triple = (Y, edge, X), strong on TO (= X = m.state)
   //   after / iter-end pause at X (next will be Z):
   //       triple = (X, edge, Z), strong on FROM (= X = m.state)
+  //   First iter's before pause has no prior state — `prevStateId` is null;
+  //   we use the synthetic `idle` sentinel as FROM (matches the idle-enter
+  //   arrow in the rendered graph, so the "transition that brought us
+  //   here" is the start-arrow itself).
   //
-  // First iter's before pause has no prior state — `prevStateId` is null;
-  // we use the synthetic `idle` sentinel as FROM (matches the idle-enter
-  // arrow in the rendered graph, so the "transition that brought us here"
-  // is the start-arrow itself).
+  // RUNNING_AUTO (driven by `idle` per-iter notifications):
+  //   triple = (currentStateId, edge, nextStateId), strong on FROM —
+  //   identical shape to the after/iter-end pause case (the iter just
+  //   ran; we're between iters). Update cadence equals the user's
+  //   `intervalMs`; strobe risk is the user's knob to manage.
   //
   // Other modes return null:
   //  - DEMO/MANUAL: no truth value (random / user-chosen commands).
-  //  - RUNNING_AUTO/CONTINUOUS: too fast to read; would strobe.
+  //  - RUNNING_CONTINUOUS: no per-iter signal (worker doesn't send `idle`).
   //  - HALTED: follow-up sub-branch (highlight last edge + halt node).
   const graphHighlight = $derived.by<GraphHighlight | null>(() => {
     if (!graph) return null;
+    if (executionMode === 'RUNNING_AUTO') {
+      if (currentStateId === null) return null;
+      return {
+        fromId: currentStateId,
+        toId: nextStateId,
+        strong: 'from',
+        paused: false,
+      };
+    }
     if (executionMode !== 'RUNNING_PAUSED' || currentStateId === null) return null;
     if (pauseBefore) {
       return {
         fromId: prevStateId ?? 'idle',
         toId: currentStateId,
         strong: 'to',
+        paused: true,
       };
     }
     return {
       fromId: currentStateId,
       toId: nextStateId,
       strong: 'from',
+      paused: true,
     };
   });
 
@@ -400,6 +425,7 @@
       lastSnapshots = res.tapes;
       halted = res.halted;
       graph = res.graph;
+      stepsApplied = 0;
       _buildMirrorMachine(res.tapes, res.alphabets);
       await tick();
       setAllFromMirror();
@@ -530,6 +556,7 @@
       _buildMirrorMachine(res.tapes, alphabets);
       setAllFromMirror();
       halted = true;
+      stepsApplied = res.stepsApplied;
       reflectNeutral();
       if (res.commands.length > 0) {
         log.appendBatch(
@@ -575,6 +602,13 @@
       );
       renderChain = renderChain.then(() => renderFromMirror(commands, animate));
     }
+    // Drive the per-iter graph highlight (#10). Iter-end semantics: we
+    // just landed in `currentStateId`, and `nextStateId` is where the
+    // next iter would go. The RUNNING_AUTO branch of `graphHighlight`
+    // reads these without touching `pauseBefore`.
+    currentStateId = data.currentStateId;
+    nextStateId = data.nextStateId;
+    stepsApplied = data.stepsApplied;
   }
 
   function onPausedHandler(paused: PausedResponse): void {
@@ -585,6 +619,7 @@
     currentStateId = paused.currentStateId;
     nextStateId = paused.nextStateId;
     pauseBefore = paused.debugBreak.before === true;
+    stepsApplied = paused.stepsApplied;
 
     // Replay buffered per-step commands so the trace leading to the break is
     // visible. In RUNNING_AUTO the buffer is drained per iter via `idle` and
@@ -643,6 +678,13 @@
       return;
     }
     reflectNeutral();
+    // Drop stale highlight IDs from any prior run so RUNNING_AUTO's
+    // $derived branch doesn't flash a previous run's triple before the
+    // first `idle` arrives. (Resume-from-paused path keeps them; the
+    // paused values are still valid until the next idle / pause.)
+    prevStateId = null;
+    currentStateId = null;
+    nextStateId = null;
     executionMode = withPause ? 'RUNNING_AUTO' : 'RUNNING_CONTINUOUS';
     codeChangedWarned = false;
     if (withPause) {
@@ -671,6 +713,7 @@
         setAllFromMirror();
       });
       halted = true;
+      stepsApplied = res.stepsApplied;
       reflectNeutral();
       if (res.commands.length > 0) {
         log.appendBatch(
@@ -947,6 +990,7 @@
           <MachineGraph
             {graph}
             highlight={graphHighlight}
+            {stepsApplied}
             collapsed={false}
             onToggleCollapsed={() => { graphModalOpen = false; }}
             onRenderError={(msg: string) => log.report(msg, 'error')}
@@ -999,6 +1043,7 @@
       <MachineGraph
         {graph}
         highlight={graphHighlight}
+        {stepsApplied}
         collapsed={graphCollapsed}
         onToggleCollapsed={() => { graphCollapsed = !graphCollapsed; }}
         onExpand={() => { graphModalOpen = true; }}

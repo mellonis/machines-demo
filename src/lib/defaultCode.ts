@@ -95,6 +95,65 @@ const initialState = new State({
 return { machine, initialState };
 `;
 
+const TURING_CALLABLE_SUBTREE = `// Task: walk right to the first blank cell, then mark it with '*'.
+// Demonstrates a callable subtree via State.withOverriddenHaltState:
+// 'walkToBlank' self-loops while reading a letter and halts at the first
+// blank. Halting INSIDE a wrapped subroutine pops the engine's halt-stack
+// and resumes at the wrapper's continuation ('writeMarker') instead of
+// terminating the run.
+//
+// In the rendered state graph, the subroutine sits inside a dashed
+// subgraph frame; the frame's border lights up while m.state is INSIDE
+// it (during the self-loop iters), then unlights when execution returns
+// to the after-call continuation.
+
+/*
+ * Available imports (named exports of @turing-machine-js/machine):
+ *   Alphabet, State, Tape, TapeBlock, TuringMachine,
+ *   haltState, ifOtherSymbol, movements, ...
+ *
+ * Return: { machine, initialState }
+ */
+
+const {
+  Alphabet, State, Tape, TapeBlock, TuringMachine,
+  haltState, ifOtherSymbol, movements,
+} = imports;
+
+const alphabet = new Alphabet([' ', 'a', 'b', '*']);
+const tape = new Tape({ alphabet, symbols: ['a', 'b', 'a'] });
+const tapeBlock = TapeBlock.fromTapes([tape]);
+const machine = new TuringMachine({ tapeBlock });
+const { symbol } = tapeBlock;
+
+// Subroutine: walk right while reading a letter; halt at the first blank.
+// (A 'halt' inside this subroutine = return to caller's continuation.)
+// Note key order: specific patterns first, ifOtherSymbol last — State
+// returns the first matching key, and ifOtherSymbol always matches.
+const walkToBlank = new State({
+  [symbol([alphabet.blankSymbol])]: {
+    command: [{ movement: movements.stay }],
+    nextState: haltState,
+  },
+  [ifOtherSymbol]: {
+    command: [{ movement: movements.right }],
+  },
+}, 'walkToBlank');
+
+// Continuation: write '*' under the head and halt for real.
+const writeMarker = new State({
+  [ifOtherSymbol]: {
+    command: [{ symbol: '*', movement: movements.stay }],
+    nextState: haltState,
+  },
+}, 'writeMarker');
+
+// Entry: call walkToBlank, then resume with writeMarker.
+const initialState = walkToBlank.withOverriddenHaltState(writeMarker);
+
+return { machine, initialState };
+`;
+
 const POST_WALK_MARK = `// Task: walk right while marked; mark the first blank cell found.
 
 /*
@@ -130,6 +189,7 @@ return { machine };
 const TURING_EXAMPLES: readonly Example[] = [
   { id: 'replace-b', title: "Replace 'b' with '*'", code: TURING_REPLACE_B },
   { id: 'copy-two-tapes', title: 'Copy tape (multi-tape)', code: TURING_COPY_TWO_TAPES },
+  { id: 'callable-subtree', title: 'Callable subtree (withOverriddenHaltState)', code: TURING_CALLABLE_SUBTREE },
 ];
 
 const POST_EXAMPLES: readonly Example[] = [

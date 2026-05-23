@@ -22,6 +22,18 @@ export type GraphHighlight = {
   fromId: number | 'idle';
   toId: number | null;
   strong: 'from' | 'to';
+  /**
+   * True when this highlight reflects a paused-event apply (RUNNING_PAUSED),
+   * false for per-iter idle applies (RUNNING_AUTO). MachineGraph uses this
+   * to detect cross-pause same-state revisits — pulsing the strong node when
+   * the current paused apply lands on the same state as the previous paused
+   * apply, even when intermediate idle applies pointed elsewhere
+   * (e.g., stateA breakpoint → continue → run through stateB/C → stateA
+   * breakpoint fires again). The simpler "previous apply's strong matches"
+   * check already covers AUTO self-loops; this flag drives the second pulse
+   * trigger.
+   */
+  paused: boolean;
 };
 
 export const ENGINES = ['turing', 'post'] as const;
@@ -218,10 +230,19 @@ export type IdleResponse = {
   reads: string[][];
   /**
    * Engine State.id of the state about to fire on the next iteration
-   * (post-throttle resume). Updates the current-state highlight per iter
-   * during `RUNNING_AUTO` (machines-demo#10). `null` if the run halted.
+   * (post-throttle resume) — i.e. m.state after the just-applied iter.
+   * Drives the `from + edge + to` triple highlight per iter during
+   * `RUNNING_AUTO` (machines-demo#10), strong on FROM (= m.state, "you
+   * are here looking forward"). `null` if the run halted.
    */
   currentStateId: number | null;
+  /**
+   * Engine State.id of the state that will follow `currentStateId` on the
+   * next iter. Drives the `to` end of the per-iter triple highlight in
+   * `RUNNING_AUTO` (machines-demo#10). `null` at halt or when
+   * `currentStateId` is `null`.
+   */
+  nextStateId: number | null;
   stepsApplied: number;
 };
 export type BusyResponse = { type: 'busy' };
