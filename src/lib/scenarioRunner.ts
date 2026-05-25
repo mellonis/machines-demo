@@ -22,9 +22,9 @@ import type { Engine, PausedResponse, TuringGraph } from './types.ts';
  * still cover those at the rule level.
  *
  * What the harness reproduces:
- * - Per-iter dispatch order `before → step → after → onIter` (engine v6.4+)
+ * - Per-iter dispatch order `before → step → after → onIter`
  * - Worker's `imminentHalt` computation at the after-side (gated on
- *   `haltState.debug === true` per the fix in this PR)
+ *   `haltState.debug === true`)
  * - Worker's `currentMatchKinds` capture from `m.matchedTransition.matchKinds`
  * - MachineView's `formatPauseLine` for pause entries
  * - MachineView's `commandsEntry` for step entries
@@ -229,7 +229,7 @@ export async function runScenario(input: ScenarioInput): Promise<ScenarioOutput>
     initialState,
     stepsLimit: input.maxSteps ?? 100,
     onStep: (m) => {
-      // Engine v6.4 lifecycle: `before → step → after → onIter`. `onStep`
+      // Per-iter lifecycle: `before → step → after → onIter`. `onStep`
       // fires mid-iter, between before-pause and after-pause. We log the
       // step line at this moment to match MachineView's log ordering.
       emitStepLine(m);

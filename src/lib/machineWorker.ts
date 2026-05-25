@@ -177,25 +177,6 @@ function resolveDisplayName(stateId: number, fallback: string): string {
   return fallback;
 }
 
-// Lazy-allocated PostMachine instance used only to escape the
-// `haltState.debug = X` lockdown that `@post-machine-js/machine`
-// installs at module load. The lockdown throws on direct writes; the
-// only sanctioned path is `pm.setBreakpoint(haltState, …)`, which
-// internally wraps the write in `withLockdownEscape`. We prefer the
-// active user `machine` when it's a PostMachine (so its breakpoint
-// registry stays consistent with the demo's state), and fall back to
-// this dummy when running Turing code. The dummy's body is the
-// minimum-valid program — we never execute it, only call its
-// setBreakpoint / clearBreakpoint helpers.
-let haltLockdownPm: post.PostMachine | null = null;
-function pmForHaltBreakpoint(): post.PostMachine {
-  if (machine instanceof post.PostMachine) return machine;
-  // PostMachine's first arg is the instructions object directly (not `{ body }`).
-  // `{ 1: noop }` is the minimum viable body — we never execute it.
-  if (!haltLockdownPm) haltLockdownPm = new post.PostMachine({ 1: post.noop });
-  return haltLockdownPm;
-}
-
 // Holds the resolver of the Promise awaited inside dispatchPause. Set when
 // the worker is paused at a break; cleared on `resume`. Concurrent `run`
 // requests are rejected by the phase machine before they reach this slot.
@@ -230,11 +211,9 @@ let prevYieldedStateId: number | null = null;
 let debugEnabled = false;
 
 // "Pause at end of next iter." Set by the `run`/`resume` request handler
-// from the `step` field, consumed in onIter. Replaces the v6.0–v6.3
-// `armStepAfter` + `stepPending` mechanism: we no longer mutate
-// `state.debug` on the engine's graph for our own coordination — onIter
-// fires unconditionally per iter (engine v6.4+), so a flag check is
-// enough.
+// from the `step` field, consumed in onIter. onIter fires unconditionally
+// per iter, so a flag check is sufficient — no need to mutate `state.debug`
+// on the engine's graph for our own coordination.
 let stepRequested = false;
 
 // RUNNING_AUTO throttle: when `runIntervalMs !== null` the worker awaits a
@@ -252,9 +231,9 @@ let pendingTimeoutResolve: (() => void) | null = null;
 let pauseRequested = false;
 
 // Tracks whether `onPauseFn` dispatched an AFTER-fire BP this iter. The
-// engine's onIter (end-of-iter, v6.4+) is functionally the same execution
-// point as an after-fire pause: both happen after the iter's transition
-// has fired and onStep has run. When Step is requested from inside an
+// engine's onIter (end-of-iter) is functionally the same execution point
+// as an after-fire pause: both happen after the iter's transition has
+// fired and onStep has run. When Step is requested from inside an
 // after-fire pause, the synthetic onIter dispatch would duplicate the
 // pause message at the same point. We skip the synthetic and keep
 // `stepRequested` for the next iter's onIter, which IS a different point.
@@ -541,8 +520,8 @@ async function run(
     });
   };
 
-  // onIter: engine v6.4.0+ fires this awaited callback at end of every
-  // iter, AFTER both onPause dispatches on the same yield. Our per-iter
+  // onIter: engine fires this awaited callback at end of every iter,
+  // AFTER both onPause dispatches on the same yield. Our per-iter
   // coordination lives here, checked in priority order:
   //
   // 1. Step boundary FIRST. Step is a manual user action; the iter
@@ -852,20 +831,9 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
       };
       const { next, debugValue } = mergeDebugKinds(current, req.kind);
       if (entry.state === turing.haltState) {
-        // @post-machine-js installs a process-wide lockdown on
-        // `haltState.debug = X` at module load (the singleton is
-        // shared across PostMachine instances, so direct writes are
-        // ambiguous). Route through a PostMachine's setBreakpoint /
-        // clearBreakpoint, which internally bypasses the lockdown via
-        // `withLockdownEscape`. clear-then-set keeps the pm's
-        // breakpoint registry to a single halt entry — without the
-        // clear, repeated toggles accumulate stale entries and the
-        // merged filter goes out of sync with the UI.
-        const bpPm = pmForHaltBreakpoint();
-        bpPm.clearBreakpoint(turing.haltState);
-        if (debugValue !== null) {
-          bpPm.setBreakpoint(turing.haltState, debugValue);
-        }
+        // turing-machine-js#207: haltState.debug is a boolean — any kind
+        // (before/after) collapses to one switch. Write directly.
+        turing.haltState.debug = next.before || next.after;
       } else {
         entry.state.debug = null;
         if (debugValue !== null) {

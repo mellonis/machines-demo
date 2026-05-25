@@ -192,7 +192,7 @@ The runner's echo `onBreakpointToggled` normalizes the echoed `stateId` via `bar
 
 ## 13a. After-fire + Step: synthetic-pause suppression
 
-The engine's `onIter` (v6.4+) fires at end-of-iter — functionally the same execution point as an `onPause(after, K)` fire (both happen after the iter's transition has executed and `onStep` has run). When a user clicks Step from inside an after-fire BP pause, the worker's `onIterFn` would otherwise dispatch a SECOND synthetic pause at the same effective point, producing a duplicate log entry.
+The engine's `onIter` fires at end-of-iter — functionally the same execution point as an `onPause(after, K)` fire (both happen after the iter's transition has executed and `onStep` has run). When a user clicks Step from inside an after-fire BP pause, the worker's `onIterFn` would otherwise dispatch a SECOND synthetic pause at the same effective point, producing a duplicate log entry.
 
 Suppression: `onPauseFn` sets `dispatchedAfterThisIter = true` whenever it dispatches with `m.debugBreak.after === true`. `onIterFn` reads the flag (and resets it) at iter boundary; when set AND `stepRequested` is true, it skips the synthetic dispatch **but keeps `stepRequested`** so the NEXT iter's `onIter` pauses naturally. Net effect: Step from an after-fire BP advances one iter (the right semantic for "next pause point"), instead of bouncing twice at the same point.
 
@@ -218,7 +218,7 @@ Also: when pausing at a wrapper, the worker swaps the dispatched `state` field t
 
 ## 15. Post-machine differences
 
-`@post-machine-js/machine` installs an `Object.defineProperty` lockdown on every State's `debug` property that funnels DIRECT writes through Post's registry (`pm.setBreakpoint` for un-shared, throw for shared). Post wraps `run`'s `onPause` to filter via that registry — pauses fire only when the registered breakpoint matches.
+`@post-machine-js/machine` installs an `Object.defineProperty` lockdown on every non-halt PostMachine-constructed State's `debug` property that funnels DIRECT writes through Post's registry (`pm.setBreakpoint` for un-shared, throw for shared). `haltState` is NOT locked — direct `turing.haltState.debug = boolean` writes go straight to the engine setter (post dropped the module-load halt lockdown alongside engine #207). Post wraps `run`'s `onPause` to filter via that registry — pauses fire only when the registered breakpoint matches.
 
 **Direct mutation of the engine's `DebugConfig` (e.g. `state.debug.before = true`) bypasses Post's lockdown** because the getter passes through; Post's wrapper then filters the engine's onPause out entirely. The worker's `toggleBreakpoint` therefore uses the SETTER form, reading both kinds and writing the merged shape so toggling one doesn't lose the other:
 
