@@ -225,20 +225,22 @@ export async function runScenario(input: ScenarioInput): Promise<ScenarioOutput>
     logs.push({ kind: 'step', text: entry.text });
   }
 
-  await machine.run({
+  const session = new turing.DebugSession(machine, {
     initialState,
     stepsLimit: input.maxSteps ?? 100,
-    onStep: (m) => {
-      // Per-iter lifecycle: `before → step → after → onIter`. `onStep`
-      // fires mid-iter, between before-pause and after-pause. We log the
-      // step line at this moment to match MachineView's log ordering.
-      emitStepLine(m);
-      stepsApplied += 1;
-    },
-    onPause: (m) => {
-      emitPauseLine(m);
-    },
   });
+  session.on('step', (m) => {
+    // Per-iter lifecycle: `pause(before) → step → pause(after) → iter`.
+    // step fires mid-iter, between any before-pause and after-pause. We log
+    // the step line at this moment to match MachineView's log ordering.
+    emitStepLine(m);
+    stepsApplied += 1;
+  });
+  session.on('pause', (m) => {
+    emitPauseLine(m);
+    session.continue();
+  });
+  await session.start();
 
   return {
     logs,

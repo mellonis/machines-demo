@@ -617,31 +617,54 @@ async function run(
     }
   };
 
-  const runOpts: Parameters<AnyMachine['run']>[0] = {
-    stepsLimit: maxSteps,
-    onStep: (m: MachineYield) => {
-      runCommandBuffer.push(commandsFromYield(m));
-      runReadsBuffer.push(readsFromYield(m));
-      runMatchKindsBuffer.push(matchKindsFromYield(m));
-      // After this onStep, iter K's transition has effectively "fired"
-      // (the runner advances state after onStep returns). Stash this
-      // state.id so iter K+1's before-pause has the prior state available
-      // as the FROM of the just-fired triple.
-      prevYieldedStateId = m.state.id;
-      stepsApplied += 1;
-    },
-    onPause: onPauseFn,
-    onIter: onIterFn,
-  };
+  // v7 adoption: drive the run through DebugSession (engine #102) instead
+  // of `machine.run({onPause, onStep, onIter})`. The engine's v7 run() is
+  // sync + callback-free; all observation moved into the session.
+  //
+  // PostMachine has its own debugRun() returning a PostDebugSession that
+  // wraps the engine session with post-specific MachineState wrapping
+  // (arrivalPath / candidatePaths) plus breakpoint-registry filtering.
+  // TuringMachine consumes the engine session directly.
+  const session = machine instanceof post.PostMachine
+    ? (machine as unknown as { debugRun: (o: { stepsLimit?: number }) => unknown })
+        .debugRun({ stepsLimit: maxSteps })
+    : new (turing as unknown as { DebugSession: new (m: unknown, o: unknown) => unknown })
+        .DebugSession(machine, { initialState, stepsLimit: maxSteps });
 
-  // TuringMachine.run() requires initialState; PostMachine.run() ignores
-  // it (carries its own #initialState internally). Branch only here.
-  if (!(machine instanceof post.PostMachine)) {
-    runOpts.initialState = initialState;
-  }
+  // Generic shape of both sessions. Local cast to a structural type so we
+  // don't pull DebugSession + PostDebugSession concretely into the worker
+  // boundary types.
+  type SessionLike = {
+    on: (event: 'step' | 'pause' | 'iter' | 'halt',
+         listener: (m: MachineYield) => void | Promise<void>) => SessionLike;
+    start: () => Promise<void>;
+    continue: () => void;
+    stop: () => void;
+    pause: () => void;
+  };
+  const ses = session as SessionLike;
+
+  ses.on('step', (m: MachineYield) => {
+    runCommandBuffer.push(commandsFromYield(m));
+    runReadsBuffer.push(readsFromYield(m));
+    runMatchKindsBuffer.push(matchKindsFromYield(m));
+    // After this step, iter K's transition has effectively "fired"
+    // (the runner advances state after step returns). Stash this state.id
+    // so iter K+1's before-pause has the prior state available as the
+    // FROM of the just-fired triple.
+    prevYieldedStateId = m.state.id;
+    stepsApplied += 1;
+  });
+  ses.on('pause', async (m) => {
+    await onPauseFn(m as unknown as OnPausePayload);
+    ses.continue();
+  });
+  ses.on('iter', (m) => {
+    void onIterFn(m as unknown as OnPausePayload);
+  });
 
   try {
-    await machine.run(runOpts);
+    await ses.start();
   } catch (err) {
     // The engine throws 'Long execution' when stepsLimit is reached. Check the
     // step counter at catch time — more reliable than a flag set in onStep
