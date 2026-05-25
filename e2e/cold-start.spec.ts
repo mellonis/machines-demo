@@ -28,7 +28,7 @@ test.describe('cold-start', () => {
     // after-trick pause is what surfaces.
     await expect(
       page.getByTestId('log-line').filter({
-        hasText: /paused at .*state .* after applying command for symbols:/,
+        hasText: /paused at .*state .* after applying command/,
       }),
     ).toBeVisible({ timeout: 5_000 });
     // Run button relabels to "Continue" while paused.
@@ -171,7 +171,7 @@ test.describe('cold-start', () => {
     // are engine-assigned (e.g. "id:N") so accept any non-whitespace run.
     await expect(
       page.getByTestId('log-line').filter({
-        hasText: /^paused at state \S+ after applying command for symbols:/,
+        hasText: /^paused at state \S+ after applying command/,
       }),
     ).toBeVisible({ timeout: 3_000 });
 

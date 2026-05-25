@@ -1,5 +1,6 @@
 import { MAX_STEPS, WORKER_TIMEOUT_MS } from './caps.ts';
 import {
+  type BreakpointKind,
   type BreakpointToggledResponse,
   type BuiltResponse,
   type Engine,
@@ -66,6 +67,17 @@ export class MachineRunner {
    * and shouldn't share the simple-pending or run-pending tracking lanes.
    */
   onBreakpointToggled: ((data: BreakpointToggledResponse) => void) | null = null;
+
+  /**
+   * Caller-set callback fired when the worker emits an `error` with no
+   * pending operation to reject (fire-and-forget paths like
+   * `toggleBreakpoint`, `setDebug`, `pause`). Without this, those
+   * errors silently disappear at the runner — exactly what happened
+   * with the haltState lockdown throw, which made the BP toggle look
+   * dead from the UI's perspective. Set by MachineView to surface
+   * them in the log panel.
+   */
+  onUncorrelatedError: ((message: string) => void) | null = null;
 
   constructor(engine: Engine, workerFactory: WorkerFactory) {
     this.engine = engine;
@@ -173,6 +185,10 @@ export class MachineRunner {
         p.reject(err);
         return;
       }
+      // No pending op to reject — fire-and-forget requests
+      // (toggleBreakpoint, setDebug, pause) land here when they throw
+      // worker-side. Surface to the consumer so they aren't silent.
+      this.onUncorrelatedError?.(data.message);
       return;
     }
     // built / stepped
@@ -299,15 +315,17 @@ export class MachineRunner {
   }
 
   /**
-   * Toggle the `state.debug.before` breakpoint on the State whose engine
-   * `GraphNode.id` matches `stateId` (machines-demo#37 layer 1). Fire-and-
-   * forget; the worker echoes a `breakpointToggled` response which routes
-   * to `onBreakpointToggled`. No-op if the worker hasn't been built — the
-   * UI's click handlers gate this anyway via the `graph != null` check.
+   * Toggle a `before` or `after` breakpoint on the State whose engine
+   * `GraphNode.id` matches `stateId` (machines-demo#37). The OTHER kind's
+   * current bit is preserved worker-side. Fire-and-forget; the worker
+   * echoes a `breakpointToggled` response (with the same `kind`) which
+   * routes to `onBreakpointToggled`. No-op if the worker hasn't been
+   * built — the UI's context-menu handlers gate this anyway via the
+   * `graph != null` check.
    */
-  toggleBreakpoint(stateId: number): void {
+  toggleBreakpoint(stateId: number, kind: BreakpointKind): void {
     if (!this.worker) return;
-    this.worker.postMessage({ type: 'toggleBreakpoint', stateId, kind: 'before' });
+    this.worker.postMessage({ type: 'toggleBreakpoint', stateId, kind });
   }
 
   terminate(): void {

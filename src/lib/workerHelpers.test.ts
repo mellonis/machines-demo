@@ -4,6 +4,7 @@ import {
   movementCode,
   commandsFromYield,
   readsFromYield,
+  matchKindsFromYield,
   snapshotTapes,
   snapshotAlphabets,
   expectPhase,
@@ -23,6 +24,16 @@ function stubState(id: number = 0): MachineYield['state'] {
   };
 }
 
+// Default per-tape `matchedTransition` for tests that don't exercise the
+// wildcard read marker — every position renders as `'literal'`, matching
+// the engine's behavior for a specific-symbol transition.
+function stubMatched(tapeCount: number, id: string = '0.0'): MachineYield['matchedTransition'] {
+  return {
+    id,
+    matchKinds: Array.from({ length: tapeCount }, () => 'literal' as const),
+  };
+}
+
 describe('workerHelpers', () => {
   describe('movement-code', () => {
     it('R-movement-code-mappings: maps left/right/stay symbols to L/R/S', () => {
@@ -39,6 +50,7 @@ describe('workerHelpers', () => {
         currentSymbols: ['a'],
         nextSymbols: ['a'],
         state: stubState(),
+        matchedTransition: { id: '0.0', matchKinds: [] },
       };
       expect(commandsFromYield(yieldVal)).toEqual([{ movement: 'R', symbol: null }]);
     });
@@ -49,6 +61,7 @@ describe('workerHelpers', () => {
         currentSymbols: ['a'],
         nextSymbols: ['b'],
         state: stubState(),
+        matchedTransition: { id: '0.0', matchKinds: [] },
       };
       expect(commandsFromYield(yieldVal)).toEqual([{ movement: 'L', symbol: 'b' }]);
     });
@@ -59,6 +72,7 @@ describe('workerHelpers', () => {
         currentSymbols: ['a', 'b', 'c'],
         nextSymbols: ['x', 'y', 'z'],
         state: stubState(),
+        matchedTransition: { id: '0.0', matchKinds: [] },
       };
       expect(commandsFromYield(yieldVal)).toEqual([
         { movement: 'L', symbol: 'x' },
@@ -73,6 +87,7 @@ describe('workerHelpers', () => {
         currentSymbols: ['a', 'b', 'c'],
         nextSymbols: ['a', 'B', 'c'], // tape 0 keeps, tape 1 writes 'B', tape 2 keeps
         state: stubState(),
+        matchedTransition: { id: '0.0', matchKinds: [] },
       };
       expect(commandsFromYield(yieldVal)).toEqual([
         { movement: 'R', symbol: null },
@@ -89,6 +104,7 @@ describe('workerHelpers', () => {
         currentSymbols: ['a'],
         nextSymbols: ['b'],
         state: stubState(),
+        matchedTransition: { id: '0.0', matchKinds: [] },
       };
       expect(readsFromYield(yieldVal)).toEqual(['a']);
     });
@@ -99,10 +115,40 @@ describe('workerHelpers', () => {
         currentSymbols: ['a', 'b'],
         nextSymbols: ['a', 'b'],
         state: stubState(),
+        matchedTransition: { id: '0.0', matchKinds: [] },
       };
       const reads = readsFromYield(yieldVal);
       reads.push('z');
       expect(yieldVal.currentSymbols).toEqual(['a', 'b']);
+    });
+  });
+
+  describe('matchKinds', () => {
+    it('R-matchKinds-passthrough: copies matchKinds from matchedTransition (per-tape parallel)', () => {
+      const yieldVal: MachineYield = {
+        movements: [turing.movements.right, turing.movements.stay],
+        currentSymbols: ['a', 'b'],
+        nextSymbols: ['a', 'b'],
+        state: stubState(),
+        matchedTransition: {
+          id: '7.1',
+          matchKinds: ['wildcard', 'literal'],
+        },
+      };
+      expect(matchKindsFromYield(yieldVal)).toEqual(['wildcard', 'literal']);
+    });
+
+    it('R-matchKinds-defensive-copy: mutating returned array does not affect the yield', () => {
+      const yieldVal: MachineYield = {
+        movements: [turing.movements.right],
+        currentSymbols: ['a'],
+        nextSymbols: ['a'],
+        state: stubState(),
+        matchedTransition: stubMatched(1),
+      };
+      const kinds = matchKindsFromYield(yieldVal);
+      kinds.push('wildcard');
+      expect(yieldVal.matchedTransition.matchKinds).toEqual(['literal']);
     });
   });
 

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount, tick, untrack } from 'svelte';
-  import { SvelteSet } from 'svelte/reactivity';
+  import { SvelteMap, SvelteSet } from 'svelte/reactivity';
   import TapesStack from './TapesStack.svelte';
   import Toolbar from './Toolbar.svelte';
   import ControlPanel from './ControlPanel.svelte';
@@ -11,11 +11,14 @@
   import { MachineRunner, WorkerError } from '../lib/machineRunner.ts';
   import * as turing from '@turing-machine-js/machine';
   import { BELT_ANIMATION_MIN_INTERVAL_MS, MAX_TAPES, VIEWPORT_WIDTH } from '../lib/caps.ts';
-  import { type Alphabets, type Command, type Engine, type GraphHighlight, type IdleResponse, type PausedResponse, type TapeSnapshot, type TuringGraph } from '../lib/types.ts';
+  import { type Alphabets, type BreakpointKind, type Command, type Engine, type GraphHighlight, type IdleResponse, type PausedResponse, type TapeSnapshot, type TuringGraph } from '../lib/types.ts';
   import { startDemoLoop } from '../lib/demoLoop.ts';
   import { parseInterval } from '../lib/interval.ts';
+  import { bareIdOf } from '../lib/graphUtils.ts';
+  import { deriveGraphHighlight } from '../lib/graphHighlightDerivation.ts';
   import { parse as parseSnapshot, serialize as serializeSnapshot } from '../lib/tapeSnapshot.ts';
   import { commandsEntry, tapesEntry } from '../lib/format.ts';
+  import { formatPauseLine } from '../lib/pauseLineFormat.ts';
   import {
     defaultExample,
     examples,
@@ -87,13 +90,27 @@
   // forces the effect to re-fire per event.
   let stepsApplied = $state(0);
 
-  // machines-demo#37 layer 1 — set of engine `GraphNode.id`s with an active
-  // `state.debug.before = true` breakpoint. Populated reactively by the
-  // worker's `breakpointToggled` echo (installed via runner.onBreakpointToggled
-  // below). Cleared on Build (a fresh worker means fresh State instances).
-  // SvelteSet so the equality the indicator effect reads off updates the
-  // rendered SVG without a manual reactivity tick.
-  const breakpoints = new SvelteSet<number>();
+  // machines-demo#37 — per-state breakpoint kinds, keyed by canonical
+  // bare id (wrapper and bare share `#debugRef` engine-side; they're one
+  // breakpoint from the user's POV — see `bareIdOf`). Each entry is the
+  // current `{ before, after }` state for that equivalence class.
+  // Populated reactively by the worker's `breakpointToggled` echo
+  // (installed via runner.onBreakpointToggled below). Entries with both
+  // kinds off are pruned. Cleared on Build (a fresh worker means fresh
+  // State instances). SvelteMap so reads in MachineGraph's indicator and
+  // context-menu effects update the rendered SVG without a manual
+  // reactivity tick.
+  const breakpoints = new SvelteMap<number, { before: boolean; after: boolean }>();
+  // Derived: the set of bare ids that have ANY kind set. Consumed by the
+  // indicator pass (which doesn't care about kinds — just "is BP active").
+  // The per-kind Map drives the context menu's checkmarks.
+  const breakpointIndicatorSet = $derived.by(() => {
+    const s = new SvelteSet<number>();
+    for (const [id, kinds] of breakpoints) {
+      if (kinds.before || kinds.after) s.add(id);
+    }
+    return s;
+  });
 
   // Persist the user's expand/collapse choice per engine. Skip the initial
   // value (it already came from localStorage or the viewport default) so we
@@ -185,13 +202,30 @@
 
   // machines-demo#37 — install the breakpoint-echo callback once at runner
   // construction. The worker emits `breakpointToggled` after each
-  // toggleBreakpoint mutation; the UI updates its indicator set in lockstep
-  // so click-to-toggle feels synchronous despite the worker round-trip.
+  // toggleBreakpoint mutation (with the same `kind`); the UI updates its
+  // per-state Map in lockstep so context-menu checkmarks feel synchronous
+  // despite the worker round-trip.
+  //
+  // Canonicalize the echoed `stateId` to the bare's id — wrappers and
+  // bares share `#debugRef` engine-side, so they're a single breakpoint
+  // class. The Map stores one entry per class; the indicator expands to
+  // all members at render time. Without canonicalization, replay-after-
+  // build would double-toggle the shared ref. Entries with both kinds
+  // off are pruned so `breakpointIndicatorSet` stays minimal.
+  // Surface worker-side errors that have no pending request to reject —
+  // toggleBreakpoint / setDebug / pause throw silently otherwise. Same
+  // formatting as the regular `failHalted` error path so users see one
+  // consistent style in the log.
+  runner.onUncorrelatedError = (msg) => log.report(`error: ${msg}`, 'error');
+
   runner.onBreakpointToggled = (data) => {
-    if (data.value === 'on') {
-      breakpoints.add(data.stateId);
+    const id = bareIdOf(data.stateId, graph);
+    const current = breakpoints.get(id) ?? { before: false, after: false };
+    const next = { ...current, [data.kind]: data.value === 'on' };
+    if (!next.before && !next.after) {
+      breakpoints.delete(id);
     } else {
-      breakpoints.delete(data.stateId);
+      breakpoints.set(id, next);
     }
   };
 
@@ -253,33 +287,9 @@
   //  - DEMO/MANUAL: no truth value (random / user-chosen commands).
   //  - RUNNING_CONTINUOUS: no per-iter signal (worker doesn't send `idle`).
   //  - HALTED: follow-up sub-branch (highlight last edge + halt node).
-  const graphHighlight = $derived.by<GraphHighlight | null>(() => {
-    if (!graph) return null;
-    if (executionMode === 'RUNNING_AUTO') {
-      if (currentStateId === null) return null;
-      return {
-        fromId: currentStateId,
-        toId: nextStateId,
-        strong: 'from',
-        paused: false,
-      };
-    }
-    if (executionMode !== 'RUNNING_PAUSED' || currentStateId === null) return null;
-    if (pauseBefore) {
-      return {
-        fromId: prevStateId ?? 'idle',
-        toId: currentStateId,
-        strong: 'to',
-        paused: true,
-      };
-    }
-    return {
-      fromId: currentStateId,
-      toId: nextStateId,
-      strong: 'from',
-      paused: true,
-    };
-  });
+  const graphHighlight = $derived<GraphHighlight | null>(deriveGraphHighlight({
+    graph, executionMode, currentStateId, nextStateId, prevStateId, pauseBefore,
+  }));
 
   // The code Reset would restore to: the loaded snippet's saved code, or the
   // selected bundled example's code, or null when the loaded snippet was
@@ -439,10 +449,6 @@
   // own that.
   async function reloadWorker(source: string = code): Promise<boolean> {
     pendingOp = 'load';
-    // A fresh worker means fresh State instances — any breakpoints toggled
-    // on the previous graph are stale and don't carry over. Clear here so
-    // the indicator set matches what the worker actually knows about.
-    breakpoints.clear();
     try {
       const res = await runner.build(source);
       workerLive = true;
@@ -454,6 +460,18 @@
       _buildMirrorMachine(res.tapes, res.alphabets);
       await tick();
       setAllFromMirror();
+      // Breakpoints are user intent (instrumentation), not run state — survive
+      // worker rebuilds. Prune ids that don't exist in the new graph (user
+      // edited code; some states gone), then replay surviving kinds onto the
+      // fresh worker. Each toggle flips off→on (fresh States have no debug
+      // set), so we issue one `toggleBreakpoint` per stored kind per class.
+      for (const id of [...breakpoints.keys()]) {
+        if (!res.graph.nodes[id]) breakpoints.delete(id);
+      }
+      for (const [id, kinds] of breakpoints) {
+        if (kinds.before) runner.toggleBreakpoint(id, 'before');
+        if (kinds.after) runner.toggleBreakpoint(id, 'after');
+      }
       return true;
     } catch (err) {
       workerLive = false;
@@ -462,6 +480,9 @@
       lastSnapshots = null;
       halted = true;
       graph = null;
+      // Build failed → no graph to replay against. Drop the set so the next
+      // successful build starts clean (user can re-set after fixing code).
+      breakpoints.clear();
       const msg = err instanceof Error ? err.message : String(err);
       log.report(`error: ${msg}`, 'error');
       return false;
@@ -470,13 +491,22 @@
     }
   }
 
-  // machines-demo#37 layer 1 — toggle a state-level `before` breakpoint by
-  // clicked engine `GraphNode.id`. Fire-and-forget; the worker echoes a
-  // `breakpointToggled` response which updates the `breakpoints` set via
-  // the runner.onBreakpointToggled hook above.
-  function onToggleBreakpoint(stateId: number): void {
+  // machines-demo#37 — toggle a state-level breakpoint (kind: 'before' or
+  // 'after') by engine `GraphNode.id`. Fire-and-forget; the worker echoes
+  // a `breakpointToggled` response which updates the `breakpoints` Map via
+  // the runner.onBreakpointToggled hook above. Invoked from MachineGraph's
+  // right-click context menu (per-kind menu items).
+  //
+  // Halt-marker normalization: halt markers (negative ids) are
+  // per-frame visualization sentinels that all collapse to the haltState
+  // singleton (id 0) at runtime. The worker's `collectStates` doesn't
+  // include negative ids — it only has the singleton at 0. So we
+  // normalize before sending; the echo comes back keyed at 0, and
+  // `bareIdOf` (also maps negative → 0) keeps the indicator consistent.
+  function onToggleBreakpoint(stateId: number, kind: BreakpointKind): void {
     if (!workerLive) return;
-    runner.toggleBreakpoint(stateId);
+    const targetId = stateId < 0 ? 0 : stateId;
+    runner.toggleBreakpoint(targetId, kind);
   }
 
   function stopMachine(): void {
@@ -601,6 +631,7 @@
               alphabets,
               { stepNumber: res.startStep + i + 1 },
               CARET_COLORS,
+              res.matchKinds[i] ?? null,
             ),
           ),
         );
@@ -630,9 +661,10 @@
     for (let i = 0; i < data.commands.length; i++) {
       const commands = data.commands[i];
       const reads = data.reads[i] ?? null;
+      const matchKinds = data.matchKinds[i] ?? null;
       reflectToActivePanel(commands);
       log.report(
-        commandsEntry(reads, commands, alphabets, { stepNumber: startStep + i + 1 }, CARET_COLORS),
+        commandsEntry(reads, commands, alphabets, { stepNumber: startStep + i + 1 }, CARET_COLORS, matchKinds),
       );
       renderChain = renderChain.then(() => renderFromMirror(commands, animate));
     }
@@ -669,6 +701,7 @@
             alphabets,
             { stepNumber: startStep + i + 1 },
             CARET_COLORS,
+            paused.matchKinds[i] ?? null,
           ),
         ),
       );
@@ -687,10 +720,23 @@
     // here's the result": after-arming means iter K just ran, and the pause
     // surfaces iter K's state and just-executed symbols. (debug toggle gates
     // whether user-authored breaks fire, not how pauses are logged.)
-    const when = paused.debugBreak.before ? 'before' : 'after';
-    const symbols = paused.currentSymbols.map((s) => `'${s}'`).join(', ');
-    const stateRef = paused.state ? `state ${paused.state}` : 'unnamed state';
-    log.report(`paused at ${stateRef} ${when} applying command for symbols: [${symbols}]`, 'ok');
+    //
+    // Halt-bound "before" pauses get a different wording because the BP that
+    // armed them was almost certainly on haltState, and "paused at writeMarker
+    // before applying command" disconnects from the user's mental model
+    // ("I clicked BP on halt — why writeMarker?"). The yielded `nextStateId`
+    // for a before-pause whose source's transition resolves to the real halt
+    // singleton is 0; for in-frame halts the engine pre-pops to the wrapper's
+    // continuation, so nextStateId points there instead — i.e., this check
+    // only triggers on the *terminal* halt-bound iter.
+    // Pure formatter extracted to lib/pauseLineFormat — see that module for
+    // the three branching cases (halt-imminent / before / after). Keeping
+    // the wording logic out of MachineView lets the scenario test harness
+    // assert log lines without standing up the Svelte component. Pass
+    // per-tape blank symbols so the before-pause read rendering uses the
+    // same `B`/`'X'` convention as the step-log line above it.
+    const blanks = alphabets.map((a) => a[0] ?? '');
+    log.report(formatPauseLine(paused, blanks), 'pause');
     executionMode = 'RUNNING_PAUSED';
   }
 
@@ -758,6 +804,7 @@
               alphabets,
               { stepNumber: res.startStep + i + 1 },
               CARET_COLORS,
+              res.matchKinds[i] ?? null,
             ),
           ),
         );
@@ -993,46 +1040,18 @@
     <TapesStack bind:this={tapesStackRef} {tapeCount} caretColors={CARET_COLORS} />
 
     {#if graphModalOpen}
-      <!-- Modal expansion of the same state graph (#9). Backdrop click +
-           Esc both dismiss; the inner card stops propagation so clicks on
-           the SVG host stay scoped. The modal's MachineGraph instance is
-           rendered with collapsed={false} unconditionally — the modal IS
-           the expanded view, no further toggle. The expand button on the
-           inner header is hidden via a never-fires onExpand prop. -->
+      <!-- Single-instance expanded mode (machines-demo#9 + post-#37
+           follow-up): the same inline `<MachineGraph>` below detaches
+           via `expanded` prop into a fixed-positioned panel. This div
+           is just the dimmed backdrop + click-out / Esc close affordance.
+           The graph itself sits at z-index 50 above this backdrop. -->
       <div
         class="graph-modal-backdrop"
         role="presentation"
         onclick={() => { graphModalOpen = false; }}
         onkeydown={(e) => { if (e.key === 'Escape') graphModalOpen = false; }}
-      >
-        <div
-          class="graph-modal-card"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Machine graph (expanded)"
-          onclick={(e) => e.stopPropagation()}
-          onkeydown={(e) => e.stopPropagation()}
-          tabindex="-1"
-        >
-          <button
-            type="button"
-            class="graph-modal-close"
-            onclick={() => { graphModalOpen = false; }}
-            aria-label="Close machine graph"
-            title="Close (Esc)"
-          >{@html icons.xSmall}</button>
-          <MachineGraph
-            {graph}
-            highlight={graphHighlight}
-            {stepsApplied}
-            {breakpoints}
-            {onToggleBreakpoint}
-            collapsed={false}
-            onToggleCollapsed={() => { graphModalOpen = false; }}
-            onRenderError={(msg: string) => log.report(msg, 'error')}
-          />
-        </div>
-      </div>
+        tabindex="-1"
+      ></div>
     {/if}
 
     <div class="panel-enter-clip">
@@ -1080,11 +1099,13 @@
         {graph}
         highlight={graphHighlight}
         {stepsApplied}
-        {breakpoints}
+        breakpoints={breakpointIndicatorSet}
+        breakpointKinds={breakpoints}
         {onToggleBreakpoint}
         collapsed={graphCollapsed}
         onToggleCollapsed={() => { graphCollapsed = !graphCollapsed; }}
-        onExpand={() => { graphModalOpen = true; }}
+        expanded={graphModalOpen}
+        onExpand={() => { graphModalOpen = !graphModalOpen; }}
         onRenderError={(msg: string) => log.report(msg, 'error')}
       />
     </div>
@@ -1176,59 +1197,16 @@
     margin-top: 12px;
   }
 
-  /* Expand-to-modal view of the state graph (#9). Fixed-position overlay,
-     dimmed backdrop, centered card with most of the viewport available. */
+  /* Backdrop for the expanded MachineGraph panel (#9 — single-instance
+     redesign). The graph itself is rendered by MachineGraph at z-index
+     50; this sits just below at 49 so clicks outside the graph land
+     here and trigger close. No flex / no padding — the backdrop just
+     dims the viewport. */
   .graph-modal-backdrop {
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 50;
-    padding: 24px;
-  }
-
-  .graph-modal-card {
-    position: relative;
-    background: var(--bg);
-    border-radius: 8px;
-    width: min(1200px, 95vw);
-    max-height: 90vh;
-    overflow: auto;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-  }
-
-  .graph-modal-close {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    background: var(--editor-bg);
-    border: 1px solid var(--cell-border);
-    border-radius: 4px;
-    color: var(--muted);
-    cursor: pointer;
-    width: 32px;
-    height: 32px;
-    padding: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1;
-    transition:
-      background var(--anim-button-hover-ms),
-      color var(--anim-button-hover-ms);
-
-    &:hover {
-      background: var(--hover-bg);
-      color: var(--fg);
-    }
-
-    :global(svg) {
-      width: 16px;
-      height: 16px;
-      display: block;
-    }
+    z-index: 49;
   }
 
   /* Clips the control-panel's enter animation so translateY(20px) can't
