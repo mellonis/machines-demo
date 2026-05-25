@@ -15,7 +15,8 @@ Files:
 - **`variant-b.html`** — older single-pane variant from the initial design pass (kept for reference)
 - **`index.html`** — original template, baseline tokens (kept for reference)
 - **`sample.svg`** — the machine graph being styled
-- **`env-light.png` / `env-dark.png`** — screenshots of the app shell for visual context
+
+For surrounding-UI visual context, open [demo.machines.mellonis.ru](https://demo.machines.mellonis.ru) (or `http://localhost:5173/turing` against a local dev server) in a sibling tab.
 
 ## Workflow
 
