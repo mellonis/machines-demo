@@ -1,6 +1,6 @@
 /* Log entry shape shared by the Log component and the formatters. */
 
-export type LogKind = 'error' | 'warn' | 'ok';
+export type LogKind = 'error' | 'warn' | 'ok' | 'pause';
 
 export type LogRow = {
   text: string;
@@ -11,7 +11,7 @@ export type LogRow = {
 export type LogEntry = {
   /** Header line — also the source for the mobile-status mirror. */
   text: string;
-  /** Tints the header. Ignored when `kind` is set so error/warn/ok keep
+  /** Tints the header. Ignored when `kind` is set so error/warn/ok/pause keep
    * their semantic color regardless of the per-tape palette. */
   color?: string;
   /** Optional structured per-tape rows, rendered below the header. */

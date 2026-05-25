@@ -48,6 +48,7 @@ describe('MachineRunner', () => {
         halted: false,
         commands: null,
         reads: null,
+        matchKinds: null,
         nextCommands: null,
         currentStateId: null,
         nextStateId: null,
@@ -85,6 +86,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        matchKinds: [],
         currentStateId: null,
         startStep: 0,
         stepsApplied: 5,
@@ -118,6 +120,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        matchKinds: [],
         currentStateId: null,
         startStep: 0,
         stepsApplied: 0,
@@ -148,9 +151,11 @@ describe('MachineRunner', () => {
         tapes: [],
         commands: [],
         reads: [],
+        matchKinds: [],
         stepsApplied: 1,
         state: 'q1',
         currentSymbols: ['a'],
+        currentMatchKinds: ['literal' as const],
         debugBreak: { before: true as const },
         currentStateId: null,
         nextStateId: null,
@@ -183,6 +188,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        matchKinds: [],
         currentStateId: null,
         startStep: 0,
         stepsApplied: 1,
@@ -214,6 +220,51 @@ describe('MachineRunner', () => {
       expect(() => runner.setDebug(true)).not.toThrow();
     });
 
+    it('R-protocol-toggle-breakpoint: posts {type:"toggleBreakpoint",stateId,kind:"before"}', async () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      // Build first — toggleBreakpoint is a no-op without a worker.
+      const buildPromise = runner.build('// user code');
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
+      await buildPromise;
+
+      runner.toggleBreakpoint(7, 'before');
+      expect(current().last).toEqual({ type: 'toggleBreakpoint', stateId: 7, kind: 'before' });
+    });
+
+    it('R-protocol-toggle-breakpoint-no-worker: toggleBreakpoint before build is a silent no-op', () => {
+      const { factory } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      expect(() => runner.toggleBreakpoint(7, 'before')).not.toThrow();
+    });
+
+    it('R-protocol-breakpoint-toggled-echo: routes BreakpointToggledResponse to onBreakpointToggled', async () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const received: { stateId: number; value: 'on' | 'off' }[] = [];
+      runner.onBreakpointToggled = (data) => {
+        received.push({ stateId: data.stateId, value: data.value });
+      };
+
+      // Build first so the worker exists.
+      const buildPromise = runner.build('// user code');
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
+      await buildPromise;
+
+      // Echo arriving out-of-band (no pending request on the runner side —
+      // toggleBreakpoint is fire-and-forget; the echo is independent).
+      current().respond({ type: 'breakpointToggled', stateId: 7, kind: 'before', value: 'on' });
+      current().respond({ type: 'breakpointToggled', stateId: 7, kind: 'before', value: 'off' });
+
+      expect(received).toEqual([
+        { stateId: 7, value: 'on' },
+        { stateId: 7, value: 'off' },
+      ]);
+    });
+
     it('R-protocol-paused-then-ran: run() invokes onPaused on paused, resolves on ran', async () => {
       const { factory, current } = makeFakeFactory();
       const runner = new MachineRunner('turing', factory);
@@ -235,9 +286,11 @@ describe('MachineRunner', () => {
         tapes: [],
         commands: [],
         reads: [],
+        matchKinds: [],
         stepsApplied: 1,
         state: 'q1',
         currentSymbols: ['a'],
+        currentMatchKinds: ['literal' as const],
         debugBreak: { before: true as const },
         currentStateId: null,
         nextStateId: null,
@@ -264,6 +317,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        matchKinds: [],
         currentStateId: null,
         startStep: 0,
         stepsApplied: 5,
@@ -291,6 +345,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        matchKinds: [],
         currentStateId: null,
         startStep: 0,
         stepsApplied: 0,
@@ -312,9 +367,11 @@ describe('MachineRunner', () => {
         tapes: [],
         commands: [],
         reads: [],
+        matchKinds: [],
         stepsApplied: 1,
         state: 'q1',
         currentSymbols: ['a'],
+        currentMatchKinds: ['literal' as const],
         debugBreak: { before: true as const },
         currentStateId: null,
         nextStateId: null,
@@ -333,6 +390,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        matchKinds: [],
         currentStateId: null,
         startStep: 0,
         stepsApplied: 1,
@@ -354,9 +412,11 @@ describe('MachineRunner', () => {
         tapes: [],
         commands: [],
         reads: [],
+        matchKinds: [],
         stepsApplied: 1,
         state: 'q1',
         currentSymbols: ['a'],
+        currentMatchKinds: ['literal' as const],
         debugBreak: { before: true as const },
         currentStateId: null,
         nextStateId: null,
@@ -375,6 +435,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        matchKinds: [],
         currentStateId: null,
         startStep: 0,
         stepsApplied: 1,
@@ -401,6 +462,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        matchKinds: [],
         currentStateId: null,
         startStep: 0,
         stepsApplied: 1,
@@ -437,6 +499,7 @@ describe('MachineRunner', () => {
         type: 'idle',
         commands: [[{ movement: 'R', symbol: null }]],
         reads: [['_']],
+        matchKinds: [['literal']],
         currentStateId: null,
         nextStateId: null,
         stepsApplied: 1,
@@ -446,6 +509,7 @@ describe('MachineRunner', () => {
         type: 'idle',
         commands: [[{ movement: 'L', symbol: null }]],
         reads: [['_']],
+        matchKinds: [['literal']],
         currentStateId: null,
         nextStateId: null,
         stepsApplied: 2,
@@ -469,6 +533,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        matchKinds: [],
         currentStateId: null,
         startStep: 2,
         stepsApplied: 2,
@@ -499,6 +564,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        matchKinds: [],
         currentStateId: null,
         startStep: 0,
         stepsApplied: 0,
@@ -577,9 +643,11 @@ describe('MachineRunner', () => {
         tapes: [],
         commands: [],
         reads: [],
+        matchKinds: [],
         stepsApplied: 1,
         state: 'q1',
         currentSymbols: ['a'],
+        currentMatchKinds: ['literal' as const],
         debugBreak: { before: true as const },
         currentStateId: null,
         nextStateId: null,
@@ -605,6 +673,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        matchKinds: [],
         currentStateId: null,
         startStep: 0,
         stepsApplied: 1,
@@ -626,9 +695,11 @@ describe('MachineRunner', () => {
         tapes: [],
         commands: [],
         reads: [],
+        matchKinds: [],
         stepsApplied: 1,
         state: 'q1',
         currentSymbols: ['a'],
+        currentMatchKinds: ['literal' as const],
         debugBreak: { before: true as const },
         currentStateId: null,
         nextStateId: null,
@@ -656,6 +727,7 @@ describe('MachineRunner', () => {
         type: 'idle',
         commands: [[{ movement: 'R', symbol: null }]],
         reads: [['_']],
+        matchKinds: [['literal']],
         currentStateId: null,
         nextStateId: null,
         stepsApplied: 1,
@@ -679,6 +751,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        matchKinds: [],
         currentStateId: null,
         startStep: 1,
         stepsApplied: 1,
@@ -699,6 +772,7 @@ describe('MachineRunner', () => {
         type: 'idle',
         commands: [[{ movement: 'R', symbol: null }]],
         reads: [['_']],
+        matchKinds: [['literal']],
         currentStateId: null,
         nextStateId: null,
         stepsApplied: 1,
@@ -726,6 +800,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        matchKinds: [],
         currentStateId: null,
         startStep: 0,
         stepsApplied: 0,
@@ -773,6 +848,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        matchKinds: [],
         currentStateId: null,
         startStep: 0,
         stepsApplied: 0,
@@ -798,6 +874,7 @@ describe('MachineRunner', () => {
         truncated: false,
         commands: [],
         reads: [],
+        matchKinds: [],
         currentStateId: null,
         startStep: 0,
         stepsApplied: 0,

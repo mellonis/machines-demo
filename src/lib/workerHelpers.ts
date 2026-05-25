@@ -22,6 +22,13 @@ export type MachineYield = {
     getSymbol: (tapeBlock: unknown) => symbol;
     getNextState: (sym: symbol) => { ref: { id: number } };
   };
+  /** Engine per-iter `matchedTransition` (turing-machine-js#205). Drives the
+   *  `[*='X']` wildcard read marker in the log when the firing alternative
+   *  matched via `ifOtherSymbol` at a tape position. */
+  matchedTransition: {
+    id: string;
+    matchKinds: ('wildcard' | 'literal')[];
+  };
 };
 
 /** Per-tape Command derivation. `symbol === null` means "no write" (resolved
@@ -40,6 +47,17 @@ export function commandsFromYield(y: MachineYield): Command[] {
  *  mutate without aliasing the engine's array (machines-demo#69). */
 export function readsFromYield(y: MachineYield): string[] {
   return [...y.currentSymbols];
+}
+
+/** Per-tape match kind for the firing alternative at each head position
+ *  (`'wildcard'` iff the engine matched via `ifOtherSymbol` at that position,
+ *  `'literal'` otherwise). Parallel to `readsFromYield` and
+ *  `commandsFromYield`; defensive-copies so the caller can mutate the
+ *  array without aliasing the engine's. Sourced from
+ *  `MachineState.matchedTransition.matchKinds` (turing-machine-js#205) —
+ *  drives the `[*='X']` wildcard read marker in the log. */
+export function matchKindsFromYield(y: MachineYield): ('wildcard' | 'literal')[] {
+  return [...y.matchedTransition.matchKinds];
 }
 
 /** Engine State.id of the next state the yielded transition will land on.

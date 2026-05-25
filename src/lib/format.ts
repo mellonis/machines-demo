@@ -10,12 +10,21 @@ import type { LogEntry } from './log.ts';
  *  matched).
  *
  *  Per-cell encoding:
- *  - Read cell: `'X'` (literal symbol, always single-quoted) or `B` (blank).
- *    `*` (the engine's `ifOtherSymbol` catch-all) never appears at runtime —
- *    the head reads a concrete symbol on every step.
- *  - Write cell: `'X'` (literal) | `K` (keep, no write — `command.symbol`
- *    is null because the resolved symbol matched current) | `E` (erase,
- *    write equals blank).
+ *  - Read cell: `'X'` (literal symbol, always single-quoted) or `B`
+ *    (blank — used only for NON-wildcard reads where the transition
+ *    matched the blank specifically). Wildcard reads always render the
+ *    literal symbol prefixed with `*=` (so `*='a'`, `*=' '`, etc.) — the
+ *    whole point of the wildcard marker is to show WHAT `ifOtherSymbol`
+ *    actually caught on this iter; the `B` shortcut would hide that.
+ *    Wildcard rendering requires per-tape `matchKinds` (sourced from
+ *    `MachineState.matchedTransition.matchKinds`); when `matchKinds` is
+ *    omitted (manual Apply — no transition fired) every position renders
+ *    as a literal.
+ *  - Write cell: `'X'` (literal) | `K='X'` (keep, no write — `command.symbol`
+ *    is null because the resolved symbol matched current; the read symbol
+ *    that remains is appended for clarity, falling back to bare `K` when
+ *    reads aren't available e.g. manual Apply) | `E` (erase, write equals
+ *    blank).
  *  - Move cell: `L` | `R` | `S`.
  *
  *  Multi-tape: per-tape entries are comma-separated inside one outer
@@ -25,10 +34,22 @@ function formatStepNotation(
   reads: readonly string[] | null,
   commands: readonly Command[],
   blanks: readonly string[],
+  matchKinds: readonly ('wildcard' | 'literal')[] | null,
 ): string {
   const writes = commands
     .map((c, i) => {
-      if (c.symbol === null) return 'K';
+      if (c.symbol === null) {
+        // Augment `K` with the concrete kept symbol — without this the
+        // log shows `['a'] → [K]/[R]` and the reader has to mentally
+        // re-resolve `K` against the read each time. `K='a'/[R]` carries
+        // both the semantic (matched a wildcard, no write) and the
+        // observable outcome (`'a'` stays on the cell).
+        if (reads !== null) {
+          const r = reads[i];
+          if (r !== undefined) return r === blanks[i] ? "K=B" : `K='${r}'`;
+        }
+        return 'K';
+      }
       if (c.symbol === blanks[i]) return 'E';
       return `'${c.symbol}'`;
     })
@@ -39,7 +60,16 @@ function formatStepNotation(
   if (reads === null) return writesPart;
 
   const readsStr = reads
-    .map((r, i) => (r === blanks[i] ? 'B' : `'${r}'`))
+    .map((r, i) => {
+      // Non-wildcard: blank → `B`, literal → `'X'`. Wildcard: always
+      // literal `*='X'` so the user sees WHAT the catch-all caught;
+      // the `B` shortcut would obscure the matched value (especially
+      // bad when the alphabet's blank glyph is something unusual).
+      if (matchKinds?.[i] === 'wildcard') return `*='${r}'`;
+      // Non-wildcard (or no matchKinds → manual Apply): blank → `B`,
+      // literal → `'X'`.
+      return r === blanks[i] ? 'B' : `'${r}'`;
+    })
     .join(',');
   return `[${readsStr}] → ${writesPart}`;
 }
@@ -117,6 +147,12 @@ export type CommandsApplication = { stepNumber: number } | 'applied';
  * at the heads at apply-time when available, or `null` to render just
  * `[writes]/[moves]`.
  *
+ * `matchKinds` parallels `reads` — per-tape match kind for the firing
+ * alternative's selector (`'wildcard'` iff the engine matched via
+ * `ifOtherSymbol` at that position). Pass `null`/omit for the manual
+ * Apply path where no transition fired — every position renders as a
+ * literal.
+ *
  * `alphabets[i][0]` is the per-tape blank symbol — used to choose `B` over
  * `'<literal>'` for reads and `E` over `'<literal>'` for writes when the
  * symbol matches the blank.
@@ -127,6 +163,7 @@ export function commandsEntry(
   alphabets: Alphabets,
   application: CommandsApplication,
   colors?: readonly string[],
+  matchKinds?: readonly ('wildcard' | 'literal')[] | readonly ('wildcard' | 'literal')[][] | null,
 ): LogEntry {
   const prefix = application === 'applied' ? 'applied' : `step ${application.stepNumber}`;
   if (!commands || commands.length === 0) return { text: `${prefix}:` };
@@ -138,10 +175,15 @@ export function commandsEntry(
       reads === null
         ? null
         : ((reads as readonly string[])[0] ?? null);
+    const tapeMatch =
+      matchKinds == null
+        ? null
+        : ((matchKinds as readonly ('wildcard' | 'literal')[])[0] ?? null);
     const notation = formatStepNotation(
       tapeRead === null ? null : [tapeRead],
       commands,
       blanks,
+      tapeMatch === null ? null : [tapeMatch],
     );
     return { text: `${prefix}: ${notation}`, color: colors?.[0] };
   }
@@ -154,10 +196,15 @@ export function commandsEntry(
         reads === null
           ? null
           : ((reads as readonly string[])[i] ?? null);
+      const tapeMatch =
+        matchKinds == null
+          ? null
+          : ((matchKinds as readonly ('wildcard' | 'literal')[])[i] ?? null);
       const notation = formatStepNotation(
         tapeRead === null ? null : [tapeRead],
         [command],
         [blanks[i] ?? ''],
+        tapeMatch === null ? null : [tapeMatch],
       );
       return {
         text: `- Tape ${i + 1}: ${notation}`,

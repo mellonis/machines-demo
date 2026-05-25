@@ -114,7 +114,11 @@
   class:disabled={!enabled}
   class:no-apply={!applyVisible}
 >
-  <div class="interactive">
+  <!-- `inert` blocks focus + keyboard + pointer events when the panel is
+       disabled. `pointer-events: none` (the previous mechanism) only
+       blocked mouse — keyboard users could still tab into the buttons
+       and press Enter/Space. -->
+  <div class="interactive" inert={!enabled}>
     {#each alphabets as alpha, i (i)}
       <div class="tape-row" class:no-label={!showTapeLabels}>
         {#if showTapeLabels}
@@ -204,9 +208,10 @@
     background: var(--surface-bg);
     animation: enter var(--anim-belt-enter-ms) ease-out var(--anim-belt-enter-delay-panel-ms) backwards;
 
+    /* Pointer-event suppression now lives on the `inert` attribute (see
+       the .interactive div). CSS only owns the visual dim. */
     &.disabled .interactive {
       opacity: 0.5;
-      pointer-events: none;
     }
 
     &.no-apply .apply-row {

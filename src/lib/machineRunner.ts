@@ -1,5 +1,7 @@
 import { MAX_STEPS, WORKER_TIMEOUT_MS } from './caps.ts';
 import {
+  type BreakpointKind,
+  type BreakpointToggledResponse,
   type BuiltResponse,
   type Engine,
   type IdleResponse,
@@ -56,6 +58,26 @@ export class MachineRunner {
   private workerFactory: WorkerFactory;
   private simplePending: SimplePending | null = null;
   private runPending: RunPending | null = null;
+  /**
+   * Caller-set callback that fires whenever the worker echoes a
+   * `breakpointToggled` response (machines-demo#37 layer 1). The toggle
+   * request itself is fire-and-forget on the runner side; the UI updates
+   * its indicator state on receipt of this echo rather than awaiting a
+   * Promise, because toggles can land mid-run (parallel to the run loop)
+   * and shouldn't share the simple-pending or run-pending tracking lanes.
+   */
+  onBreakpointToggled: ((data: BreakpointToggledResponse) => void) | null = null;
+
+  /**
+   * Caller-set callback fired when the worker emits an `error` with no
+   * pending operation to reject (fire-and-forget paths like
+   * `toggleBreakpoint`, `setDebug`, `pause`). Without this, those
+   * errors silently disappear at the runner — exactly what happened
+   * with the haltState lockdown throw, which made the BP toggle look
+   * dead from the UI's perspective. Set by MachineView to surface
+   * them in the log panel.
+   */
+  onUncorrelatedError: ((message: string) => void) | null = null;
 
   constructor(engine: Engine, workerFactory: WorkerFactory) {
     this.engine = engine;
@@ -131,6 +153,13 @@ export class MachineRunner {
       this.startRunTimer();
       return;
     }
+    if (data.type === 'breakpointToggled') {
+      // Side-channel echo — doesn't complete any pending Promise, just
+      // signals the UI to update its indicator state. May arrive at any
+      // point: between simple requests, mid-run, or while paused.
+      this.onBreakpointToggled?.(data);
+      return;
+    }
     // ran / error complete the run; stepped / built complete a simple request.
     if (data.type === 'ran') {
       const p = this.runPending;
@@ -156,6 +185,10 @@ export class MachineRunner {
         p.reject(err);
         return;
       }
+      // No pending op to reject — fire-and-forget requests
+      // (toggleBreakpoint, setDebug, pause) land here when they throw
+      // worker-side. Surface to the consumer so they aren't silent.
+      this.onUncorrelatedError?.(data.message);
       return;
     }
     // built / stepped
@@ -279,6 +312,20 @@ export class MachineRunner {
   setDebug(on: boolean): void {
     if (!this.worker) return;
     this.worker.postMessage({ type: 'setDebug', on });
+  }
+
+  /**
+   * Toggle a `before` or `after` breakpoint on the State whose engine
+   * `GraphNode.id` matches `stateId` (machines-demo#37). The OTHER kind's
+   * current bit is preserved worker-side. Fire-and-forget; the worker
+   * echoes a `breakpointToggled` response (with the same `kind`) which
+   * routes to `onBreakpointToggled`. No-op if the worker hasn't been
+   * built — the UI's context-menu handlers gate this anyway via the
+   * `graph != null` check.
+   */
+  toggleBreakpoint(stateId: number, kind: BreakpointKind): void {
+    if (!this.worker) return;
+    this.worker.postMessage({ type: 'toggleBreakpoint', stateId, kind });
   }
 
   terminate(): void {
