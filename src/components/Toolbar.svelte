@@ -432,12 +432,11 @@
   </button>
   {#if configVisible}
     <label class="checkbox">
-      <input type="checkbox" bind:checked={withPause} disabled={runDisabled} />
+      <input type="checkbox" bind:checked={withPause} disabled={runDisabled} class="visually-hidden" />
+      <span class="checkbox-icon" aria-hidden="true">
+        {@html withPause ? icons.checkboxChecked : icons.checkboxEmpty}
+      </span>
       <span>with pause</span>
-    </label>
-    <label class="checkbox" title="When on, breaks set via state.debug pause execution at a Continue/Step prompt.">
-      <input type="checkbox" bind:checked={debugMode} disabled={runDisabled} />
-      <span>debug</span>
     </label>
     {#if withPause}
       <input
@@ -448,6 +447,13 @@
         placeholder="1s"
       />
     {/if}
+    <label class="checkbox" title="When on, breaks set via state.debug pause execution at a Continue/Step prompt.">
+      <input type="checkbox" bind:checked={debugMode} disabled={runDisabled} class="visually-hidden" />
+      <span class="checkbox-icon" aria-hidden="true">
+        {@html debugMode ? icons.checkboxChecked : icons.checkboxEmpty}
+      </span>
+      <span>debug</span>
+    </label>
   {/if}
   {#if stopVisible}
     <button type="button" class="stop-btn" onclick={onStop}>
@@ -885,6 +891,7 @@
   }
 
   .checkbox {
+    position: relative;
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -893,10 +900,50 @@
     cursor: pointer;
     user-select: none;
 
-    input {
-      accent-color: var(--accent);
-      margin: 0;
+    &:has(input:disabled) {
+      opacity: 0.5;
+      cursor: not-allowed;
     }
+  }
+
+  /* Visually hide the native input but stretch it over the whole label so
+     pointer + keyboard + screen-reader all reach the real <input>. The
+     custom Tabler icon next to it renders the visible state. */
+  .visually-hidden {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    padding: 0;
+    opacity: 0;
+    cursor: pointer;
+    border: 0;
+  }
+
+  .visually-hidden:disabled {
+    cursor: not-allowed;
+  }
+
+  .checkbox-icon {
+    display: inline-flex;
+    align-items: center;
+    width: 16px;
+    height: 16px;
+    color: inherit;
+    /* Decorative (aria-hidden); the underlying input handles all interaction. */
+    pointer-events: none;
+
+    :global(svg) {
+      width: 16px;
+      height: 16px;
+      display: block;
+    }
+  }
+
+  /* Keyboard focus ring on the icon when the hidden input has focus. */
+  .checkbox:has(input:focus-visible) .checkbox-icon {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 2px;
   }
 
   .interval-input {

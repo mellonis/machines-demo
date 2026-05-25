@@ -36,6 +36,7 @@
           class:error={entry.kind === 'error'}
           class:warn={entry.kind === 'warn'}
           class:ok={entry.kind === 'ok'}
+          class:pause={entry.kind === 'pause'}
           data-testid="log-line"
           data-kind={entry.kind ?? ''}
         >
@@ -94,7 +95,8 @@
 
     &.error,
     &.warn,
-    &.ok {
+    &.ok,
+    &.pause {
       padding-left: 8px;
       border-left: 3px solid transparent;
     }
@@ -102,10 +104,15 @@
     &.error { border-left-color: var(--error); }
     &.warn  { border-left-color: var(--warn); }
     &.ok    { border-left-color: var(--ok); }
+    /* `pause` reuses the graph-highlight color so a debugger break in the
+       log visually binds to the highlighted state node in the diagram —
+       same amber/orange palette, same semantic ("attention: paused here"). */
+    &.pause { border-left-color: var(--graph-highlight); }
 
     &.error .head { color: var(--error); }
     &.warn  .head { color: var(--warn); }
     &.ok    .head { color: var(--ok); }
+    &.pause .head { color: var(--graph-highlight); }
   }
 
   .sep {

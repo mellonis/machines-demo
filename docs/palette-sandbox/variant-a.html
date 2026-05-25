@@ -1,0 +1,634 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Machine-graph palette sandbox</title>
+<style id="tokens">
+/* ────────────────────────────────────────────────────────────────────────
+   Tweak the values below and reload. Both themes coexist — toggle with
+   the button (or your OS color scheme). The two `:root` blocks are the
+   only place colors live; the rules under PALETTE further down derive
+   everything from these tokens via var()/color-mix(). Try edits like:
+
+     --graph-node-fill: #f0f0f5;
+     --graph-node-stroke: var(--accent);
+
+   and see them apply instantly to every shape in the sample SVG below.
+   ──────────────────────────────────────────────────────────────────── */
+
+/* Themes are now scoped CLASSES (not :root attributes) so the page can
+   render BOTH simultaneously — each .pane.theme-X carries its own
+   cascade of base site tokens and graph palette tokens. */
+.theme-dark {
+  /* base site tokens — mirror src/app.css :root */
+  --bg: #1a1b1e;
+  --fg: #e6e6e6;
+  --muted: #8a8d93;
+  --accent: #6ea8fe;
+  --cell-bg: #2a2c30;
+  --cell-border: #3a3d42;
+  --head: #ffd166;
+  --editor-bg: #282c34;
+  --surface-bg: rgba(0, 0, 0, 0.18);
+  --surface-border: var(--cell-border);
+
+  /* graph palette — neutral / minimal.
+     Brand accent reserved for the entry-point node only; the runtime
+     highlight uses --head (amber). Every other surface is built from
+     muted/fg/cell tokens so the structure carries meaning.
+
+     5 contrast tiers (dark, against the page):
+       page bg #1a1b1e (--bg)
+         < node fill #2a2c30 (--cell-bg) — elevated surface
+           < edge-label bg = page-bg lifted ~6% toward --fg — distinct
+             from both page and nodes, so labels float without merging
+             into any adjacent node
+             < default stroke (--muted blended with --cell-border)
+               < accent (entry-point) / --fg (halt ring) */
+  --graph-node-fill: var(--cell-bg);
+  --graph-node-stroke: color-mix(in srgb, var(--muted) 85%, var(--fg));
+  --graph-node-tagged-fill: color-mix(in srgb, var(--accent) 14%, var(--graph-node-fill));
+  --graph-node-tagged-stroke: var(--accent);
+  --graph-node-halt-stroke: var(--fg);
+  --graph-node-halt-inner-fill: var(--graph-node-fill);
+  --graph-text: var(--fg);
+  /* Edges: muted-leaning toward --fg for visibility on dark bg. Thick
+     (==>) shares the regular color — mermaid's `.edge-thickness-thick`
+     stroke-width carries the weight differentiation. Dotted shares the
+     same color too — the dash pattern alone provides the "secondary /
+     structural" cue. (Earlier attempts dimmed dotted by mixing toward
+     --bg, but that landed too dark — readability suffered.) */
+  --graph-edge: color-mix(in srgb, var(--muted) 60%, var(--fg));
+  --graph-edge-thick: var(--graph-edge);
+  --graph-edge-dotted: var(--graph-edge);
+  --graph-edge-label-text: var(--fg);
+  /* Label bg lifted further from node-fill so labels don't merge into
+     adjacent nodes. */
+  --graph-edge-label-bg: color-mix(in srgb, var(--fg) 12%, var(--bg));
+  --graph-cluster-fill: color-mix(in srgb, var(--fg) 4%, transparent);
+  --graph-cluster-stroke: color-mix(in srgb, var(--muted) 35%, var(--cell-border));
+  /* Yellow-shifted amber for dark theme — light theme's #f97316 read
+     too red against the dark bg; bumping the hue toward yellow keeps
+     the warm pop while reading distinctly as "amber" not "orange".
+     Decoupled from --head so the tape-head marker stays its own thing. */
+  --graph-highlight: #f59e0b;
+  --graph-highlight-soft-fill: color-mix(in srgb, #f59e0b 22%, var(--graph-node-fill));
+  --graph-highlight-strong-fill: color-mix(in srgb, #f59e0b 40%, var(--graph-node-fill));
+}
+
+.theme-light {
+  --bg: #ffffff;
+  --fg: #1a1b1e;
+  --muted: #5a5d63;
+  --accent: #2563eb;
+  --cell-bg: #f5f5f7;
+  --cell-border: #d0d0d4;
+  --head: #d97706;
+  --editor-bg: #ffffff;
+  --surface-bg: rgba(0, 0, 0, 0.04);
+  --surface-border: var(--cell-border);
+
+  /* 5 contrast tiers (light, against the page):
+       page bg #ffffff (--bg)
+         < node fill #f5f5f7 (--cell-bg) — elevated surface
+           < edge-label bg — page-bg darkened ~5% toward --fg, distinct
+             from both page and nodes so labels float
+             < default stroke (--muted blended with --cell-border)
+               < accent (entry-point) / --fg (halt ring) */
+  --graph-node-fill: var(--cell-bg);
+  --graph-node-stroke: color-mix(in srgb, var(--muted) 40%, var(--cell-border));
+  --graph-node-tagged-fill: color-mix(in srgb, var(--accent) 9%, var(--graph-node-fill));
+  --graph-node-tagged-stroke: var(--accent);
+  --graph-node-halt-stroke: var(--fg);
+  --graph-node-halt-inner-fill: var(--graph-node-fill);
+  --graph-text: var(--fg);
+  /* Edges: muted by default. Thick (==>) shares the regular color —
+     mermaid's `.edge-thickness-thick` stroke-width carries the weight
+     differentiation, so we don't double-up with extra contrast. */
+  --graph-edge: var(--muted);
+  --graph-edge-thick: var(--graph-edge);
+  --graph-edge-dotted: color-mix(in srgb, var(--muted) 60%, transparent);
+  --graph-edge-label-text: var(--fg);
+  /* Label bg lifted toward --fg so labels separate from node-fill
+     (white page < light gray node < soft gray label). */
+  --graph-edge-label-bg: color-mix(in srgb, var(--fg) 10%, var(--bg));
+  --graph-cluster-fill: color-mix(in srgb, var(--fg) 3%, transparent);
+  --graph-cluster-stroke: color-mix(in srgb, var(--muted) 30%, var(--cell-border));
+  /* Light-theme debugger pause highlight: vivid orange — punchier than
+     amber on white, decoupled from --head so the tape-head marker can
+     stay calmer. Soft fill for predecessor/successor, strong for the
+     "you are here" m.state. */
+  --graph-highlight: #f97316;
+  --graph-highlight-soft-fill: color-mix(in srgb, #f97316 16%, var(--graph-node-fill));
+  --graph-highlight-strong-fill: color-mix(in srgb, #f97316 32%, var(--graph-node-fill));
+}
+
+/* ────────── PALETTE — selectors that turn tokens into rendered SVG ────────── */
+
+body {
+  background: #444;
+  color: #ddd;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  margin: 0;
+  padding: 16px;
+}
+
+.toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.toolbar button {
+  background: #2a2c30;
+  color: #e6e6e6;
+  border: 1px solid #555;
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font: inherit;
+}
+
+/* Dual-pane container — light + dark themes side by side. */
+.dual {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.pane {
+  background: var(--bg);
+  color: var(--fg);
+  border-radius: 8px;
+  padding: 12px;
+  min-height: 200px;
+}
+.pane h2 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+.svg-host {
+  background: var(--editor-bg);
+  border: 1px solid var(--cell-border);
+  border-radius: 6px;
+  padding: 16px;
+  overflow: auto;
+  max-height: 60vh;
+}
+
+.svg-host svg {
+  zoom: 0.8;
+  display: block;
+  margin: 0 auto;
+  color: var(--graph-text);
+}
+
+/* All state shapes share node-fill; outline + bg paths get themed via
+   the same two declarations. Preserve `fill="none"` / `stroke="none"`
+   intent so the bg path stays stroke-less and outline stays fill-less. */
+.svg-host svg g.node rect,
+.svg-host svg g.node polygon,
+.svg-host svg g.node circle,
+.svg-host svg g.node path {
+  fill: var(--graph-node-fill) !important;
+  stroke: var(--graph-node-stroke) !important;
+}
+.svg-host svg g.node path[fill='none'] { fill: none !important; }
+.svg-host svg g.node path[stroke='none'] { stroke: none !important; }
+
+/* Tagged states — unified style across any tag_* class. Engine v7 can
+   emit per-tag hash-based colors; the demo overrides that with a single
+   coherent treatment so every tagged state reads the same way. Debugger-
+   pause highlight rules still win via source order, so a paused tagged
+   state shows the highlight, not the tag styling. */
+.svg-host svg g.node[class*='tag_'] rect,
+.svg-host svg g.node[class*='tag_'] polygon,
+.svg-host svg g.node[class*='tag_'] circle,
+.svg-host svg g.node[class*='tag_'] path {
+  fill: var(--graph-node-tagged-fill) !important;
+  stroke: var(--graph-node-tagged-stroke) !important;
+  stroke-width: 1.5px !important;
+}
+.svg-host svg g.node[class*='tag_'] path[fill='none'] { fill: none !important; }
+.svg-host svg g.node[class*='tag_'] path[stroke='none'] { stroke: none !important; }
+
+/* Halt node — preserve the double-stroke "terminal" affordance:
+   outer-circle is a hollow ring (fill: none, stroke: --halt-stroke),
+   inner-circle is a solid disc using node-fill. */
+.svg-host svg g.node .outer-circle {
+  fill: none !important;
+  stroke: var(--graph-node-halt-stroke) !important;
+  stroke-width: 1.5px !important;
+}
+.svg-host svg g.node .inner-circle {
+  fill: var(--graph-node-halt-inner-fill) !important;
+  stroke: var(--graph-node-halt-stroke) !important;
+}
+
+/* Node + edge label text */
+.svg-host svg .nodeLabel,
+.svg-host svg .nodeLabel p,
+.svg-host svg .edgeLabel,
+.svg-host svg .edgeLabel p,
+.svg-host svg .label,
+.svg-host svg .label p {
+  color: var(--graph-text) !important;
+  fill: var(--graph-text) !important;
+}
+
+/* Edge paths + arrow markers */
+.svg-host svg .flowchart-link,
+.svg-host svg path.flowchart-link {
+  stroke: var(--graph-edge) !important;
+}
+.svg-host svg .marker {
+  fill: var(--graph-edge) !important;
+  stroke: var(--graph-edge) !important;
+}
+.svg-host svg .marker.cross {
+  stroke: var(--graph-edge) !important;
+}
+/* thick `==>` edges */
+.svg-host svg .edge-thickness-thick.flowchart-link,
+.svg-host svg path.edge-thickness-thick {
+  stroke: var(--graph-edge-thick) !important;
+}
+/* dotted `-. enter / onHalt .->` edges */
+.svg-host svg .edge-pattern-dotted.flowchart-link,
+.svg-host svg path.edge-pattern-dotted,
+.svg-host svg .edge-pattern-dashed.flowchart-link,
+.svg-host svg path.edge-pattern-dashed {
+  stroke: var(--graph-edge-dotted) !important;
+}
+
+/* Edge-label background — labels floating on the page bg, distinct
+   from node surface so they don't merge with adjacent nodes. */
+.svg-host svg g.edgeLabel foreignObject div,
+.svg-host svg g.edgeLabel span.edgeLabel,
+.svg-host svg g.edgeLabel .labelBkg,
+.svg-host svg g.edgeLabel p {
+  background-color: var(--graph-edge-label-bg) !important;
+}
+.svg-host svg rect.labelBkg {
+  fill: var(--graph-edge-label-bg) !important;
+}
+.svg-host svg g.edgeLabel {
+  background-color: transparent !important;
+}
+
+/* Highlight rules (mirror MachineGraph #10 — debugger pause "you are here").
+   Classes (`mg-highlight-from`, `-to`, `-strong`, `-edge`) are added
+   imperatively at runtime in production; the sandbox replays that via
+   the "Toggle debugger pause" button. */
+.svg-host svg g.node.mg-highlight-from rect,
+.svg-host svg g.node.mg-highlight-from polygon,
+.svg-host svg g.node.mg-highlight-from circle,
+.svg-host svg g.node.mg-highlight-from path[fill]:not([fill='none']),
+.svg-host svg g.node.mg-highlight-to rect,
+.svg-host svg g.node.mg-highlight-to polygon,
+.svg-host svg g.node.mg-highlight-to circle,
+.svg-host svg g.node.mg-highlight-to path[fill]:not([fill='none']) {
+  fill: var(--graph-highlight-soft-fill) !important;
+}
+.svg-host svg g.node.mg-highlight-from rect,
+.svg-host svg g.node.mg-highlight-from polygon,
+.svg-host svg g.node.mg-highlight-from circle,
+.svg-host svg g.node.mg-highlight-from path[stroke]:not([stroke='none']),
+.svg-host svg g.node.mg-highlight-to rect,
+.svg-host svg g.node.mg-highlight-to polygon,
+.svg-host svg g.node.mg-highlight-to circle,
+.svg-host svg g.node.mg-highlight-to path[stroke]:not([stroke='none']) {
+  stroke: var(--graph-highlight) !important;
+  stroke-width: 2px !important;
+}
+.svg-host svg g.node.mg-highlight-strong rect,
+.svg-host svg g.node.mg-highlight-strong polygon,
+.svg-host svg g.node.mg-highlight-strong circle,
+.svg-host svg g.node.mg-highlight-strong path[fill]:not([fill='none']) {
+  fill: var(--graph-highlight-strong-fill) !important;
+}
+.svg-host svg g.node.mg-highlight-strong rect,
+.svg-host svg g.node.mg-highlight-strong polygon,
+.svg-host svg g.node.mg-highlight-strong circle,
+.svg-host svg g.node.mg-highlight-strong path[stroke]:not([stroke='none']) {
+  stroke-width: 4px !important;
+  filter: drop-shadow(0 0 6px var(--graph-highlight));
+}
+/* Qualify with `.flowchart-link` so this beats the dotted/thick edge
+   rules which use two-class selectors (.edge-pattern-dotted.flowchart-link,
+   etc.) at specificity 0,3,1 — without the extra class qualifier the
+   single-class highlight rule loses to the dotted rule on the dotted
+   "enter" arrow. */
+.svg-host svg path.flowchart-link.mg-highlight-edge,
+.svg-host svg path.mg-highlight-edge,
+.svg-host svg .mg-highlight-edge path {
+  stroke: var(--graph-highlight) !important;
+  stroke-width: 2.5px !important;
+}
+
+/* Subgraphs (v7 callable subtrees). Force dashed stroke so the cluster
+   container reads as "structural wrapper", not "another state node". */
+.svg-host svg g.cluster rect {
+  fill: var(--graph-cluster-fill) !important;
+  stroke: var(--graph-cluster-stroke) !important;
+  stroke-dasharray: 6 4 !important;
+  stroke-width: 1px !important;
+}
+
+/* Picker panel — full-width strip beneath the dual panes. One row per
+   --graph-* token; per-row shows the token name plus a (swatch | hex)
+   pair for DARK and another for LIGHT. Derived tokens (var/color-mix)
+   render the swatch as a read-only div so the user sees the resolved
+   color but can't pick a literal that would break the chain; solid
+   tokens render an editable color input. */
+.picker-panel {
+  background: #1f2024;
+  color: #ddd;
+  border: 1px solid #444;
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-size: 12px;
+}
+.picker-panel h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.picker-controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.picker-controls button {
+  background: #2a2c30;
+  color: #e6e6e6;
+  border: 1px solid #555;
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font: inherit;
+}
+.picker-table {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.4fr) 32px 80px 32px 80px;
+  gap: 4px 8px;
+  align-items: center;
+}
+.picker-table .head {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.5;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #333;
+}
+.picker-table .name {
+  font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.picker-table input[type='color'] {
+  width: 28px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid #444;
+  border-radius: 3px;
+  cursor: pointer;
+  background: none;
+}
+.picker-table .swatch {
+  display: inline-block;
+  width: 28px;
+  height: 22px;
+  border: 1px dashed #666;
+  border-radius: 3px;
+  background-clip: padding-box;
+  cursor: help;
+}
+.picker-table code {
+  font-size: 10px;
+  opacity: 0.75;
+  font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#picker-export-status {
+  display: inline-block;
+  font-size: 11px;
+  opacity: 0.7;
+  margin-left: 8px;
+}
+</style>
+</head>
+<body>
+  <div class="toolbar">
+    <button id="hl-toggle">Toggle debugger pause (highlight)</button>
+    <span style="margin-left:auto;opacity:.6;font-size:12px">Edit the &lt;style id="tokens"&gt; block to start from new values; use the palette below to tweak live.</span>
+  </div>
+  <div class="dual">
+    <section class="pane theme-dark" id="pane-dark">
+      <h2>Dark</h2>
+      <div class="svg-host"><div class="svg-mount" id="host-dark">Loading…</div></div>
+    </section>
+    <section class="pane theme-light" id="pane-light">
+      <h2>Light</h2>
+      <div class="svg-host"><div class="svg-mount" id="host-light">Loading…</div></div>
+    </section>
+  </div>
+  <div class="picker-panel">
+    <h3>Palette</h3>
+    <div class="picker-controls">
+      <button id="picker-reset" type="button">Reset to file values</button>
+      <button id="picker-export" type="button">Copy CSS (both themes)</button>
+      <span id="picker-export-status"></span>
+    </div>
+    <div class="picker-table" id="picker-table">
+      <div class="head">token</div>
+      <div class="head">dark</div>
+      <div class="head">dark hex</div>
+      <div class="head">light</div>
+      <div class="head">light hex</div>
+    </div>
+  </div>
+  <script>
+    // Fetch sample.svg ONCE, inject a clone into each pane. Both copies
+    // get styled by their own .theme-X scope; CSS variables cascade from
+    // the pane to the SVG inside.
+    fetch('sample.svg').then(r => r.text()).then(t => {
+      document.getElementById('host-dark').innerHTML = t;
+      document.getElementById('host-light').innerHTML = t;
+      setTimeout(buildPicker, 100); // refresh once SVGs are mounted
+    });
+
+    // Per-theme picker. Reads computed values from each pane scope
+    // independently. Derived tokens (var/color-mix) render as a swatch
+    // div (read-only color sample); solid tokens render as a color
+    // input that writes inline override to that pane.
+    const GRAPH_TOKENS = [
+      '--graph-node-fill', '--graph-node-stroke',
+      '--graph-node-tagged-fill', '--graph-node-tagged-stroke',
+      '--graph-node-halt-stroke', '--graph-node-halt-inner-fill',
+      '--graph-text',
+      '--graph-edge', '--graph-edge-thick', '--graph-edge-dotted',
+      '--graph-edge-label-text', '--graph-edge-label-bg',
+      '--graph-cluster-fill', '--graph-cluster-stroke',
+      '--graph-highlight', '--graph-highlight-soft-fill', '--graph-highlight-strong-fill',
+    ];
+    const THEMES = ['dark', 'light'];
+    const _ctx = document.createElement('canvas').getContext('2d');
+    function resolveHex(cssValue) {
+      if (!cssValue || cssValue === 'transparent' || cssValue === 'none') return null;
+      _ctx.fillStyle = '#000';
+      _ctx.fillStyle = cssValue;
+      const fs = _ctx.fillStyle;
+      if (fs.startsWith('#')) return fs;
+      _ctx.fillRect(0, 0, 1, 1);
+      const [r, g, b] = _ctx.getImageData(0, 0, 1, 1).data;
+      return '#' + [r, g, b].map(n => n.toString(16).padStart(2, '0')).join('');
+    }
+    function paneEl(theme) { return document.getElementById('pane-' + theme); }
+    function buildPicker() {
+      const table = document.getElementById('picker-table');
+      // Wipe existing rows (preserve header row).
+      while (table.children.length > 5) table.removeChild(table.lastChild);
+
+      for (const token of GRAPH_TOKENS) {
+        // Cell 1: name
+        const nameCell = document.createElement('div');
+        nameCell.className = 'name';
+        nameCell.textContent = token.replace('--graph-', '');
+        nameCell.title = token;
+        table.appendChild(nameCell);
+
+        // Cells 2-3 (dark), 4-5 (light)
+        for (const theme of THEMES) {
+          const pane = paneEl(theme);
+          const value = getComputedStyle(pane).getPropertyValue(token).trim();
+          const isDerived = /\bvar\(|\bcolor-mix\(/.test(value);
+          const hex = resolveHex(value);
+
+          // Swatch / input cell
+          const swatchCell = document.createElement('div');
+          if (isDerived) {
+            const swatch = document.createElement('span');
+            swatch.className = 'swatch';
+            swatch.style.background = hex ?? 'transparent';
+            swatch.title = `derived: ${value}\nresolved: ${hex ?? '(non-solid)'}`;
+            swatchCell.appendChild(swatch);
+          } else {
+            const input = document.createElement('input');
+            input.type = 'color';
+            input.value = hex ?? '#000000';
+            if (!hex) input.title = `'${value}' — not a solid color; picking will replace it`;
+            input.addEventListener('input', () => {
+              pane.style.setProperty(token, input.value);
+              buildPicker();
+            });
+            swatchCell.appendChild(input);
+          }
+          table.appendChild(swatchCell);
+
+          // Hex / formula cell
+          const codeCell = document.createElement('code');
+          codeCell.textContent = isDerived ? (hex ?? value) : (hex ?? value);
+          codeCell.title = isDerived ? value : '';
+          table.appendChild(codeCell);
+        }
+      }
+    }
+    document.getElementById('picker-reset').addEventListener('click', () => {
+      for (const theme of THEMES) {
+        const pane = paneEl(theme);
+        for (const token of GRAPH_TOKENS) pane.style.removeProperty(token);
+      }
+      buildPicker();
+    });
+
+    // Export — snapshot current computed values per theme into a CSS
+    // snippet. Both panes' scopes are independent; we just read from
+    // each. Derived tokens come out as formulas; picked-color tokens
+    // come out as hex literals.
+    document.getElementById('picker-export').addEventListener('click', async () => {
+      const status = document.getElementById('picker-export-status');
+      const snapshots = {};
+      for (const theme of THEMES) {
+        const cs = getComputedStyle(paneEl(theme));
+        snapshots[theme] = GRAPH_TOKENS.map(t => [t, cs.getPropertyValue(t).trim()]);
+      }
+      const fmt = (selector, pairs) =>
+        `${selector} {\n${pairs.map(([k, v]) => `  ${k}: ${v};`).join('\n')}\n}`;
+      const css = [
+        '/* Generated from palette sandbox — paste into src/app.css */',
+        fmt(':root', snapshots.dark),
+        '',
+        fmt(":root[data-theme='light']", snapshots.light),
+      ].join('\n');
+      try {
+        await navigator.clipboard.writeText(css);
+        status.textContent = `copied ${GRAPH_TOKENS.length * 2} declarations`;
+      } catch {
+        const ta = document.createElement('textarea');
+        ta.value = css;
+        ta.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:80vw;height:60vh;z-index:99';
+        document.body.appendChild(ta);
+        ta.select();
+        status.textContent = 'clipboard blocked — copy the textarea manually';
+        ta.addEventListener('blur', () => ta.remove(), { once: true });
+      }
+      setTimeout(() => { status.textContent = ''; }, 3500);
+    });
+
+    // Debugger-pause simulation. Applied to BOTH panes so the same
+    // highlight is visible in both themes simultaneously.
+    let hlPhase = 0;
+    const phaseLabel = ['off', 'paused at regular state',
+                        'paused at tagged main', 'from → edge → to triple'];
+    function applyHighlightToPane(host, phase) {
+      const svg = host.querySelector('svg');
+      if (!svg) return;
+      svg.querySelectorAll('.mg-highlight-from, .mg-highlight-to, .mg-highlight-strong, .mg-highlight-edge')
+        .forEach(el => el.classList.remove(
+          'mg-highlight-from', 'mg-highlight-to', 'mg-highlight-strong', 'mg-highlight-edge'));
+      if (phase === 0) return;
+      const nodes = Array.from(svg.querySelectorAll('g.node'));
+      const tagged = svg.querySelector('g.node[class*="tag_"]');
+      const regular = nodes.find(n => /flowchart-s\d+/.test(n.id) &&
+        !(n.className?.baseVal ?? '').includes('tag_'));
+      const edges = Array.from(svg.querySelectorAll('[data-id^="L_"]'));
+      const firstEdge = edges[0];
+      if (phase === 1 && regular) regular.classList.add('mg-highlight-strong', 'mg-highlight-to');
+      if (phase === 2 && tagged) tagged.classList.add('mg-highlight-strong', 'mg-highlight-to');
+      if (phase === 3 && firstEdge) {
+        const dataId = firstEdge.getAttribute('data-id');
+        const m = dataId.match(/^L_(\w+?)_(\w+?)_\d+$/);
+        if (m) {
+          const fromEl = nodes.find(n => n.id.includes('-flowchart-' + m[1] + '-'));
+          const toEl = nodes.find(n => n.id.includes('-flowchart-' + m[2] + '-'));
+          if (fromEl) fromEl.classList.add('mg-highlight-from');
+          if (toEl) toEl.classList.add('mg-highlight-to', 'mg-highlight-strong');
+        }
+        firstEdge.classList.add('mg-highlight-edge');
+      }
+    }
+    document.getElementById('hl-toggle').addEventListener('click', () => {
+      hlPhase = (hlPhase + 1) % 4;
+      applyHighlightToPane(document.getElementById('host-dark'), hlPhase);
+      applyHighlightToPane(document.getElementById('host-light'), hlPhase);
+      document.getElementById('hl-toggle').textContent =
+        'Toggle debugger pause: ' + phaseLabel[hlPhase];
+    });
+  </script>
+</body>
+</html>

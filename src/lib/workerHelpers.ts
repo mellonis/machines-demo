@@ -14,6 +14,21 @@ export type MachineYield = {
   movements: symbol[];
   currentSymbols: string[];
   nextSymbols: string[];
+  /** Engine State object. Only `id` plus the `getSymbol`/`getNextState`
+   *  methods are read on the demo side, used to drive `from + edge + to`
+   *  graph highlight (machines-demo#10). */
+  state: {
+    id: number;
+    getSymbol: (tapeBlock: unknown) => symbol;
+    getNextState: (sym: symbol) => { ref: { id: number } };
+  };
+  /** Engine per-iter `matchedTransition` (turing-machine-js#205). Drives the
+   *  `[*='X']` wildcard read marker in the log when the firing alternative
+   *  matched via `ifOtherSymbol` at a tape position. */
+  matchedTransition: {
+    id: string;
+    matchKinds: ('wildcard' | 'literal')[];
+  };
 };
 
 /** Per-tape Command derivation. `symbol === null` means "no write" (resolved
@@ -25,6 +40,38 @@ export function commandsFromYield(y: MachineYield): Command[] {
     const before = y.currentSymbols[i];
     return { movement, symbol: written === before ? null : written };
   });
+}
+
+/** Per-tape read symbols at the heads BEFORE the yielded step applied.
+ *  Parallel to `commandsFromYield`; defensive-copies so the caller can
+ *  mutate without aliasing the engine's array (machines-demo#69). */
+export function readsFromYield(y: MachineYield): string[] {
+  return [...y.currentSymbols];
+}
+
+/** Per-tape match kind for the firing alternative at each head position
+ *  (`'wildcard'` iff the engine matched via `ifOtherSymbol` at that position,
+ *  `'literal'` otherwise). Parallel to `readsFromYield` and
+ *  `commandsFromYield`; defensive-copies so the caller can mutate the
+ *  array without aliasing the engine's. Sourced from
+ *  `MachineState.matchedTransition.matchKinds` (turing-machine-js#205) —
+ *  drives the `[*='X']` wildcard read marker in the log. */
+export function matchKindsFromYield(y: MachineYield): ('wildcard' | 'literal')[] {
+  return [...y.matchedTransition.matchKinds];
+}
+
+/** Engine State.id of the next state the yielded transition will land on.
+ *  Computed via `state.getNextState(state.getSymbol(tapeBlock)).ref.id` —
+ *  the same lookup the engine performs internally each iter, just executed
+ *  on demand here so the demo can drive the `from → to` graph highlight
+ *  (machines-demo#10). Returns `null` if the lookup throws (defensive). */
+export function nextStateIdFromYield(y: MachineYield, tapeBlock: unknown): number | null {
+  try {
+    const sym = y.state.getSymbol(tapeBlock);
+    return y.state.getNextState(sym).ref.id;
+  } catch {
+    return null;
+  }
 }
 
 // --- Tape / alphabet snapshots ---
