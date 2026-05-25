@@ -44,25 +44,19 @@ import { decideOnIter, mergeDebugKinds } from './breakpointCoordination.ts';
  * The strong types live at the worker postMessage boundary instead.
  */
 
-// onPause payload subset we read. Engine's full type carries more.
-type OnPausePayload = {
-  state: {
-    id: number;
-    name?: string;
-    getSymbol: (tapeBlock: unknown) => symbol;
-    getNextState: (sym: symbol) => { ref: { id: number } };
-  };
-  currentSymbols: string[];
-  nextState: { debug: { before?: true; after?: true } | null };
-  debugBreak?: { before?: true; after?: true };
-  /** Per-iter matched transition (engine #205). Same shape as MachineYield's
-   *  field. Drives the `[*='X']` wildcard marker on the pause-line's
-   *  "applying command for symbols: …" — without this, the line shows raw
-   *  reads while the parallel step-log line shows wildcard-aware reads. */
-  matchedTransition: {
-    id: string;
-    matchKinds: ('wildcard' | 'literal')[];
-  };
+// MachineYield (defined in workerHelpers) carries movements / currentSymbols /
+// nextSymbols / state / matchedTransition. The pause / iter handlers want a
+// couple of extra fields the engine ALSO emits but workerHelpers doesn't
+// declare:
+//   - `state.name` — used for log lines + debugger UI display.
+//   - `debugBreak` — set when the iter is a pause point; consumed by the
+//     halt-imminent detector and the after-fire suppression rule.
+// Both are optional / undefined-safe in the engine emit, so the handlers
+// gate their reads. Declared as a structural extension of MachineYield so a
+// MachineYield value flows directly into a parameter of this type — no cast.
+type OnPausePayload = Omit<MachineYield, 'state'> & {
+  state: MachineYield['state'] & { name?: string };
+  debugBreak?: { before?: true; after?: true; cause?: 'breakpoint' | 'step' | 'manual' };
 };
 
 type AnyMachine = {
@@ -656,13 +650,13 @@ async function run(
     stepsApplied += 1;
   });
   ses.on('pause', async (m) => {
-    await onPauseFn(m as unknown as OnPausePayload);
+    await onPauseFn(m);
     ses.continue();
   });
   // iter is AWAITED by the engine — return the Promise so the awaits inside
   // onIterFn (RUNNING_STEP synthetic dispatchPause, RUNNING_AUTO throttle
   // setTimeout, click-pause dispatch) actually block the engine.
-  ses.on('iter', (m) => onIterFn(m as unknown as OnPausePayload));
+  ses.on('iter', (m) => onIterFn(m));
 
   try {
     await ses.start();
@@ -835,13 +829,31 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
         });
         return;
       }
-      // Read both bits, compute the merged result (see `mergeDebugKinds`
-      // in `breakpointCoordination.ts` for the rules), write via the
-      // SETTER. Engine-side `state.debug = { before, after }` creates a
-      // fresh DebugConfig; Post's per-State lockdown intercepts the setter
-      // and routes through `setBreakpoint` so its registry stays in sync
-      // (a direct `state.debug.before = true` bypasses the lockdown and
-      // the breakpoint never fires).
+      // haltState (turing-machine-js#207): `debug` is a single boolean,
+      // not a DebugConfig — the menu shows one "Pause" toggle for halt.
+      // Branch out before reading per-side bits, since `boolean.before`
+      // would be `undefined` and `mergeDebugKinds` would flip "on" every
+      // click instead of toggling.
+      if (entry.state === turing.haltState) {
+        const enabled = turing.haltState.debug === true;
+        const nextEnabled = !enabled;
+        turing.haltState.debug = nextEnabled;
+        send({
+          type: 'breakpointToggled',
+          stateId: req.stateId,
+          kind: req.kind,
+          value: nextEnabled ? 'on' : 'off',
+        });
+        return;
+      }
+
+      // Non-halt: read both bits, compute the merged result (see
+      // `mergeDebugKinds` in `breakpointCoordination.ts` for the rules),
+      // write via the SETTER. Engine-side `state.debug = { before, after }`
+      // creates a fresh DebugConfig; Post's per-State lockdown intercepts
+      // the setter and routes through `setBreakpoint` so its registry
+      // stays in sync (a direct `state.debug.before = true` bypasses the
+      // lockdown and the breakpoint never fires).
       //
       // For Post specifically, we MUST clear first (`state.debug = null`)
       // because Post's lockdown PUSHES onto its `#breakpoints` array
@@ -854,15 +866,9 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
         after: debug.after === true,
       };
       const { next, debugValue } = mergeDebugKinds(current, req.kind);
-      if (entry.state === turing.haltState) {
-        // turing-machine-js#207: haltState.debug is a boolean — any kind
-        // (before/after) collapses to one switch. Write directly.
-        turing.haltState.debug = next.before || next.after;
-      } else {
-        entry.state.debug = null;
-        if (debugValue !== null) {
-          entry.state.debug = debugValue as turing.State['debug'];
-        }
+      entry.state.debug = null;
+      if (debugValue !== null) {
+        entry.state.debug = debugValue as turing.State['debug'];
       }
       send({
         type: 'breakpointToggled',
