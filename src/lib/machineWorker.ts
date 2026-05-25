@@ -659,9 +659,10 @@ async function run(
     await onPauseFn(m as unknown as OnPausePayload);
     ses.continue();
   });
-  ses.on('iter', (m) => {
-    void onIterFn(m as unknown as OnPausePayload);
-  });
+  // iter is AWAITED by the engine — return the Promise so the awaits inside
+  // onIterFn (RUNNING_STEP synthetic dispatchPause, RUNNING_AUTO throttle
+  // setTimeout, click-pause dispatch) actually block the engine.
+  ses.on('iter', (m) => onIterFn(m as unknown as OnPausePayload));
 
   try {
     await ses.start();
