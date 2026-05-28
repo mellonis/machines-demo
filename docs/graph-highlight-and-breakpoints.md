@@ -194,7 +194,7 @@ The runner's echo `onBreakpointToggled` normalizes the echoed `stateId` via `bar
 
 The engine's `onIter` fires at end-of-iter — functionally the same execution point as an `onPause(after, K)` fire (both happen after the iter's transition has executed and `onStep` has run). When a user clicks Step from inside an after-fire BP pause, the worker's `onIterFn` would otherwise dispatch a SECOND synthetic pause at the same effective point, producing a duplicate log entry.
 
-Suppression: `onPauseFn` sets `dispatchedAfterThisIter = true` whenever it dispatches with `m.debugBreak.after === true`. `onIterFn` reads the flag (and resets it) at iter boundary; when set AND `stepRequested` is true, it skips the synthetic dispatch **but keeps `stepRequested`** so the NEXT iter's `onIter` pauses naturally. Net effect: Step from an after-fire BP advances one iter (the right semantic for "next pause point"), instead of bouncing twice at the same point.
+Suppression: `onPauseFn` sets `dispatchedAfterThisIter = true` whenever the engine pause is after-side (`m.pause?.side === 'after'`). `onIterFn` reads the flag (and resets it) at iter boundary; when set AND `stepRequested` is true, it skips the synthetic dispatch **but keeps `stepRequested`** so the NEXT iter's `onIter` pauses naturally. Net effect: Step from an after-fire BP advances one iter (the right semantic for "next pause point"), instead of bouncing twice at the same point.
 
 `before`-fires don't set the flag — they fire mid-iter, distinct from end-of-iter, so the synthetic at end-of-iter is a genuinely different pause point and isn't suppressed.
 
