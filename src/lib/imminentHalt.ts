@@ -29,8 +29,8 @@ import type { TuringGraph } from './types.ts';
  * inputs through; tests can call it directly with synthetic inputs.
  */
 export function computeImminentHalt(args: {
-  /** The engine's yielded `MachineState`-shaped object. Reads:
-   *   - `debugBreak.after` (to gate on after-pause)
+  /** The engine's `pause`-event object. Reads:
+   *   - `pause.side` (to gate on after-pause)
    *   - `state.id` (frame lookup)
    *   - `state.getSymbol(tapeBlock)` + `state.getNextState(sym).ref.id` (halt-bound check) */
   m: {
@@ -39,7 +39,7 @@ export function computeImminentHalt(args: {
       getSymbol: (tapeBlock: unknown) => symbol;
       getNextState: (sym: symbol) => { ref: { id: number } };
     };
-    debugBreak?: { before?: true; after?: true };
+    pause?: { side: 'before' | 'after' };
   };
   /** TapeBlock instance — passed to `state.getSymbol`. */
   tapeBlock: unknown;
@@ -51,7 +51,7 @@ export function computeImminentHalt(args: {
    *  state-level after-pauses. */
   haltStateDebug: boolean;
 }): { kind: 'real' } | { kind: 'in-frame'; haltMarkerId: number } | undefined {
-  if (args.m.debugBreak?.after !== true) return undefined;
+  if (args.m.pause?.side !== 'after') return undefined;
   if (!args.haltStateDebug) return undefined;
   if (!args.tapeBlock) return undefined;
 

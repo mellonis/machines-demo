@@ -684,7 +684,7 @@
     prevStateId = paused.prevStateId;
     currentStateId = paused.currentStateId;
     nextStateId = paused.nextStateId;
-    pauseBefore = paused.debugBreak.before === true;
+    pauseBefore = paused.pause.side === 'before';
     stepsApplied = paused.stepsApplied;
 
     // Replay buffered per-step commands so the trace leading to the break is

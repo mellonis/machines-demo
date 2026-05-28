@@ -45,51 +45,9 @@ export function mergeDebugKinds(
   return { next, debugValue };
 }
 
-// (Removed: `decideJoinedBare` + `JoinedBareDecision`. They implemented a
-// "wrapper-entry pause + immediately-following bare entry = same call,
-// skip the bare one" conflation. It violated the engine invariant
-// "before/after armed → fires per iter at the state, regardless of
-// wrapper nesting" — iter 2 of a wrapped call reads a different symbol
-// from iter 1's wrapper-entry; suppressing it hid a real iter from the
-// user. Now onPauseFn always dispatches; wrapper-entry shows the
-// composite name `walkToBlank(writeMarker)`, bare iters show
-// `walkToBlank` — the boundary is visible instead of conflated.)
-
-/** Outcome of evaluating an `onIter` call for the step/after-fire suppression rule. */
-export type IterDecision = {
-  /** Whether to dispatch a synthetic step-boundary pause. */
-  dispatchStep: boolean;
-  /** New value of `stepRequested` after this iter. */
-  nextStepRequested: boolean;
-  /** New value of `dispatchedAfterThisIter` — always reset to false at iter boundary. */
-  nextDispatchedAfter: false;
-};
-
-/**
- * Decide what `onIterFn` should do for the after-fire-Step suppression
- * rule (§13a in the doc). Pure function — no side effects.
- *
- * When an `onPause(after, K)` dispatched and the user clicks Step from
- * inside that pause, the engine's onIter for the SAME iter K fires next
- * — but it's at the same effective execution point as the after-fire,
- * so dispatching a synthetic step pause there would duplicate the
- * message. We skip the synthetic and KEEP `stepRequested` so the next
- * iter's onIter dispatches it naturally.
- */
-export function decideOnIter(args: {
-  stepRequested: boolean;
-  dispatchedAfterThisIter: boolean;
-}): IterDecision {
-  if (args.stepRequested && args.dispatchedAfterThisIter) {
-    // After-fire already paused at this point — skip synthetic, keep
-    // stepRequested for the next iter.
-    return { dispatchStep: false, nextStepRequested: true, nextDispatchedAfter: false };
-  }
-  if (args.stepRequested) {
-    // Normal step boundary; dispatch and consume the flag.
-    return { dispatchStep: true, nextStepRequested: false, nextDispatchedAfter: false };
-  }
-  // No step pending; the throttle / pauseRequested logic the caller runs
-  // after this decision handles RUNNING_AUTO cadence + click-pause.
-  return { dispatchStep: false, nextStepRequested: false, nextDispatchedAfter: false };
-}
+// (Removed: `decideJoinedBare` and `decideOnIter`. `decideOnIter` drove the
+// worker's synthetic step-boundary dispatch + the after-fire-Step suppression
+// rule; both are gone now that Step / click-Pause are driven through the
+// engine's `stepIn()` / `pause()` (engine #102) and surface via the single
+// `pause` event. Step is now before-side, so it never collides with an
+// after-side breakpoint and needs no dedup.)

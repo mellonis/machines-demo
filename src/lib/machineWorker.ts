@@ -33,7 +33,7 @@ import {
   type WorkerRequest,
   type WorkerResponse,
 } from './types.ts';
-import { decideOnIter, mergeDebugKinds } from './breakpointCoordination.ts';
+import { mergeDebugKinds } from './breakpointCoordination.ts';
 
 /* ───── dynamic-eval side: deliberately loose typing ─────
  *
@@ -44,25 +44,19 @@ import { decideOnIter, mergeDebugKinds } from './breakpointCoordination.ts';
  * The strong types live at the worker postMessage boundary instead.
  */
 
-// onPause payload subset we read. Engine's full type carries more.
-type OnPausePayload = {
-  state: {
-    id: number;
-    name?: string;
-    getSymbol: (tapeBlock: unknown) => symbol;
-    getNextState: (sym: symbol) => { ref: { id: number } };
-  };
-  currentSymbols: string[];
-  nextState: { debug: { before?: true; after?: true } | null };
-  debugBreak?: { before?: true; after?: true };
-  /** Per-iter matched transition (engine #205). Same shape as MachineYield's
-   *  field. Drives the `[*='X']` wildcard marker on the pause-line's
-   *  "applying command for symbols: …" — without this, the line shows raw
-   *  reads while the parallel step-log line shows wildcard-aware reads. */
-  matchedTransition: {
-    id: string;
-    matchKinds: ('wildcard' | 'literal')[];
-  };
+// MachineYield (defined in workerHelpers) carries movements / currentSymbols /
+// nextSymbols / state / matchedTransition. The pause / iter handlers want a
+// couple of extra fields the engine ALSO emits but workerHelpers doesn't
+// declare:
+//   - `state.name` — used for log lines + debugger UI display.
+//   - `pause` — present on DebugSession `pause` events (engine v7); carries
+//     {side, cause}. Absent on `iter` events, so it's optional here —
+//     onIterFn ignores it, onPauseFn reads it.
+// Declared as a structural extension of MachineYield so a MachineYield value
+// flows directly into a parameter of this type — no cast.
+type OnPausePayload = Omit<MachineYield, 'state'> & {
+  state: MachineYield['state'] & { name?: string };
+  pause?: { side: 'before' | 'after'; cause: 'breakpoint' | 'step' | 'manual' };
 };
 
 type AnyMachine = {
@@ -182,6 +176,32 @@ function resolveDisplayName(stateId: number, fallback: string): string {
 // requests are rejected by the phase machine before they reach this slot.
 let resumeResolve: (() => void) | null = null;
 
+// Structural view of both the engine `DebugSession` and `PostDebugSession`.
+// The worker drives the engine's native pause/step controls directly (engine
+// #102) rather than synthesizing pauses: Step → stepIn(), click-Pause →
+// pause(), Continue → continue(). All pauses (breakpoint / step / manual) come
+// back through the single `pause` event.
+type SessionLike = {
+  on: (event: 'step' | 'pause' | 'iter' | 'halt',
+       listener: (m: MachineYield) => void | Promise<void>) => SessionLike;
+  start: () => Promise<void>;
+  continue: () => void;
+  stepIn: () => void;
+  stop: () => void;
+  pause: () => void;
+};
+
+// The active session for the current run, hoisted so the `pause` request
+// handler (click-Pause) can call `activeSes.pause()` from outside the run
+// loop. Set at run-start, cleared on reset / run-end.
+let activeSes: SessionLike | null = null;
+
+// What the paused run loop should do once main resolves the pause: a plain
+// Continue, a single Step (engine stepIn), or Stop. Set by the `resume` /
+// `stop` request handlers, read by the `pause` listener after dispatchPause
+// returns.
+let resumeAction: 'continue' | 'step' | 'stop' = 'continue';
+
 // Per-run buffer of commands captured by onStep. Drained on `paused` (sent
 // in the response), on `idle` per-iter (auto mode), and on `ran` (sent in
 // the response). `runReadsBuffer` is the parallel array of pre-step head
@@ -210,12 +230,6 @@ let prevYieldedStateId: number | null = null;
 // so the user can flip the checkbox without restarting.
 let debugEnabled = false;
 
-// "Pause at end of next iter." Set by the `run`/`resume` request handler
-// from the `step` field, consumed in onIter. onIter fires unconditionally
-// per iter, so a flag check is sufficient — no need to mutate `state.debug`
-// on the engine's graph for our own coordination.
-let stepRequested = false;
-
 // RUNNING_AUTO throttle: when `runIntervalMs !== null` the worker awaits a
 // `setTimeout(intervalMs)` Promise inside onIter, sending `idle`/`busy` to
 // bracket each await so the runner can suspend `WORKER_TIMEOUT_MS`. Updated
@@ -224,21 +238,6 @@ let stepRequested = false;
 let runIntervalMs: number | null = null;
 let pendingTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let pendingTimeoutResolve: (() => void) | null = null;
-
-// Click-pause: set by the `pause` request handler; consumed in onIter after
-// the throttle await unwinds. The handler cancels the throttle timer so
-// onIter doesn't sit waiting for the full intervalMs before checking.
-let pauseRequested = false;
-
-// Tracks whether `onPauseFn` dispatched an AFTER-fire BP this iter. The
-// engine's onIter (end-of-iter) is functionally the same execution point
-// as an after-fire pause: both happen after the iter's transition has
-// fired and onStep has run. When Step is requested from inside an
-// after-fire pause, the synthetic onIter dispatch would duplicate the
-// pause message at the same point. We skip the synthetic and keep
-// `stepRequested` for the next iter's onIter, which IS a different point.
-// Reset at every iter boundary inside `onIterFn`.
-let dispatchedAfterThisIter = false;
 
 function reset(): void {
   phase = { kind: 'idle' };
@@ -255,12 +254,11 @@ function reset(): void {
   prevYieldedStateId = null;
   runStartStep = 0;
   debugEnabled = false;
-  stepRequested = false;
   runIntervalMs = null;
   pendingTimeoutId = null;
   pendingTimeoutResolve = null;
-  pauseRequested = false;
-  dispatchedAfterThisIter = false;
+  activeSes = null;
+  resumeAction = 'continue';
   currentGraph = null;
 }
 
@@ -404,7 +402,7 @@ async function dispatchPause(info: {
    *  before / after). Drives the wildcard marker on the pause-line's
    *  "for symbols: …" group; parallel to `currentSymbols`. */
   currentMatchKinds: ('wildcard' | 'literal')[];
-  debugBreak: { before?: true; after?: true };
+  pause: { side?: 'before' | 'after'; cause: 'breakpoint' | 'step' | 'manual' };
   currentStateId: number | null;
   nextStateId: number | null;
   prevStateId: number | null;
@@ -430,7 +428,7 @@ async function dispatchPause(info: {
     state: info.state,
     currentSymbols: info.currentSymbols,
     currentMatchKinds: info.currentMatchKinds,
-    debugBreak: info.debugBreak,
+    pause: info.pause,
     imminentHalt: info.imminentHalt,
   });
   await new Promise<void>((resolve) => {
@@ -470,19 +468,18 @@ async function run(
   prevYieldedStateId = null;
   phase = { kind: 'running' };
   debugEnabled = debug;
-  stepRequested = step;
   runIntervalMs = intervalMs;
-  pauseRequested = false;
-  dispatchedAfterThisIter = false;
+  resumeAction = 'continue';
 
   let truncated = false;
 
-  // onPause: engine fires this when a user-authored `state.debug[when]`
-  // matches. The worker has nothing to "arm" here anymore — onIter is
-  // where our Step/Pause coordination lives. We just surface the user's
-  // break.
+  // onPause: dispatch the `paused` message and block on main's resume
+  // decision. Fires for EVERY engine pause — breakpoint (state.debug match),
+  // step (stepIn endpoint), and manual (external pause()). The `pause`
+  // listener gates breakpoint-cause pauses behind `debugEnabled`; step/manual
+  // always surface. After this resolves, the listener calls
+  // stepIn()/continue()/stop() per `resumeAction`.
   const onPauseFn = async (m: OnPausePayload) => {
-    if (!debugEnabled) return;
     // Engine invariant: every iter where the source state's `#debugRef`
     // matches fires before/after as configured — wrappers share the
     // bare's #debugRef, so a wrapper-entry iter (iter 1 of a wrapped
@@ -491,11 +488,6 @@ async function run(
     // `resolveDisplayName` so the log line is consistent across the
     // wrapper-entry boundary.
     const displayedName = resolveDisplayName(m.state.id, m.state.name ?? '');
-    // Mark the iter so onIterFn can skip a redundant step-synthetic when
-    // the after-fire and the synthetic would land at the same execution
-    // point. Only `after` matters here — `before` fires mid-iter, distinct
-    // from end-of-iter. See `decideOnIter` for the suppression rule.
-    if (m.debugBreak?.after === true) dispatchedAfterThisIter = true;
     // Halt-imminent detection extracted to lib/imminentHalt — see that
     // module's JSDoc for the gating rules (after-only, halt-BP-only,
     // halt-bound-only). Keeping the logic pure lets the scenario harness
@@ -510,7 +502,8 @@ async function run(
       state: displayedName,
       currentSymbols: [...m.currentSymbols],
       currentMatchKinds: [...m.matchedTransition.matchKinds],
-      debugBreak: { ...m.debugBreak },
+      // Engine breakpoint pause — forward the descriptor as-is (always has a side).
+      pause: m.pause ?? {cause: 'breakpoint'},
       currentStateId: m.state.id,
       nextStateId: machine?.tapeBlock
         ? nextStateIdFromYield(m as unknown as MachineYield, machine.tapeBlock)
@@ -520,57 +513,16 @@ async function run(
     });
   };
 
-  // onIter: engine fires this awaited callback at end of every iter,
-  // AFTER both onPause dispatches on the same yield. Our per-iter
-  // coordination lives here, checked in priority order:
-  //
-  // 1. Step boundary FIRST. Step is a manual user action; the iter
-  //    happens IMMEDIATELY and pauses. The auto-step `intervalMs` is the
-  //    cadence between consecutive auto iters, not a Step-click latency.
-  //    Skipping the throttle block here means clicking Step in
-  //    RUNNING_PAUSED with `withPause=on` doesn't make the user wait
-  //    intervalMs before the next pause materializes.
-  //
-  // 2. Throttle (RUNNING_AUTO): drain command buffer → idle (suspends
-  //    runner's WORKER_TIMEOUT_MS) → setTimeout(intervalMs) → busy.
-  //    Cancellable mid-throttle via `cancelThrottle()` from the pause
-  //    handler.
-  //
-  // 3. Click-pause: `pauseRequested` is checked AFTER the throttle block
-  //    so it also works in continuous mode (where there's no throttle
-  //    to cancel — the flag is just consumed on the next iter).
-  //    Currently the Pause button is hidden in RUNNING_CONTINUOUS, but
-  //    the worker-side capability is wired for future use.
+  // onIter: engine fires this awaited callback at end of every iter. With
+  // Step / click-Pause / breakpoints all driven through the engine's pause
+  // controls (engine #102), the only thing left here is the RUNNING_AUTO
+  // throttle: drain the command buffer → `idle` (suspends the runner's
+  // WORKER_TIMEOUT_MS) → setTimeout(intervalMs) → `busy`. Cancellable
+  // mid-throttle via `cancelThrottle()` from the `pause` request handler.
+  // Skipped while stepping (`resumeAction === 'step'`) so a Step click never
+  // waits out the auto-run interval before its pause materializes.
   const onIterFn = async (m: OnPausePayload) => {
-    // Decide whether to dispatch a synthetic step-boundary pause via the
-    // pure `decideOnIter` helper. The decision resets `dispatchedAfter`
-    // to false (iter boundary) and may keep `stepRequested` true (when
-    // the synthetic is suppressed because an after-fire BP already paused
-    // at this iter — see §13a).
-    const iterDecision = decideOnIter({
-      stepRequested,
-      dispatchedAfterThisIter,
-    });
-    dispatchedAfterThisIter = iterDecision.nextDispatchedAfter;
-    stepRequested = iterDecision.nextStepRequested;
-    if (iterDecision.dispatchStep) {
-      await dispatchPause({
-        state: resolveDisplayName(m.state.id, m.state.name ?? ''),
-        currentSymbols: [...m.currentSymbols],
-        currentMatchKinds: [...m.matchedTransition.matchKinds],
-        debugBreak: {},
-        currentStateId: m.state.id,
-        nextStateId: machine?.tapeBlock
-          ? nextStateIdFromYield(m as unknown as MachineYield, machine.tapeBlock)
-          : null,
-        prevStateId: prevYieldedStateId,
-      });
-      return;
-    }
-    // If `stepRequested` is still true after the decision (suppression
-    // case), we don't run the throttle/click-pause branches — they apply
-    // only to non-step iters.
-    if (stepRequested) return;
+    if (resumeAction === 'step') return;
 
     if (runIntervalMs !== null && runIntervalMs > 0) {
       const drained = runCommandBuffer;
@@ -600,48 +552,68 @@ async function run(
       });
       send({ type: 'busy' });
     }
+  };
 
-    if (pauseRequested) {
-      pauseRequested = false;
-      await dispatchPause({
-        state: resolveDisplayName(m.state.id, m.state.name ?? ''),
-        currentSymbols: [...m.currentSymbols],
-        currentMatchKinds: [...m.matchedTransition.matchKinds],
-        debugBreak: {},
-        currentStateId: m.state.id,
-        nextStateId: machine?.tapeBlock
-          ? nextStateIdFromYield(m as unknown as MachineYield, machine.tapeBlock)
-          : null,
-        prevStateId: prevYieldedStateId,
-      });
+  // v7 adoption: drive the run through DebugSession (engine #102) instead
+  // of `machine.run({onPause, onStep, onIter})`. The engine's v7 run() is
+  // sync + callback-free; all observation moved into the session.
+  //
+  // PostMachine has its own debugRun() returning a PostDebugSession that
+  // wraps the engine session with post-specific MachineState wrapping
+  // (arrivalPath / candidatePaths) plus breakpoint-registry filtering.
+  // TuringMachine consumes the engine session directly.
+  const session = machine instanceof post.PostMachine
+    ? (machine as unknown as { debugRun: (o: { stepsLimit?: number }) => unknown })
+        .debugRun({ stepsLimit: maxSteps })
+    : new (turing as unknown as { DebugSession: new (m: unknown, o: unknown) => unknown })
+        .DebugSession(machine, { initialState, stepsLimit: maxSteps });
+
+  // Generic shape of both sessions. Local cast to a structural type so we
+  // don't pull DebugSession + PostDebugSession concretely into the worker
+  // boundary types.
+  const ses = session as SessionLike;
+  activeSes = ses;
+
+  ses.on('step', (m: MachineYield) => {
+    runCommandBuffer.push(commandsFromYield(m));
+    runReadsBuffer.push(readsFromYield(m));
+    runMatchKindsBuffer.push(matchKindsFromYield(m));
+    // After this step, iter K's transition has effectively "fired"
+    // (the runner advances state after step returns). Stash this state.id
+    // so iter K+1's before-pause has the prior state available as the
+    // FROM of the just-fired triple.
+    prevYieldedStateId = m.state.id;
+    stepsApplied += 1;
+  });
+  ses.on('pause', async (m) => {
+    // The engine's pause payload carries `pause` (PausedMachineState); the
+    // structural SessionLike listener types it as the leaner MachineYield, so
+    // read it through the OnPausePayload view onPauseFn already consumes.
+    const pm = m as OnPausePayload;
+    // Gate breakpoint pauses behind the debug toggle; step/manual (the user's
+    // own Step / click-Pause, driven via stepIn()/pause()) always surface.
+    if (pm.pause?.cause === 'breakpoint' && !debugEnabled) {
+      ses.continue();
+      return;
     }
-  };
+    // Dispatch `paused` and block until main resolves the resume decision.
+    await onPauseFn(pm);
+    // Resume per main's choice: another Step (stepIn), a Stop, or Continue.
+    if (resumeAction === 'stop') ses.stop();
+    else if (resumeAction === 'step') ses.stepIn();
+    else ses.continue();
+  });
+  // iter is AWAITED by the engine — return the Promise so the RUNNING_AUTO
+  // throttle's setTimeout inside onIterFn actually blocks the engine.
+  ses.on('iter', (m) => onIterFn(m));
 
-  const runOpts: Parameters<AnyMachine['run']>[0] = {
-    stepsLimit: maxSteps,
-    onStep: (m: MachineYield) => {
-      runCommandBuffer.push(commandsFromYield(m));
-      runReadsBuffer.push(readsFromYield(m));
-      runMatchKindsBuffer.push(matchKindsFromYield(m));
-      // After this onStep, iter K's transition has effectively "fired"
-      // (the runner advances state after onStep returns). Stash this
-      // state.id so iter K+1's before-pause has the prior state available
-      // as the FROM of the just-fired triple.
-      prevYieldedStateId = m.state.id;
-      stepsApplied += 1;
-    },
-    onPause: onPauseFn,
-    onIter: onIterFn,
-  };
-
-  // TuringMachine.run() requires initialState; PostMachine.run() ignores
-  // it (carries its own #initialState internally). Branch only here.
-  if (!(machine instanceof post.PostMachine)) {
-    runOpts.initialState = initialState;
-  }
+  // Step-from-start (run({step:true})): arm a before-iter-1 pause. stepIn()
+  // sets the step mode; with no pause-resolver yet its release is a no-op, so
+  // the first iter's before-side fires the `pause` event (cause 'step').
+  if (step) ses.stepIn();
 
   try {
-    await machine.run(runOpts);
+    await ses.start();
   } catch (err) {
     // The engine throws 'Long execution' when stepsLimit is reached. Check the
     // step counter at catch time — more reliable than a flag set in onStep
@@ -753,24 +725,22 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
       // Explicit `undefined` keeps the existing policy (cold-start Step's
       // resume calls don't pass intervalMs).
       if (req.intervalMs !== undefined) runIntervalMs = req.intervalMs;
-      // `step` controls whether onIter pauses again at the end of the next
-      // iter — set the flag here (was previously inside dispatchPause via
-      // armStepAfter; now a direct flag flip).
-      stepRequested = req.step ?? false;
+      // `step` selects how the paused `pause` listener resumes: a single
+      // engine stepIn() (pauses again before the next iter, cause 'step') or
+      // a plain continue(). Read by the listener after dispatchPause returns.
+      resumeAction = req.step ? 'step' : 'continue';
       r();
       return;
     }
 
     if (req.type === 'pause') {
-      // Click-pause. The throttle Promise (if any) is the synchronization
-      // point; cancelling it unblocks `onIter` which then sees
-      // `pauseRequested` and dispatches the synthetic `paused`. In
-      // continuous mode there's no throttle to cancel — the flag is just
-      // consumed on the next iter. If the worker is already paused or
-      // building, this is a no-op — main-thread guards it anyway via
-      // the runner.
+      // Click-Pause → engine external pause(): the session pauses at the next
+      // iter's before-side (cause 'manual') and fires the `pause` event.
+      // cancelThrottle() unblocks any in-flight RUNNING_AUTO throttle wait so
+      // the pause lands promptly instead of after the full interval. No-op
+      // unless actively running (main guards via the runner too).
       if (phase.kind !== 'running') return;
-      pauseRequested = true;
+      activeSes?.pause();
       cancelThrottle();
       return;
     }
@@ -811,13 +781,31 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
         });
         return;
       }
-      // Read both bits, compute the merged result (see `mergeDebugKinds`
-      // in `breakpointCoordination.ts` for the rules), write via the
-      // SETTER. Engine-side `state.debug = { before, after }` creates a
-      // fresh DebugConfig; Post's per-State lockdown intercepts the setter
-      // and routes through `setBreakpoint` so its registry stays in sync
-      // (a direct `state.debug.before = true` bypasses the lockdown and
-      // the breakpoint never fires).
+      // haltState (turing-machine-js#207): `debug` is a single boolean,
+      // not a DebugConfig — the menu shows one "Pause" toggle for halt.
+      // Branch out before reading per-side bits, since `boolean.before`
+      // would be `undefined` and `mergeDebugKinds` would flip "on" every
+      // click instead of toggling.
+      if (entry.state === turing.haltState) {
+        const enabled = turing.haltState.debug === true;
+        const nextEnabled = !enabled;
+        turing.haltState.debug = nextEnabled;
+        send({
+          type: 'breakpointToggled',
+          stateId: req.stateId,
+          kind: req.kind,
+          value: nextEnabled ? 'on' : 'off',
+        });
+        return;
+      }
+
+      // Non-halt: read both bits, compute the merged result (see
+      // `mergeDebugKinds` in `breakpointCoordination.ts` for the rules),
+      // write via the SETTER. Engine-side `state.debug = { before, after }`
+      // creates a fresh DebugConfig; Post's per-State lockdown intercepts
+      // the setter and routes through `setBreakpoint` so its registry
+      // stays in sync (a direct `state.debug.before = true` bypasses the
+      // lockdown and the breakpoint never fires).
       //
       // For Post specifically, we MUST clear first (`state.debug = null`)
       // because Post's lockdown PUSHES onto its `#breakpoints` array
@@ -830,15 +818,9 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
         after: debug.after === true,
       };
       const { next, debugValue } = mergeDebugKinds(current, req.kind);
-      if (entry.state === turing.haltState) {
-        // turing-machine-js#207: haltState.debug is a boolean — any kind
-        // (before/after) collapses to one switch. Write directly.
-        turing.haltState.debug = next.before || next.after;
-      } else {
-        entry.state.debug = null;
-        if (debugValue !== null) {
-          entry.state.debug = debugValue as turing.State['debug'];
-        }
+      entry.state.debug = null;
+      if (debugValue !== null) {
+        entry.state.debug = debugValue as turing.State['debug'];
       }
       send({
         type: 'breakpointToggled',

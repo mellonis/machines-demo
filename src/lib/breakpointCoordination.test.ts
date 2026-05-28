@@ -1,20 +1,16 @@
 import { describe, it, expect } from 'vitest';
-import {
-  decideOnIter,
-  mergeDebugKinds,
-} from './breakpointCoordination.ts';
+import { mergeDebugKinds } from './breakpointCoordination.ts';
 
 /**
  * Unit tests for the pure worker-side coordination helpers. Companion to
- * `docs/graph-highlight-and-breakpoints.md` — each `describe` block maps
- * to a section there:
+ * `docs/graph-highlight-and-breakpoints.md`:
  *
  *   §15  → mergeDebugKinds (per-kind toggle that preserves the other bit)
- *   §13a → decideOnIter (after-fire + Step suppression)
  *
- * (Removed: `decideJoinedBare` tests — the helper was deleted along with
- * the wrapper/bare-entry conflation rule it implemented. See the comment
- * in `breakpointCoordination.ts` for the rationale.)
+ * (Removed: `decideJoinedBare` + `decideOnIter` tests — both helpers were
+ * deleted. `decideOnIter` drove the synthetic step-boundary dispatch, which
+ * is gone now that Step / click-Pause run through the engine's stepIn() /
+ * pause() (engine #102). See the comment in `breakpointCoordination.ts`.)
  */
 
 describe('mergeDebugKinds (§15 per-kind toggle)', () => {
@@ -72,67 +68,6 @@ describe('mergeDebugKinds (§15 per-kind toggle)', () => {
     expect(mergeDebugKinds({ before: true, after: true }, 'after')).toEqual({
       next: { before: true, after: false },
       debugValue: { before: true },
-    });
-  });
-});
-
-describe('decideOnIter (§13a after-fire + Step suppression)', () => {
-  it('dispatches synthetic when Step requested and no after-fire this iter', () => {
-    expect(decideOnIter({ stepRequested: true, dispatchedAfterThisIter: false })).toEqual({
-      dispatchStep: true,
-      nextStepRequested: false,
-      nextDispatchedAfter: false,
-    });
-  });
-
-  it('skips synthetic but KEEPS stepRequested when after-fire dispatched this iter', () => {
-    // The fix for the duplicate-pause bug: after-fire + Step → don't
-    // double-dispatch at the same effective point, but propagate
-    // stepRequested to the next iter so it pauses there.
-    expect(decideOnIter({ stepRequested: true, dispatchedAfterThisIter: true })).toEqual({
-      dispatchStep: false,
-      nextStepRequested: true, // ← critical: must remain true
-      nextDispatchedAfter: false,
-    });
-  });
-
-  it('does nothing when no step requested', () => {
-    expect(decideOnIter({ stepRequested: false, dispatchedAfterThisIter: false })).toEqual({
-      dispatchStep: false,
-      nextStepRequested: false,
-      nextDispatchedAfter: false,
-    });
-  });
-
-  it('clears the after-fire flag even when no step requested', () => {
-    // Iter boundary always resets the flag — even if the user didn't
-    // click Step, the next iter starts with a clean slate.
-    expect(decideOnIter({ stepRequested: false, dispatchedAfterThisIter: true })).toEqual({
-      dispatchStep: false,
-      nextStepRequested: false,
-      nextDispatchedAfter: false,
-    });
-  });
-
-  it('regression scenario: BP-after-K + Step → suppress at K, advance to K+1', () => {
-    // Iter K: BP after fires, dispatches. User clicks Step.
-    // onIter for K runs with both flags set.
-    const k = decideOnIter({ stepRequested: true, dispatchedAfterThisIter: true });
-    expect(k).toEqual({
-      dispatchStep: false,
-      nextStepRequested: true,
-      nextDispatchedAfter: false,
-    });
-    // Iter K+1: assume no BP fired (typical case). onIter runs with
-    // stepRequested still true, flag false → dispatch synthetic.
-    const k1 = decideOnIter({
-      stepRequested: k.nextStepRequested,
-      dispatchedAfterThisIter: k.nextDispatchedAfter,
-    });
-    expect(k1).toEqual({
-      dispatchStep: true,
-      nextStepRequested: false,
-      nextDispatchedAfter: false,
     });
   });
 });

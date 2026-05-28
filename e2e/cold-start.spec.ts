@@ -23,12 +23,13 @@ test.describe('cold-start', () => {
   test('E-cold-start-step-debug-on: Step+debug=on parks at iter-1 with state info', async ({ page }) => {
     await page.getByRole('checkbox', { name: /^debug$/i }).check();
     await page.getByRole('button', { name: /^step$/i }).click();
-    // Cold-start Step always uses the run-mode after-trick; with debug=on the
-    // user-set breaks would also fire, but the example has none — the
-    // after-trick pause is what surfaces.
+    // Step is driven by the engine's stepIn() (engine #102) — a before-side
+    // pause: it parks BEFORE applying iter 1's command. With debug=on any
+    // user-set breaks would also fire, but the example has none, so the
+    // step pause is what surfaces.
     await expect(
       page.getByTestId('log-line').filter({
-        hasText: /paused at .*state .* after applying command/,
+        hasText: /paused at state .* before applying command/,
       }),
     ).toBeVisible({ timeout: 5_000 });
     // Run button relabels to "Continue" while paused.
@@ -160,9 +161,10 @@ test.describe('cold-start', () => {
     // Step doubles as Pause in RUNNING_AUTO — same button, icon + label
     // flip to a pause glyph and the word "Pause". Target by the rendered
     // label to assert it's actually labelled correctly AND enabled (this
-    // button is what the user clicks to pause an auto run). The
-    // "after applying command" phrasing falls out of debugBreak={} (the
-    // renderer falls back to "after" when neither before/after is set).
+    // button is what the user clicks to pause an auto run). Pause is the
+    // engine's external pause() (engine #102) — a before-side pause
+    // (cause: 'manual') at the next iter, so the line reads "before applying
+    // command".
     await expect(page.getByRole('button', { name: /^pause$/i })).toBeEnabled();
     await page.getByRole('button', { name: /^pause$/i }).click();
 
@@ -171,7 +173,7 @@ test.describe('cold-start', () => {
     // are engine-assigned (e.g. "id:N") so accept any non-whitespace run.
     await expect(
       page.getByTestId('log-line').filter({
-        hasText: /^paused at state \S+ after applying command/,
+        hasText: /^paused at state \S+ before applying command/,
       }),
     ).toBeVisible({ timeout: 3_000 });
 

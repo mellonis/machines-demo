@@ -166,7 +166,7 @@ export async function runScenario(input: ScenarioInput): Promise<ScenarioOutput>
 
   // The worker's onPauseFn equivalent — builds a PausedResponse-shaped
   // payload and feeds it to formatPauseLine.
-  function emitPauseLine(m: turing.MachineState): void {
+  function emitPauseLine(m: turing.PausedMachineState): void {
     const imminentHalt = computeImminentHalt({
       // Engine's MachineState.state has its `getSymbol`/`getNextState`
       // typed against the concrete `TapeBlock`; computeImminentHalt's
@@ -195,7 +195,8 @@ export async function runScenario(input: ScenarioInput): Promise<ScenarioOutput>
       state: displayedName,
       currentSymbols: [...m.currentSymbols],
       currentMatchKinds: [...m.matchedTransition.matchKinds],
-      debugBreak: { ...m.debugBreak },
+      // Forward the engine's pause descriptor as-is into the PausedResponse.
+      pause: m.pause,
       imminentHalt,
     } as unknown as PausedResponse;
     const blanks = alphabets.map((a) => a[0] ?? '');
@@ -225,20 +226,22 @@ export async function runScenario(input: ScenarioInput): Promise<ScenarioOutput>
     logs.push({ kind: 'step', text: entry.text });
   }
 
-  await machine.run({
+  const session = new turing.DebugSession(machine, {
     initialState,
     stepsLimit: input.maxSteps ?? 100,
-    onStep: (m) => {
-      // Per-iter lifecycle: `before → step → after → onIter`. `onStep`
-      // fires mid-iter, between before-pause and after-pause. We log the
-      // step line at this moment to match MachineView's log ordering.
-      emitStepLine(m);
-      stepsApplied += 1;
-    },
-    onPause: (m) => {
-      emitPauseLine(m);
-    },
   });
+  session.on('step', (m) => {
+    // Per-iter lifecycle: `pause(before) → step → pause(after) → iter`.
+    // step fires mid-iter, between any before-pause and after-pause. We log
+    // the step line at this moment to match MachineView's log ordering.
+    emitStepLine(m);
+    stepsApplied += 1;
+  });
+  session.on('pause', (m) => {
+    emitPauseLine(m);
+    session.continue();
+  });
+  await session.start();
 
   return {
     logs,
