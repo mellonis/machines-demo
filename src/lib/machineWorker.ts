@@ -49,14 +49,14 @@ import { decideOnIter, mergeDebugKinds } from './breakpointCoordination.ts';
 // couple of extra fields the engine ALSO emits but workerHelpers doesn't
 // declare:
 //   - `state.name` — used for log lines + debugger UI display.
-//   - `debugBreak` — set when the iter is a pause point; consumed by the
-//     halt-imminent detector and the after-fire suppression rule.
-// Both are optional / undefined-safe in the engine emit, so the handlers
-// gate their reads. Declared as a structural extension of MachineYield so a
-// MachineYield value flows directly into a parameter of this type — no cast.
+//   - `pause` — present on DebugSession `pause` events (engine v7); carries
+//     {side, cause}. Absent on `iter` events, so it's optional here —
+//     onIterFn ignores it, onPauseFn reads it.
+// Declared as a structural extension of MachineYield so a MachineYield value
+// flows directly into a parameter of this type — no cast.
 type OnPausePayload = Omit<MachineYield, 'state'> & {
   state: MachineYield['state'] & { name?: string };
-  debugBreak?: { before?: true; after?: true; cause?: 'breakpoint' | 'step' | 'manual' };
+  pause?: { side: 'before' | 'after'; cause: 'breakpoint' | 'step' | 'manual' };
 };
 
 type AnyMachine = {
@@ -489,7 +489,7 @@ async function run(
     // the after-fire and the synthetic would land at the same execution
     // point. Only `after` matters here — `before` fires mid-iter, distinct
     // from end-of-iter. See `decideOnIter` for the suppression rule.
-    if (m.debugBreak?.after === true) dispatchedAfterThisIter = true;
+    if (m.pause?.side === 'after') dispatchedAfterThisIter = true;
     // Halt-imminent detection extracted to lib/imminentHalt — see that
     // module's JSDoc for the gating rules (after-only, halt-BP-only,
     // halt-bound-only). Keeping the logic pure lets the scenario harness
@@ -504,7 +504,11 @@ async function run(
       state: displayedName,
       currentSymbols: [...m.currentSymbols],
       currentMatchKinds: [...m.matchedTransition.matchKinds],
-      debugBreak: { ...m.debugBreak },
+      // Translate the engine's one-sided pause.side into the worker→main
+      // {before?, after?} protocol (unchanged; MachineView reads that shape).
+      debugBreak: m.pause?.side === 'before' ? {before: true}
+        : m.pause?.side === 'after' ? {after: true}
+          : {},
       currentStateId: m.state.id,
       nextStateId: machine?.tapeBlock
         ? nextStateIdFromYield(m as unknown as MachineYield, machine.tapeBlock)

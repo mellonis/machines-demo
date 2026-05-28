@@ -166,7 +166,7 @@ export async function runScenario(input: ScenarioInput): Promise<ScenarioOutput>
 
   // The worker's onPauseFn equivalent — builds a PausedResponse-shaped
   // payload and feeds it to formatPauseLine.
-  function emitPauseLine(m: turing.MachineState): void {
+  function emitPauseLine(m: turing.PausedMachineState): void {
     const imminentHalt = computeImminentHalt({
       // Engine's MachineState.state has its `getSymbol`/`getNextState`
       // typed against the concrete `TapeBlock`; computeImminentHalt's
@@ -195,7 +195,9 @@ export async function runScenario(input: ScenarioInput): Promise<ScenarioOutput>
       state: displayedName,
       currentSymbols: [...m.currentSymbols],
       currentMatchKinds: [...m.matchedTransition.matchKinds],
-      debugBreak: { ...m.debugBreak },
+      // Translate the engine's one-sided pause.side into the PausedResponse
+      // {before?, after?} shape that formatPauseLine reads.
+      debugBreak: m.pause.side === 'before' ? {before: true} : {after: true},
       imminentHalt,
     } as unknown as PausedResponse;
     const blanks = alphabets.map((a) => a[0] ?? '');
