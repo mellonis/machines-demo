@@ -398,7 +398,7 @@ async function dispatchPause(info: {
    *  before / after). Drives the wildcard marker on the pause-line's
    *  "for symbols: …" group; parallel to `currentSymbols`. */
   currentMatchKinds: ('wildcard' | 'literal')[];
-  debugBreak: { before?: true; after?: true };
+  pause: { side?: 'before' | 'after'; cause: 'breakpoint' | 'step' | 'manual' };
   currentStateId: number | null;
   nextStateId: number | null;
   prevStateId: number | null;
@@ -424,7 +424,7 @@ async function dispatchPause(info: {
     state: info.state,
     currentSymbols: info.currentSymbols,
     currentMatchKinds: info.currentMatchKinds,
-    debugBreak: info.debugBreak,
+    pause: info.pause,
     imminentHalt: info.imminentHalt,
   });
   await new Promise<void>((resolve) => {
@@ -504,11 +504,8 @@ async function run(
       state: displayedName,
       currentSymbols: [...m.currentSymbols],
       currentMatchKinds: [...m.matchedTransition.matchKinds],
-      // Translate the engine's one-sided pause.side into the worker→main
-      // {before?, after?} protocol (unchanged; MachineView reads that shape).
-      debugBreak: m.pause?.side === 'before' ? {before: true}
-        : m.pause?.side === 'after' ? {after: true}
-          : {},
+      // Engine breakpoint pause — forward the descriptor as-is (always has a side).
+      pause: m.pause ?? {cause: 'breakpoint'},
       currentStateId: m.state.id,
       nextStateId: machine?.tapeBlock
         ? nextStateIdFromYield(m as unknown as MachineYield, machine.tapeBlock)
@@ -556,7 +553,7 @@ async function run(
         state: resolveDisplayName(m.state.id, m.state.name ?? ''),
         currentSymbols: [...m.currentSymbols],
         currentMatchKinds: [...m.matchedTransition.matchKinds],
-        debugBreak: {},
+        pause: {cause: 'step'},  // Step-button synthetic boundary — no before/after side.
         currentStateId: m.state.id,
         nextStateId: machine?.tapeBlock
           ? nextStateIdFromYield(m as unknown as MachineYield, machine.tapeBlock)
@@ -605,7 +602,7 @@ async function run(
         state: resolveDisplayName(m.state.id, m.state.name ?? ''),
         currentSymbols: [...m.currentSymbols],
         currentMatchKinds: [...m.matchedTransition.matchKinds],
-        debugBreak: {},
+        pause: {cause: 'manual'},  // Click-pause synthetic boundary — no before/after side.
         currentStateId: m.state.id,
         nextStateId: machine?.tapeBlock
           ? nextStateIdFromYield(m as unknown as MachineYield, machine.tapeBlock)

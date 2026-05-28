@@ -230,11 +230,14 @@ export type PausedResponse = {
    *  wildcard marker in the pause-line's "for symbols: …" group so it
    *  matches the step-log line for the same iter. */
   currentMatchKinds: ('wildcard' | 'literal')[];
-  /** At least one of `before` / `after` is `true` for user-authored breaks
-   * and cold-start step (the armed `.after`). A click-pause from RUNNING_AUTO
-   * lands a synthetic `paused` with `debugBreak = {}` — no engine-fired break,
-   * the worker dispatched it from inside `onStep` when the user clicked Pause. */
-  debugBreak: { before?: true; after?: true };
+  /** Pause descriptor (mirrors the engine's `m.pause`, engine #102).
+   * - `side` — `'before'` / `'after'` for an engine breakpoint pause. ABSENT
+   *   for a worker-synthesized boundary (a Step-button stop or a click-pause
+   *   from RUNNING_AUTO), which has no before/after timing — formatPauseLine
+   *   renders those as the generic "after applying command" line.
+   * - `cause` — `'breakpoint'` (engine `state.debug` / `haltState.debug`),
+   *   `'step'` (Step-button synthetic), or `'manual'` (click-pause synthetic). */
+  pause: { side?: 'before' | 'after'; cause: 'breakpoint' | 'step' | 'manual' };
   /**
    * Set on an `after`-pause whose iter's transition leads to haltState
    * AND `haltState.debug === true` (the user armed the halt-BP). Drives

@@ -161,8 +161,8 @@ test.describe('cold-start', () => {
     // flip to a pause glyph and the word "Pause". Target by the rendered
     // label to assert it's actually labelled correctly AND enabled (this
     // button is what the user clicks to pause an auto run). The
-    // "after applying command" phrasing falls out of debugBreak={} (the
-    // renderer falls back to "after" when neither before/after is set).
+    // "after applying command" phrasing falls out of a side-less pause
+    // (cause: 'manual'); the renderer falls back to "after" when no side is set.
     await expect(page.getByRole('button', { name: /^pause$/i })).toBeEnabled();
     await page.getByRole('button', { name: /^pause$/i }).click();
 

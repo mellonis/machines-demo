@@ -195,9 +195,8 @@ export async function runScenario(input: ScenarioInput): Promise<ScenarioOutput>
       state: displayedName,
       currentSymbols: [...m.currentSymbols],
       currentMatchKinds: [...m.matchedTransition.matchKinds],
-      // Translate the engine's one-sided pause.side into the PausedResponse
-      // {before?, after?} shape that formatPauseLine reads.
-      debugBreak: m.pause.side === 'before' ? {before: true} : {after: true},
+      // Forward the engine's pause descriptor as-is into the PausedResponse.
+      pause: m.pause,
       imminentHalt,
     } as unknown as PausedResponse;
     const blanks = alphabets.map((a) => a[0] ?? '');

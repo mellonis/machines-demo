@@ -32,11 +32,11 @@ export function formatPauseLine(
 ): string {
   const stateRef = paused.state ? `state ${paused.state}` : 'unnamed state';
 
-  if (paused.debugBreak.after && paused.imminentHalt !== undefined) {
+  if (paused.pause.side === 'after' && paused.imminentHalt !== undefined) {
     return `paused before halt (after ${paused.state ?? 'unnamed state'})`;
   }
 
-  if (paused.debugBreak.before) {
+  if (paused.pause.side === 'before') {
     const symbols = paused.currentSymbols
       .map((s, i) => {
         // Wildcard: always show literal `*='X'` — the point of the
