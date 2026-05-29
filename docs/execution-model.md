@@ -186,7 +186,7 @@ flowchart TD
     Resolve1 -->|true| ManualOut[→ MANUAL]
     Resolve1 -->|false| IdleOut[→ IDLE]
     Action -->|Step| RunStep[runner.run debug=debugMode, step=true]
-    RunStep --> PauseOut[worker calls ses.stepIn before ses.start; pauses before iter 1 → RUNNING_PAUSED]
+    RunStep --> PauseOut[worker calls ses.stepIn before ses.start, pausing before iter 1 → RUNNING_PAUSED]
     Action -->|Run| WithPause{withPause?}
     WithPause -->|true| RunAuto[runner.run debug=debugMode, intervalMs=N — iter event throttles each iter]
     RunAuto --> AutoOut[→ RUNNING_AUTO]
@@ -287,15 +287,15 @@ sequenceDiagram
 
     User->>Main: click Run [debug=on]
     Main->>Worker: postMessage { type: 'run', debug: true }
-    Worker->>Session: new DebugSession(machine, ...) — ses.on('pause'); ses.start()
+    Worker->>Session: new DebugSession(machine, ...) — ses.on('pause'), ses.start()
     Session-->>Worker: pause event, m.pause = { side: 'before', cause: 'breakpoint' }
     Worker-->>Main: { type: 'paused', state, currentSymbols, pause: { side: 'before', cause: 'breakpoint' } }
-    Note over Worker: timer suspended; pause listener awaits resume
+    Note over Worker: timer suspended — pause listener awaits resume
     Note over Main: → RUNNING_PAUSED — log paused at state X before applying ...
 
     User->>Main: click Step
     Main->>Worker: postMessage { type: 'resume', step: true }
-    Note over Worker: timer restarted; resumeAction = 'step'
+    Note over Worker: timer restarted — resumeAction = 'step'
     Worker->>Session: ses.stepIn()
     Session-->>Worker: pause event, m.pause = { side: 'before', cause: 'step' }
     Worker-->>Main: { type: 'paused', pause: { side: 'before', cause: 'step' } }
@@ -304,7 +304,7 @@ sequenceDiagram
 
     User->>Main: click Run (Continue)
     Main->>Worker: postMessage { type: 'resume', step: false }
-    Note over Worker: timer restarted; resumeAction = 'continue'
+    Note over Worker: timer restarted — resumeAction = 'continue'
     Worker->>Session: ses.continue()
     alt run completes naturally
         Session-->>Worker: halt event → ses.start() resolves
