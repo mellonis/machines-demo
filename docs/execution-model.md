@@ -4,7 +4,7 @@
 
 ## 1. Overview
 
-The demo runs user-typed JavaScript inside a Web Worker that drives a `@turing-machine-js/machine` v6 instance. The main thread tracks the worker's progress with a 7-mode state machine: three resting states (DEMO, IDLE, MANUAL), three running states (RUNNING_AUTO, RUNNING_CONTINUOUS, RUNNING_PAUSED), and one terminal (HALTED).
+The demo runs user-typed JavaScript inside a Web Worker that drives a `@turing-machine-js/machine` v7.0.0-alpha.6 machine through a **`DebugSession`** ([engine #102](https://github.com/mellonis/turing-machine-js/issues/102)). The engine's v7 `run()` is sync + callback-free; all interactive observation (breakpoints, step controls, click-pause, throttle) moved into the session. The worker constructs one — `machine.debugRun(...)` for Post (returns a `PostDebugSession`), `new DebugSession(machine, ...)` for Turing — and listens to its `step` / `pause` / `iter` / `halt` events. The main thread tracks the worker's progress with a 7-mode state machine: three resting states (DEMO, IDLE, MANUAL), three running states (RUNNING_AUTO, RUNNING_CONTINUOUS, RUNNING_PAUSED), and one terminal (HALTED).
 
 Most user actions are mode transitions; a few — debug toggle, withPause toggle, Apply — are flag changes or in-place mirror writes that don't move the mode.
 
@@ -76,19 +76,19 @@ Entry: Take Control from any non-MANUAL mode; post-RUNNING_* completion or Build
 Exit: Step / Run via §7 cold-start (→ RUNNING_AUTO / RUNNING_CONTINUOUS / RUNNING_PAUSED), Build (→ MANUAL, reload), Apply (stays MANUAL, writes to mirror).
 
 ### RUNNING_AUTO
-The worker is running inside `machine.run({ onStep, onPause, onIter })` with the throttle inside `onIter` (the `withPause` interval awaited at end-of-iter). Belt animations follow the cadence; the user can click Pause to suspend.
+The worker is running inside the session's `start()` with the throttle on the awaited `iter` event (the `withPause` interval awaited at end-of-iter). Belt animations follow the cadence; the user can click Pause to suspend (the engine's external `pause()`).
 Entry: Run from IDLE / MANUAL / HALTED with `withPause=on`; Continue from RUNNING_PAUSED with `withPause=on`.
 Exit: Pause (→ RUNNING_PAUSED), debug break with `debug=on` (→ RUNNING_PAUSED), Stop (→ HALTED), run completion (→ HALTED), Take Control (→ MANUAL).
 
 ### RUNNING_CONTINUOUS
-The worker is running inside `machine.run({ onStep, onPause, onIter })` with no throttle (`onIter` no-ops in this mode) — snap-to-final. Belt animation is suppressed; per-step commands batch-log on completion. Stop is visible as the user's kill-switch; the Step button stays rendered but disabled (no per-iter checkpoint to pause at).
+The worker is running inside the session's `start()` with no throttle (the `iter` listener no-ops in this mode) — snap-to-final. Belt animation is suppressed; per-step commands batch-log on completion. Stop is visible as the user's kill-switch; the Step button stays rendered but disabled (no per-iter checkpoint to pause at).
 Entry: Run from IDLE / MANUAL / HALTED with `withPause=off`; Continue from RUNNING_PAUSED with `withPause=off`.
 Exit: debug break with `debug=on` (→ RUNNING_PAUSED), Stop (→ HALTED), run completion (→ HALTED), Take Control (→ MANUAL).
 
 ### RUNNING_PAUSED
-The worker is suspended inside `machine.run()` awaiting a `resume` message from the main thread. Reachable from any RUNNING_* mode via debug break, click-pause, or cold-start arming. The Run button reads "Continue" throughout any RUNNING_* mode (disabled in AUTO/CONTINUOUS, enabled here). Build is disabled while a run is in flight (including PAUSED) — to start over the user must Stop first, then Build, which makes the worker tear-down explicit rather than silent.
-Entry: cold-start Step (arms `initialState.debug.after`); break fires from RUNNING_AUTO / RUNNING_CONTINUOUS with `debug=on`; click-pause from RUNNING_AUTO; Step self-loop from RUNNING_PAUSED.
-Exit: Step (arm next `.after`, → RUNNING_PAUSED via re-pause), Continue (→ RUNNING_AUTO / RUNNING_CONTINUOUS for the duration of the resume), Stop (terminate worker → HALTED), Take Control (→ MANUAL).
+The worker is blocked inside the session's `pause` listener (the engine awaits an internal resume-promise) and the worker's own listener awaits a `resume` message from the main thread before deciding how to continue. Reachable from any RUNNING_* mode via debug break, click-pause, or cold-start Step. The Run button reads "Continue" throughout any RUNNING_* mode (disabled in AUTO/CONTINUOUS, enabled here). Build is disabled while a run is in flight (including PAUSED) — to start over the user must Stop first, then Build, which makes the worker tear-down explicit rather than silent.
+Entry: cold-start Step (`run({ step: true })` arms `ses.stepIn()` before `ses.start()` → pauses before iter 1); break fires from RUNNING_AUTO / RUNNING_CONTINUOUS with `debug=on`; click-pause from RUNNING_AUTO; Step self-loop from RUNNING_PAUSED.
+Exit: Step (`resume({ step: true })` → the pause listener calls `ses.stepIn()`, → RUNNING_PAUSED via re-pause before the next iter), Continue (`ses.continue()`, → RUNNING_AUTO / RUNNING_CONTINUOUS for the duration of the resume), Stop (`ses.stop()`, terminate worker → HALTED), Take Control (→ MANUAL).
 
 ### HALTED
 Terminal state. The machine reached its halt state, errored, timed out, or hit `MAX_STEPS` truncation. Tape is frozen at the final state. Build / Step / Run reload-from-code. Take Control is visible only when `!userTookControl`.
@@ -99,7 +99,7 @@ Exit: Build (→ IDLE if `!userTookControl`, → MANUAL if `userTookControl`), S
 
 Four flags govern transitions and per-action behavior. Three are user-visible UI controls; one is a sticky latch.
 
-- **`debugMode`** — `boolean`. UI checkbox in the Toolbar, persisted to `localStorage:machines-demo:<engine>:debugMode`. Gates whether user-authored `state.debug` / `haltState.debug` breaks pause execution. Mid-run toggle pushes `setDebug(on)` to the worker (the only mode-aware effect on a flag toggle).
+- **`debugMode`** — `boolean`. UI checkbox in the Toolbar, persisted to `localStorage:machines-demo:<engine>:debugMode`. Gates whether **breakpoint-cause** pauses (the `pause` event's `cause: 'breakpoint'` — a `state.debug` / `haltState.debug` match) surface; when off, the worker's `pause` listener calls `ses.continue()` and runs through. **Step-cause and manual-cause pauses always surface regardless of `debugMode`** — they're the user's own Step / click-Pause. Mid-run toggle pushes `setDebug(on)` to the worker (flips the worker-side `debugEnabled` gate; the only mode-aware effect on a flag toggle).
 - **`withPause`** — `boolean`. UI checkbox + interval input in the Toolbar. Selects RUNNING_AUTO (with throttle) vs RUNNING_CONTINUOUS (snap-to-final) on the next Run. The toggle itself (`S-withpause-toggle`) has no immediate runtime effect; it's read at Run-click time.
 - **`halted`** — `boolean`. Derived from worker `built` / `ran` / `error` responses. Drives the HALTED-mode transition.
 - **`userTookControl`** — `boolean`. Sticky latch, starts `false`, set `true` on Take Control click, never re-enables. Marks the "manual track": after RUNNING_* / HALTED, post-action mode resolution lands MANUAL when true, IDLE when false.
@@ -118,7 +118,7 @@ The loop is entirely a main-thread effect; the worker doesn't see DEMO. The mirr
 
 **Scenario IDs.**
 - `S-build-demo` — reload, → IDLE.
-- `S-step-demo-{off,on}` — cold-start Step. Worker arms `initialState.debug.after = true`, runs, → RUNNING_PAUSED. Per §7.
+- `S-step-demo-{off,on}` — cold-start Step. Worker calls `ses.stepIn()` before `ses.start()`, pauses before iter 1, → RUNNING_PAUSED. Per §7.
 - `S-run-demo-{off,on}-{auto,cont}` — cold-start Run. → RUNNING_AUTO or RUNNING_CONTINUOUS by withPause. Per §7.
 - `S-takectl-demo` — `userTookControl = true`, → MANUAL.
 
@@ -171,7 +171,7 @@ The cold-start path (Build / Step / Run from IDLE, MANUAL, or HALTED — and DEM
 The path is identical from IDLE, MANUAL, and HALTED. Each Build / Step / Run reloads the worker, builds a fresh mirror, then routes by action:
 
 - **Build** — reload only. → IDLE if `!userTookControl`, → MANUAL if `userTookControl`.
-- **Step** — reload, call `runner.run({ debug: debugMode, step: true })`. Worker sets `stepRequested = true`; `onIter` dispatches paused at end of iter 1 → RUNNING_PAUSED. With `debug=on` and a user-authored `state.debug.before` on `initialState`, the before-fire `onPause` interposes first; same target mode. **Step is a manual action — it ignores `intervalMs`.** Even if `withPause=on` and `intervalMs=1s`, the Step iter happens immediately (no throttle). The interval applies only to actual RUNNING_AUTO iters; clicking Step is not an auto iter. (Pre-v6.4.0 the Step boundary worked via arming `initialState.debug.after = true` and pausing at the after-fire; the engine's `onIter` hook in v6.4.0 lets the worker do this without mutating user state.)
+- **Step** — reload, call `runner.run({ debug: debugMode, step: true })`. The worker calls `ses.stepIn()` *before* `ses.start()`, which arms the step mode so the session pauses **before iter 1** (`m.pause: { side: 'before', cause: 'step' }`) → RUNNING_PAUSED. **No command has been applied yet** — the highlight / pause line point at the *about-to-fire* transition, not a just-applied one. With `debug=on` and a user-authored `state.debug.before` on `initialState`, the pause fires at the same moment but reports `cause: 'breakpoint'` (the engine's `breakpoint > step > manual` precedence when one iter satisfies several triggers); same target mode. **Step is a manual action — it ignores `intervalMs`.** Even if `withPause=on` and `intervalMs=1s`, the Step pause materializes immediately: the throttle lives on the awaited `iter` event, and the `iter` listener early-returns while a step is in flight. The interval applies only to actual RUNNING_AUTO iters; clicking Step is not an auto iter.
 - **Run** — reload, call `runner.run({ debug: debugMode })`. → RUNNING_AUTO (`withPause=on`, `onIter` awaits the throttle) or RUNNING_CONTINUOUS (`withPause=off`, `onIter` no-ops). Debug breaks during the run land → RUNNING_PAUSED.
 
 If the reload itself fails (build error in user code), → HALTED with an error log; covered by walk-through 7.
@@ -186,11 +186,11 @@ flowchart TD
     Resolve1 -->|true| ManualOut[→ MANUAL]
     Resolve1 -->|false| IdleOut[→ IDLE]
     Action -->|Step| RunStep[runner.run debug=debugMode, step=true]
-    RunStep --> PauseOut[worker sets stepRequested; onIter dispatches paused after iter 1 → RUNNING_PAUSED]
+    RunStep --> PauseOut[worker calls ses.stepIn before ses.start; pauses before iter 1 → RUNNING_PAUSED]
     Action -->|Run| WithPause{withPause?}
-    WithPause -->|true| RunAuto[runner.run debug=debugMode, intervalMs=N — onIter throttles each iter]
+    WithPause -->|true| RunAuto[runner.run debug=debugMode, intervalMs=N — iter event throttles each iter]
     RunAuto --> AutoOut[→ RUNNING_AUTO]
-    WithPause -->|false| RunCont[runner.run debug=debugMode, no intervalMs — onIter no-ops]
+    WithPause -->|false| RunCont[runner.run debug=debugMode, no intervalMs — iter listener no-ops]
     RunCont --> ContOut[→ RUNNING_CONTINUOUS]
 ```
 
@@ -206,10 +206,10 @@ flowchart TD
 
 ### Resume from PAUSED
 
-The Run / Continue button (labelled "Continue" throughout any RUNNING_*; only clickable in RUNNING_PAUSED) doesn't reload — it sends `runner.resume({ step: false })` and the worker continues inside the same in-flight `machine.run()` invocation. Two outcomes by `debug`:
+The Run / Continue button (labelled "Continue" throughout any RUNNING_*; only clickable in RUNNING_PAUSED) doesn't reload — it sends `runner.resume({ step: false })`, which sets the worker's `resumeAction` and resolves the pending pause-promise; the worker's `pause` listener then calls `ses.continue()` and the run advances inside the same in-flight session. Two outcomes by `debug`:
 
-- `S-continue-paused-off` — `runner.resume({ step: false })`. Debug breaks are not honored (worker-side `debugEnabled = false`), so the run continues to halt → HALTED on completion. Stop / error / timeout still terminate the worker normally.
-- `S-continue-paused-on` — `runner.resume({ step: false })`. Debug breaks fire as encountered → next RUNNING_PAUSED. The user can click Continue again, repeating across multiple paused / resume cycles until halt or Stop.
+- `S-continue-paused-off` — `runner.resume({ step: false })`. Breakpoint-cause pauses are not honored (worker-side `debugEnabled = false`, so the `pause` listener auto-`continue()`s past any `cause: 'breakpoint'`), so the run continues to halt → HALTED on completion. Stop / error / timeout still terminate the worker normally.
+- `S-continue-paused-on` — `runner.resume({ step: false })`. Breakpoint pauses fire as encountered → next RUNNING_PAUSED. The user can click Continue again, repeating across multiple paused / resume cycles until halt or Stop.
 
 The button's label is "Run" in the resting modes (DEMO / IDLE / MANUAL / HALTED) where the action is a cold start, and "Continue" in every RUNNING_* mode (resume / let the run finish). The button is enabled in resting modes and in RUNNING_PAUSED; disabled in RUNNING_AUTO / RUNNING_CONTINUOUS (the run is already advancing on its own).
 
@@ -223,15 +223,15 @@ Mode-transition outcomes for user actions across the three running / paused mode
 
 | Action | RUNNING_AUTO | RUNNING_CONTINUOUS | RUNNING_PAUSED |
 |---|---|---|---|
-| **Step (debug=off)** | `S-step-auto-off`: pause label — suspend run loop, → PAUSED | — | `S-step-paused-off`: arm `.after` on next state, resume(step), → PAUSED |
-| **Step (debug=on)** | `S-step-auto-on`: pause label — suspend, → PAUSED | — | `S-step-paused-on`: arm `.after`, resume(step), → PAUSED (a user break may interpose first) |
+| **Step (debug=off)** | `S-step-auto-off`: pause label — `ses.pause()`, → PAUSED | — | `S-step-paused-off`: resume(step) → `ses.stepIn()`, before-side, → PAUSED |
+| **Step (debug=on)** | `S-step-auto-on`: pause label — `ses.pause()`, → PAUSED | — | `S-step-paused-on`: resume(step) → `ses.stepIn()`, before-side, → PAUSED (a breakpoint may report `cause:'breakpoint'` if it lands on the same iter) |
 | **Stop** | `S-stop-auto`: terminate, → HALTED | `S-stop-cont`: terminate, → HALTED | `S-stop-paused`: terminate, suppress failHalted, → HALTED |
 | **Take Control** | `S-takectl-auto`: latch userTookControl=true, terminate, → MANUAL | `S-takectl-cont`: latch, terminate, → MANUAL | `S-takectl-paused`: latch, terminate, → MANUAL |
 
 Notes:
 - Every cell is a mode transition (or `—` for hidden / disabled). Flag-change actions (debug toggle, withPause toggle) live in §3 — they don't cause mode transitions.
 - **Build is rendered but disabled across all RUNNING_* (AUTO / CONTINUOUS / PAUSED)** — a pending worker request blocks Build, including the paused-but-still-pending case. To rebuild, the user clicks Stop or Take Control first (terminate the worker), then Build is available from HALTED / MANUAL. The Stop → Build sequence keeps the worker tear-down explicit instead of silently destroying paused state on a stray Build click.
-- All RUNNING_* paths use `run()`. "Pause" from RUNNING_AUTO suspends inside run-mode (the throttle's setTimeout) and lands in PAUSED — the same paused state used by debug breaks. The Pause affordance is the Step button with its label and icon flipped while RUNNING_AUTO; clicking it sends a `pause` request to the worker. In RUNNING_CONTINUOUS that same button stays labelled `Step` and is disabled (no per-iter checkpoint), so the user's only kill-switch is Stop.
+- All RUNNING_* paths drive the same `DebugSession`. "Pause" from RUNNING_AUTO calls the engine's external `ses.pause()` — the session pauses at the next iter's before-side (`cause: 'manual'`) and lands in PAUSED, the same paused state used by breakpoints and Step. The worker also `cancelThrottle()`s so an in-flight RUNNING_AUTO interval doesn't delay the pause. The Pause affordance is the Step button with its label and icon flipped while RUNNING_AUTO; clicking it sends a `pause` request to the worker. In RUNNING_CONTINUOUS that same button stays labelled `Step` and is disabled (no per-iter checkpoint), so the user's only kill-switch is Stop.
 - **RUNNING_CONTINUOUS shares most of RUNNING_AUTO's control surface** — Stop, Take Control, debug toggle all available. The throttle / animation differ, and the Step-→-Pause affordance is suppressed in CONTINUOUS (button rendered but disabled). Take Control mid-CONTINUOUS can lose the race to completion, but no race produces a broken state — terminate-or-complete are both clean exits.
 - Run / Continue is a single-column action (only meaningful from RUNNING_PAUSED). It's documented in §7 Resume from PAUSED rather than in the matrix.
 - DEMO, IDLE, MANUAL, HALTED are not matrix columns — they have their own sections (§4, §5, §6, §9).
@@ -260,20 +260,21 @@ Each walk-through expands a contested or non-obvious path with sequence, log ent
 
 **Sequence**
 1. User clicks Step while in RUNNING_PAUSED.
-2. Main thread arms `.after` on the relevant state — `m.state` if the current pause was a `before`-fire, `m.nextState` if it was an `after`-fire. The mutation is captured in `pendingRestore` for later un-application.
-3. `runner.resume({ step: true })` resolves the worker's pending Promise with the step intent.
-4. Worker un-applies any prior `pendingRestore`, then runs until the armed `.after` fire (or until a user-authored break interposes when `debug=on`).
-5. Worker sends `paused`; main thread enters RUNNING_PAUSED with the new break info, runs `pendingRestore` for the new arm.
+2. `runner.resume({ step: true })` sets the worker's `resumeAction = 'step'` and resolves the pending pause-promise — no main-thread engine mutation.
+3. The worker's `pause` listener wakes, sees `resumeAction === 'step'`, and calls `ses.stepIn()`. The session resumes and pauses **before the next iter** (`m.pause: { side: 'before', cause: 'step' }`) — or sooner, at a breakpoint, when `debug=on`.
+4. Worker sends `paused`; main thread enters RUNNING_PAUSED with the new pause info.
+
+Each Step advances exactly one iter, same as before — but the displayed pause is now the *before* side of the next iter (pre-command), not the *after* side. The "Step advances one iter" invariant survives; the pause side flipped.
 
 **Log entries**
-- `paused at state <X> after applying command for symbols: [<syms>]`
+- `paused at state <X> before applying command for symbols: [<syms>]`
 
 **Worker calls**
-- `resume({ step: true })`
+- `resume({ step: true })` → worker `ses.stepIn()`
 
 **Edge cases**
-- `debug=on`: a user-authored `.before` may interpose before the armed `.after` fires. Both produce a normal `paused` response; the long-format log line distinguishes them by `before` vs `after`.
-- The halting iter's armed `.after` never fires (engine quirk). If the next iter halts the machine, the worker sends `ran` instead of a final `paused` — the run lands in HALTED. Tracked in [turing-machine-js#108](https://github.com/mellonis/turing-machine-js/issues/108).
+- `debug=on`: a user-authored `.before` breakpoint on the next iter's state lands on the same moment the step would. The engine fires a single `pause` event and resolves the `breakpoint > step > manual` precedence in favor of `cause: 'breakpoint'`; the step mode is still consumed (one-shot rule). The long-format log line reads the same `before` side either way.
+- Stepping onto the halt-triggering iter: when `haltState.debug` is on the worker labels the resulting after-side halt pause "paused before halt (after X)" (engine #207 — `m.state` is the triggering state, `m.pause.side === 'after'`). When the halt breakpoint is off, the run simply finishes and the worker sends `ran` → HALTED.
 
 The sequence diagram below shows the complete cycle: Run (debug=on) → break → Step → re-pause → Continue → halt or further breaks.
 
@@ -282,45 +283,43 @@ sequenceDiagram
     actor User
     participant Main as Main thread (MachineView)
     participant Worker
-    participant Engine as machine.run()
+    participant Session as DebugSession
 
     User->>Main: click Run [debug=on]
     Main->>Worker: postMessage { type: 'run', debug: true }
-    Worker->>Engine: machine.run({ onPause })
-    Engine-->>Worker: yield N, state.debug.before fires
-    Worker-->>Main: { type: 'paused', state, currentSymbols, debugBreak: { before: true } }
-    Note over Worker: timer suspended
+    Worker->>Session: new DebugSession(machine, ...) — ses.on('pause'); ses.start()
+    Session-->>Worker: pause event, m.pause = { side: 'before', cause: 'breakpoint' }
+    Worker-->>Main: { type: 'paused', state, currentSymbols, pause: { side: 'before', cause: 'breakpoint' } }
+    Note over Worker: timer suspended; pause listener awaits resume
     Note over Main: → RUNNING_PAUSED — log paused at state X before applying ...
 
     User->>Main: click Step
-    Main->>Main: arm m.state.debug.after = true (pendingRestore captured)
     Main->>Worker: postMessage { type: 'resume', step: true }
-    Note over Worker: timer restarted
-    Worker->>Engine: resolve onPause Promise
-    Engine-->>Worker: yield N+1, state.debug.after fires (armed)
-    Worker->>Worker: pendingRestore() — undo arm
-    Worker-->>Main: { type: 'paused', debugBreak: { after: true } }
+    Note over Worker: timer restarted; resumeAction = 'step'
+    Worker->>Session: ses.stepIn()
+    Session-->>Worker: pause event, m.pause = { side: 'before', cause: 'step' }
+    Worker-->>Main: { type: 'paused', pause: { side: 'before', cause: 'step' } }
     Note over Worker: timer suspended
-    Note over Main: → RUNNING_PAUSED — log paused at state X after applying ...
+    Note over Main: → RUNNING_PAUSED — log paused at state X before applying ...
 
     User->>Main: click Run (Continue)
     Main->>Worker: postMessage { type: 'resume', step: false }
-    Note over Worker: timer restarted
-    Worker->>Engine: resolve
+    Note over Worker: timer restarted; resumeAction = 'continue'
+    Worker->>Session: ses.continue()
     alt run completes naturally
-        Engine-->>Worker: ... runs to halt
+        Session-->>Worker: halt event → ses.start() resolves
         Worker-->>Main: { type: 'ran', tapes, commands }
         Note over Main: → HALTED — log halted after N step(s)
-    else another debug break fires (debug=on)
-        Engine-->>Worker: yield M, state.debug.before fires
-        Worker-->>Main: { type: 'paused', state, currentSymbols, debugBreak: { before: true } }
+    else another breakpoint fires (debug=on)
+        Session-->>Worker: pause event, m.pause = { side: 'before', cause: 'breakpoint' }
+        Worker-->>Main: { type: 'paused', state, currentSymbols, pause: { side: 'before', cause: 'breakpoint' } }
         Note over Main: → RUNNING_PAUSED — back to the break-cycle above
     end
 ```
 
 ### Walk-through 2 — Run with breakpoints (multi-paused cycle)
 
-A Run with `debug=on` and user-authored `state.debug` triggers a sequence of paused / resume cycles. Each `paused` includes the current state, current symbols, and the `debugBreak` shape (`{ before: true }` or `{ after: true }`).
+A Run with `debug=on` and user-authored `state.debug` triggers a sequence of paused / resume cycles. Each `paused` includes the current state, current symbols, and the `m.pause` descriptor (`{ side: 'before' | 'after', cause: 'breakpoint' }` for these user-authored breaks).
 
 **Per-segment timer.** The worker's per-segment `WORKER_TIMEOUT_MS` (5 s) suspends on every `paused` and restarts on every `resume`-send. The same suspend/restart pair fires on every `idle`/`busy` bracket inside RUNNING_AUTO's throttle — a user inspecting a paused state for minutes (or picking a 60-second auto interval) does not trigger the timeout; only worker-side engine execution time counts.
 
@@ -333,7 +332,7 @@ A Run with `debug=on` and user-authored `state.debug` triggers a sequence of pau
 **Sequence (debug=off).**
 1. User clicks Run while in RUNNING_PAUSED. The button reads "Continue".
 2. Main thread sends `resume({ step: false })`.
-3. Worker resolves the pending Promise. `debugEnabled = false` so `onPause` returns immediately on subsequent breaks.
+3. Worker resolves the pending Promise. With `debugEnabled = false`, the `pause` listener auto-continues past breakpoint-cause pauses, so subsequent breaks don't surface.
 4. Run continues to halt; worker sends `ran` → HALTED.
 
 **Sequence (debug=on).**
@@ -343,7 +342,7 @@ A Run with `debug=on` and user-authored `state.debug` triggers a sequence of pau
 
 **Log entries**
 - (debug=off, halt) `halted after N step(s)`
-- (debug=on, next break) — same long-format line as walk-through 1's log: `paused at state <X> {before|after} applying command for symbols: [<syms>]`
+- (debug=on, next break) — same long-format line as walk-through 1's log, with the wording driven by `m.pause.side`: `paused at state <X> {before|after} applying command for symbols: [<syms>]`
 
 **Worker calls**
 - `resume({ step: false })`
@@ -365,7 +364,7 @@ Stop is visible while in RUNNING_AUTO, RUNNING_CONTINUOUS, and RUNNING_PAUSED.
 
 The `debugMode` UI checkbox is reactive across mode transitions. A change while in any RUNNING_* mode pushes `setDebug(on)` to the worker.
 
-- `S-debug-toggle-auto` / `S-debug-toggle-cont` — `runner.setDebug(on)` posts a fire-and-forget message. Worker flips an internal `debugEnabled` flag. Subsequent `onPause` calls honor the new value (no run restart).
+- `S-debug-toggle-auto` / `S-debug-toggle-cont` — `runner.setDebug(on)` posts a fire-and-forget message. Worker flips an internal `debugEnabled` flag; the `pause` listener gates breakpoint-cause pauses by it, so subsequent breaks honor the new value (no run restart).
 - `S-debug-toggle-paused` — same `setDebug()` send. The current paused state is unaffected; the next break (after Continue) is gated by the new flag value.
 - In DEMO / IDLE / MANUAL / HALTED — flag flip only; no worker call (the worker is idle, the flag is read at the next `run()`).
 
@@ -424,21 +423,21 @@ A run that doesn't halt naturally hits `MAX_STEPS = 100_000` inside the worker's
 **Log entries**
 - `timeout after 5000ms — worker terminated (likely infinite loop)`
 
-**Edge case.** Today's API doesn't expose any callback hook to user code — `state.debug.before` / `state.debug.after` are filter values (`true | string[] | null`), not user-supplied functions, and the worker's `onStep` / `onPause` wrap the run on the demo side. So a "stall via async user callback" isn't reachable in the current surface. The per-segment cap defends against the cases that *are* reachable: infinite loops in user code, hung worker-side Promises, and any future API surface that might let user-supplied async logic interpose.
+**Edge case.** Today's API doesn't expose any callback hook to user code — `state.debug.before` / `state.debug.after` are filter values (`true | string[] | null`), not user-supplied functions, and the worker's `DebugSession` listeners (`step` / `pause`) wrap the run on the demo side. So a "stall via async user callback" isn't reachable in the current surface. The per-segment cap defends against the cases that *are* reachable: infinite loops in user code, hung worker-side Promises, and any future API surface that might let user-supplied async logic interpose.
 
 ## 11. Current divergences from spec
 
 A punchlist of where today's code differs from the spec, each with a tracking-issue link. Acts as a TODO list for follow-up PRs; #47 cites scenario IDs and `it.skip` divergent ones until they close.
 
-- **IDLE mode does not exist.** Today's code encodes the post-Build, pre-Take-Control resting state via `(executionMode = DEMO, demoEnabled = false)`. Affects all `S-*-idle-*` IDs — they're served by `S-*-demo-*` paths today. Step from DEMO completes back to a still-running auto-loop that overwrites the result. Implementation tracked alongside [#46](https://github.com/mellonis/machines-demo/issues/46) (this spec); follow-up PR introduces IDLE and drops `demoEnabled`.
-- **Halting iter's `state.debug.after` never fires.** Affects walk-through 1 edge case. Tracked in [turing-machine-js#108](https://github.com/mellonis/turing-machine-js/issues/108).
-- **`haltState.debug.after` silently ignored; `haltState.debug.before` IS honored.** Tracked in [turing-machine-js#108](https://github.com/mellonis/turing-machine-js/issues/108).
+- **IDLE mode does not exist.** Today's code encodes the post-Build, pre-Take-Control resting state via `(executionMode = DEMO, demoEnabled = false)`. The `ExecutionMode` union in `MachineView.svelte` has no `IDLE` member. Affects all `S-*-idle-*` IDs — they're served by `S-*-demo-*` paths today. Step from DEMO completes back to a still-running auto-loop that overwrites the result. Implementation tracked alongside [#46](https://github.com/mellonis/machines-demo/issues/46) (this spec); follow-up PR introduces IDLE and drops `demoEnabled`.
+
+> ⚠️ The two former entries here — "halting iter's `state.debug.after` never fires" and "`haltState.debug.after` silently ignored" — are **resolved** under the v7 `DebugSession` model. Step no longer arms `.after` (it uses the engine's `stepIn()`, before-side), and `haltState.debug` is now a `boolean` ([turing-machine-js#207](https://github.com/mellonis/turing-machine-js/issues/207)) whose pause fires reliably on the after-side of the halt-triggering iter. Neither divergence applies anymore.
 
 ## 12. Engine quirks
 
 Upstream behaviors the spec encodes (won't change without a major upstream version, so the spec works around them):
 
-- `onStep` is sync and not awaited (engine docstring: "must not be async"). The demo uses it purely to buffer commands. Per-iter awaited coordination lives on `onIter` (v6.4.0+). Cross-ref [turing-machine-js#163](https://github.com/mellonis/turing-machine-js/issues/163) for the hook's introduction.
+- The `DebugSession` `step` event is fire-and-forget and synchronous (per-iter, mid-iter, between any before-pause and after-pause). The demo's `step` listener uses it purely to buffer commands / reads / match-kinds and track `prevYieldedStateId` — it never awaits. Per-iter **awaited** coordination lives on the `iter` event (the engine awaits it, sequenced after any after-pause), which the demo uses for the RUNNING_AUTO throttle. The `pause` event is also awaited (the engine blocks on its internal resume-promise until `continue` / `stepIn` / `stop`). Cross-ref [turing-machine-js#102](https://github.com/mellonis/turing-machine-js/issues/102) for the `DebugSession` reshape.
 
 §11 vs §12: §11 lists demo-side gaps to be closed; §12 lists engine semantics that won't change. Items can move from §12 to §11 if the upstream issue lands and a corresponding demo-side simplification becomes possible.
 
