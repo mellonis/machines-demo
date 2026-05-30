@@ -1,62 +1,47 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { turingVersion, postVersion, visualsVersion, appVersion } from 'virtual:lib-versions';
+  import Landing from './components/Landing.svelte';
   import MachineView from './components/MachineView.svelte';
   import { icons } from './lib/icons.ts';
+  import { legacyMachineRewrite, readRouteFromUrl } from './lib/routing.ts';
   import { theme } from './lib/theme.svelte.ts';
-  import { ENGINES, type Engine } from './lib/types.ts';
+  import type { Route } from './lib/types.ts';
 
-  // Engine lives in the URL path (`/turing`, `/post`). The first path segment
-  // is the engine; anything else (`/`, `/foo`) normalises to the default
-  // engine. Requires SPA-fallback routing on the server (nginx
+  // Route lives in the URL path: `/` is the Landing page, `/turing` and
+  // `/post` mount the engine-specific MachineView. Anything else falls back
+  // to Landing. Requires SPA-fallback routing on the server (nginx
   // `try_files $uri $uri/ /index.html;` for prod; Vite's default in dev).
-  function readEngineFromUrl(): Engine {
-    try {
-      const seg = window.location.pathname.replace(/^\/+/, '').split('/')[0];
-      return (ENGINES as readonly string[]).includes(seg) ? (seg as Engine) : 'turing';
-    } catch {
-      return 'turing';
-    }
-  }
-
-  let activeEngine = $state<Engine>('turing');
+  let route = $state<Route>({ kind: 'landing' });
 
   onMount(() => {
     // Backwards-compat: legacy `?machine=<engine>` → `/<engine>`. Rewrite the
     // URL once on mount so old bookmarks/links don't silently lose context.
-    const url = new URL(window.location.href);
-    const legacy = url.searchParams.get('machine');
-    if (legacy !== null) {
-      url.searchParams.delete('machine');
-      if ((ENGINES as readonly string[]).includes(legacy)) {
-        url.pathname = '/' + legacy;
-      }
+    const url = legacyMachineRewrite(new URL(window.location.href));
+    if (url.href !== window.location.href) {
       history.replaceState(null, '', url);
     }
 
-    // Normalise unknown/root paths to `/<default-engine>` so the URL always
-    // reflects the active engine (no silent fallback discrepancy).
-    const seg = window.location.pathname.replace(/^\/+/, '').split('/')[0];
-    if (!(ENGINES as readonly string[]).includes(seg)) {
-      const normalised = new URL(window.location.href);
-      normalised.pathname = '/turing';
-      history.replaceState(null, '', normalised);
-    }
-
-    activeEngine = readEngineFromUrl();
+    route = readRouteFromUrl(window.location.pathname);
     const onPopState = () => {
-      activeEngine = readEngineFromUrl();
+      route = readRouteFromUrl(window.location.pathname);
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   });
 
-  function selectEngine(engine: Engine): void {
-    if (engine === activeEngine) return;
-    activeEngine = engine;
-    // Drop existing query params: they are engine-scoped (e.g. `?snippet=`)
-    // and don't carry over to the other engine's namespace.
-    history.pushState(null, '', '/' + engine);
+  function selectRoute(next: Route): void {
+    // Noop on same-route navigation — don't push history entries that don't
+    // change anything.
+    if (route.kind === next.kind) {
+      if (next.kind === 'landing') return;
+      if (route.kind === 'engine' && route.engine === next.engine) return;
+    }
+    route = next;
+    // Engine paths drop existing query params: they are engine-scoped (e.g.
+    // `?snippet=`) and don't carry over to the other engine's namespace or
+    // to the landing page.
+    history.pushState(null, '', next.kind === 'landing' ? '/' : '/' + next.engine);
   }
 
   const themeIcon = $derived(
@@ -75,15 +60,15 @@
   <nav class="tabs">
     <button
       type="button"
-      class:active={activeEngine === 'turing'}
-      onclick={() => selectEngine('turing')}
+      class:active={route.kind === 'engine' && route.engine === 'turing'}
+      onclick={() => selectRoute({ kind: 'engine', engine: 'turing' })}
     >
       Turing
     </button>
     <button
       type="button"
-      class:active={activeEngine === 'post'}
-      onclick={() => selectEngine('post')}
+      class:active={route.kind === 'engine' && route.engine === 'post'}
+      onclick={() => selectRoute({ kind: 'engine', engine: 'post' })}
     >
       Post
     </button>
@@ -100,9 +85,13 @@
 </header>
 
 <main>
-  {#key activeEngine}
-    <MachineView engine={activeEngine} />
-  {/key}
+  {#if route.kind === 'landing'}
+    <Landing />
+  {:else}
+    {#key route.engine}
+      <MachineView engine={route.engine} />
+    {/key}
+  {/if}
 </main>
 
 <footer>
