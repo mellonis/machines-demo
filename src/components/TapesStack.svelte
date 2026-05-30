@@ -5,8 +5,15 @@
   type Props = {
     tapeCount: number;
     caretColors: readonly string[];
+    /** When true, user-facing interactive surfaces on the tape stack are
+     *  disabled. Currently `TapesStack` and `Tape` have no interactive
+     *  handlers of their own (caret-edit and copy/paste live on
+     *  `MachineView`), so this prop is a forward-compat marker for Task 7
+     *  (`setTapeViewport`, etc.). The imperative API (`setFromTape`,
+     *  `clearAll`, `setTransitionsEnabled`) is unaffected. */
+    readOnly?: boolean;
   };
-  let { tapeCount, caretColors }: Props = $props();
+  let { tapeCount, caretColors, readOnly: _readOnly = false }: Props = $props();
 
   let tapeRefs = $state<Array<ReturnType<typeof Tape> | undefined>>([]);
 

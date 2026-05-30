@@ -30,6 +30,13 @@
     stepsApplied?: number;
     collapsed: boolean;
     onToggleCollapsed: () => void;
+    /** When true, all user-facing interactive surfaces are disabled: the
+     *  collapse toggle, zoom/aim/expand header buttons, pan+wheel gestures,
+     *  and the breakpoint context menu on graph nodes. The imperative render
+     *  pipeline (highlight, applyIndicator, scroll-into-view) is unaffected.
+     *  Default `false` preserves the full interactive behaviour for
+     *  `MachineView`. */
+    readOnly?: boolean;
     /** When true, the panel detaches into a fixed-position 80vw×80vh
      *  overlay (single-instance: same mermaid render, no DOM move).
      *  Backdrop + click-out closing are managed by the parent so this
@@ -74,6 +81,7 @@
     breakpoints,
     breakpointKinds,
     onToggleBreakpoint,
+    readOnly = false,
   }: Props = $props();
 
   const instanceId = `mg-${nextInstanceCounter()}`;
@@ -218,6 +226,7 @@
   let panStartScrollTop = 0;
 
   function onBodyPointerDown(e: PointerEvent): void {
+    if (readOnly) return;
     if (e.button !== 0) return; // left mouse only; right is reserved for the BP context menu
     if (!canPan) return; // nothing to scroll → ignore drag (cursor reflects this too)
     if (panActive) return;
@@ -268,6 +277,7 @@
   // content under the pointer stays put (clamping at ZOOM_MIN /
   // ZOOM_MAX absorbs any single-event overshoot).
   function onBodyWheel(e: WheelEvent): void {
+    if (readOnly) return;
     if (!(e.ctrlKey || e.metaKey)) return;
     e.preventDefault();
     const factor = Math.exp(-e.deltaY * 0.012);
@@ -717,7 +727,7 @@
       // singleton (id 0) and halt markers (negative ids) ARE clickable —
       // they all map to the haltState class via `bareIdOf`, surfacing the
       // global breakpoint info in the menu (machines-demo#37 layer 2).
-      if (onToggleBreakpoint && typeof key === 'number') {
+      if (!readOnly && onToggleBreakpoint && typeof key === 'number') {
         el.style.cursor = 'context-menu';
         el.classList.add('node-clickable');
         el.addEventListener(
@@ -954,12 +964,15 @@
 
 <section class="machine-graph" class:expanded aria-label="Machine graph">
   <header class="header">
-    {#if expanded}
+    {#if expanded || readOnly}
       <!-- In expanded (modal) mode the chevron collapse toggle is hidden:
            collapsing while the modal is open would leave a header-only
            strip floating with no content — a confusing dead state. The
            minimize button (header-actions, right side) is the single
-           way out of modal mode. -->
+           way out of modal mode.
+           In readOnly mode the toggle is also hidden — showcase panels
+           are always expanded and their collapsed state is controlled by
+           the parent. -->
       <span class="title">Machine graph</span>
     {:else}
       <button
@@ -975,7 +988,7 @@
         <span class="title">Machine graph</span>
       </button>
     {/if}
-    {#if !collapsed}
+    {#if !collapsed && !readOnly}
       <div class="header-actions">
         <button
           type="button"
@@ -1028,10 +1041,10 @@
     <div
       class="body"
       class:panning={panActive}
-      class:can-pan={canPan}
+      class:can-pan={!readOnly && canPan}
       data-testid="machine-graph-body"
-      role="application"
-      aria-label="Machine graph viewport (drag to pan, Ctrl+scroll to zoom)"
+      role={readOnly ? 'img' : 'application'}
+      aria-label={readOnly ? 'Machine graph' : 'Machine graph viewport (drag to pan, Ctrl+scroll to zoom)'}
       onpointerdown={onBodyPointerDown}
       onpointermove={onBodyPointerMove}
       onpointerup={onBodyPointerUp}
