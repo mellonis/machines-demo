@@ -56,7 +56,15 @@
 </script>
 
 <header>
-  <h1><span class="title-prefix">machines&nbsp;</span>demo</h1>
+  <h1>
+    <button
+      type="button"
+      class="home-link"
+      onclick={() => selectRoute({ kind: 'landing' })}
+      title="Back to landing"
+      aria-label="Back to landing"
+    ><span class="title-prefix">machines&nbsp;</span>demo</button>
+  </h1>
   <nav class="tabs">
     <button
       type="button"
@@ -145,6 +153,22 @@
       font-weight: 500;
       letter-spacing: 0.04em;
       color: var(--accent);
+
+      .home-link {
+        background: transparent;
+        border: none;
+        padding: 0;
+        margin: 0;
+        font: inherit;
+        letter-spacing: inherit;
+        color: inherit;
+        cursor: pointer;
+        transition: opacity var(--anim-button-hover-ms) ease;
+
+        &:hover {
+          opacity: 0.8;
+        }
+      }
 
       .title-prefix {
         @media (max-width: 768px) {

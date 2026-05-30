@@ -223,6 +223,23 @@
     background: var(--editor-bg);
     border: 1px solid var(--cell-border);
     border-radius: var(--surface-radius);
+    /* Tape's intrinsic width (--visible-cells * cell-width) can exceed the
+       grid-track width on narrow layouts; clip rather than letting cells
+       escape past the panel's border. */
+    overflow: hidden;
+
+    /* Showcase context — fewer cells visible than the engine pages (default
+       --visible-cells is 19 desktop / 17 tablet / 11 phone). 13 fits a
+       400-pixel-min grid track comfortably with room for head context on
+       both sides. The mask in Tape.svelte fades edge cells, so partial
+       symbols don't pop in/out as the head moves. */
+    :global(.ui-belt) {
+      --visible-cells: 13;
+
+      @media (max-width: 480px) {
+        --visible-cells: 9;
+      }
+    }
   }
 
   .caption {
