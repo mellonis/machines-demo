@@ -6,7 +6,7 @@ Interactive in-browser playground for **Turing** and **Post** machines.
 
 **Live demo:** [demo.machines.mellonis.ru](https://demo.machines.mellonis.ru)
 
-Two tabs (Turing, Post) where you write JavaScript that builds a machine — using the published [`@turing-machine-js/machine`](https://www.npmjs.com/package/@turing-machine-js/machine) and [`@post-machine-js/machine`](https://www.npmjs.com/package/@post-machine-js/machine) libraries — and watch it execute on an animated tape. Auto-running demo on first load, manual control of the tape head via a movement/symbol/Apply panel, single-step and paused-auto-step execution, a log of every command applied, and clipboard copy/paste of the tape-block state for sharing or restoring snapshots.
+Two tabs (Turing, Post) where you write JavaScript that builds a machine — using the published [`@turing-machine-js/machine`](https://www.npmjs.com/package/@turing-machine-js/machine), [`@post-machine-js/machine`](https://www.npmjs.com/package/@post-machine-js/machine), and [`@turing-machine-js/visuals`](https://www.npmjs.com/package/@turing-machine-js/visuals) (highlight + graph-indexing surface) libraries — and watch it execute on an animated tape. Auto-running demo on first load, manual control of the tape head via a movement/symbol/Apply panel, single-step and paused-auto-step execution, a log of every command applied, and clipboard copy/paste of the tape-block state for sharing or restoring snapshots.
 
 ## Running locally
 
@@ -40,7 +40,7 @@ Static bundle emitted to `dist/`. Serve with any static host. The build referenc
 - [CodeMirror 6](https://codemirror.net/) via [`svelte-codemirror-editor`](https://www.npmjs.com/package/svelte-codemirror-editor); Lezer-based syntax preflight before Load
 - [Tabler Icons](https://tabler.io/icons) (SVG `?raw` imports)
 - User code runs inside a Web Worker — terminate-on-timeout sandbox, with `'unsafe-eval'` only at the worker level so the worker is the actual security boundary
-- `@turing-machine-js/machine` and `@post-machine-js/machine` (peer-dependency relationship preserved)
+- `@turing-machine-js/machine` and `@post-machine-js/machine` (peer-dependency relationship preserved); `@turing-machine-js/visuals` for the highlight + graph-indexing surface that drives `MachineGraph.svelte`'s breakpoint dots, pulse animations, frame-active marks, and the engine edge-label log notation
 
 ## Architecture: two lands
 
@@ -93,7 +93,7 @@ src/
 │   ├── Log.svelte              # entries list (desktop) / latest line (mobile)
 │   └── IconButton.svelte       # icon + optional label
 └── lib/
-    ├── types.ts                # Engine, Command, WorkerRequest/Response, TapeSnapshot, ...
+    ├── types.ts                # Engine, Command, Alphabets, WorkerRequest/Response (TapeSnapshot + Graph imported from @turing-machine-js/{visuals,machine})
     ├── caps.ts                 # numeric caps: VIEWPORT_WIDTH, MAX_STEPS, WORKER_TIMEOUT_MS, MAX_TAPES
     ├── machineRunner.ts        # main-thread worker wrapper; per-segment timeout; injected workerFactory
     ├── machineRunner.test.ts   # Vitest suite for MachineRunner — protocol-shape / timer / pending / error
@@ -105,14 +105,13 @@ src/
     ├── logStore.svelte.ts      # per-MachineView log store — buffer + throttled view + overflow cap
     ├── logStore.test.ts        # Vitest suite for LogStore
     ├── demoLoop.ts             # idle-mode random-command loop
-    ├── autoStep.ts             # paused-auto-step controller
     ├── completions.ts          # CodeMirror autocomplete from machine namespace
     ├── syntaxLinter.ts         # Lezer-based syntax-error markers
     ├── persist.ts              # localStorage helpers per engine
     ├── tapeSnapshot.ts         # serialize/parse tape-block snapshots for copy+paste
     ├── tapeSnapshot.test.ts    # Vitest suite for tapeSnapshot
     ├── defaultCode.ts          # starter Turing / Post snippets
-    ├── format.ts               # describeAppliedCommand / formatTape / commandsEntry / tapesEntry
+    ├── format.ts               # LogEntry assemblers (commandsEntry / tapesEntry); per-step string rendering from @turing-machine-js/visuals
     ├── icons.ts                # Tabler icon namespace
     └── theme.svelte.ts         # theme (light / dark) state + matchMedia watcher
 
