@@ -3,8 +3,7 @@ import { test, expect } from '@playwright/test';
 test.describe('cold-start', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/turing');
-    // Wait for the app to mount before clicking. DEMO mode auto-runs but
-    // doesn't block clicks.
+    // Wait for the app to mount before clicking.
     await expect(page.getByTestId('tapes-stack')).toBeVisible();
   });
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { computeInitialBoot } from './initialBoot.ts';
 import { defaultExample, findExample } from './defaultCode.ts';
 import type { Snippets } from './persist.ts';
+import type { ExecutionMode } from './graphHighlightDerivation.ts';
 
 const TURING_INITIAL_EXAMPLE = defaultExample('turing');
 const POST_INITIAL_EXAMPLE = defaultExample('post');
@@ -117,5 +118,13 @@ describe('computeInitialBoot — boot-priority decision tree', () => {
       initialExample: TURING_INITIAL_EXAMPLE,
     });
     expect(bare.code).toBe(TURING_INITIAL_EXAMPLE.code);
+  });
+});
+
+describe('ExecutionMode union', () => {
+  it('M-execution-mode-union — no longer accepts DEMO', () => {
+    // @ts-expect-error — DEMO removed from the union in Phase 2
+    const _bad: ExecutionMode = 'DEMO';
+    expect(true).toBe(true);
   });
 });
