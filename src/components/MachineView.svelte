@@ -26,6 +26,7 @@
     findExample,
     type Example,
   } from '../lib/defaultCode.ts';
+  import { computeInitialBoot } from '../lib/initialBoot.ts';
   import {
     loadCode,
     loadExampleId,
@@ -165,25 +166,22 @@
     const persistedId = loadExampleId(engine);
     return (persistedId && findExample(engine, persistedId)) || defaultExample(engine);
   });
-  let selectedExampleId = $state<string>(initialExample.id);
   const initialSnippets = untrack(() => loadSnippets(engine));
   let snippets = $state<Snippets>(initialSnippets);
-  // Active snippet is read from the URL (`?snippet=<uuid>`) — bookmarkable,
-  // shareable, and the future-#24 share key. When the URL points at a snippet
-  // that exists locally, its code becomes the editor's code; otherwise we fall
-  // back to localStorage and report the bad UUID once on mount.
-  const initial = untrack(() => {
-    const raw = new URL(window.location.href).searchParams.get('snippet');
-    const urlId = raw !== null && raw !== '' ? raw : null;
-    if (urlId !== null && urlId in initialSnippets) {
-      return { loadedSnippetId: urlId, code: initialSnippets[urlId].code, badUrlId: null as string | null };
-    }
-    return {
-      loadedSnippetId: null as string | null,
-      code: loadCode(engine) ?? initialExample.code,
-      badUrlId: urlId,
-    };
-  });
+  // Resolve the initial editor state from URL query + localStorage. Boot
+  // priority: ?example=<id> > ?snippet=<uuid> > localStorage code > the
+  // bundled default. Unknown ?example=/?snippet= ids fall through and are
+  // surfaced once on mount via the badExampleId/badUrlId log entries.
+  const initial = untrack(() =>
+    computeInitialBoot({
+      engine,
+      url: new URL(window.location.href),
+      snippets: initialSnippets,
+      loadedCode: loadCode(engine),
+      initialExample,
+    }),
+  );
+  let selectedExampleId = $state<string>(initial.selectedExampleId);
   let loadedSnippetId = $state<string | null>(initial.loadedSnippetId);
   let code = $state<string>(initial.code);
 
@@ -982,6 +980,11 @@
     const url = new URL(window.location.href);
     if (loadedSnippetId !== null) url.searchParams.set('snippet', loadedSnippetId);
     else url.searchParams.delete('snippet');
+    // `?example=` is a one-shot deep-link consumed at boot; once the
+    // MachineView has mounted, `selectedExampleId` is the in-memory carrier
+    // and the URL param is dropped so subsequent state changes (loading a
+    // snippet, editing, taking control) don't leave it stranded.
+    url.searchParams.delete('example');
     history.replaceState(null, '', url);
   });
 
@@ -1026,6 +1029,7 @@
   /* ───── lifecycle ───── */
 
   onMount(() => {
+    if (initial.badExampleId !== null) log.report(`example not found: ${initial.badExampleId}`, 'error');
     if (initial.badUrlId !== null) log.report(`snippet not found: ${initial.badUrlId}`, 'error');
     void doLoad();
   });
