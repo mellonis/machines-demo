@@ -11,10 +11,11 @@
   import { MachineRunner, WorkerError } from '../lib/machineRunner.ts';
   import * as turing from '@turing-machine-js/machine';
   import { BELT_ANIMATION_MIN_INTERVAL_MS, MAX_TAPES, VIEWPORT_WIDTH } from '../lib/caps.ts';
-  import { type Alphabets, type BreakpointKind, type Command, type Engine, type GraphHighlight, type IdleResponse, type PausedResponse, type TapeSnapshot, type TuringGraph } from '../lib/types.ts';
+  import { type Alphabets, type BreakpointKind, type Command, type Engine, type IdleResponse, type PausedResponse } from '../lib/types.ts';
+  import type { Graph } from '@turing-machine-js/machine';
+  import { bareIdOf, type GraphHighlight, type TapeSnapshot } from '@turing-machine-js/visuals';
   import { startDemoLoop } from '../lib/demoLoop.ts';
   import { parseInterval } from '../lib/interval.ts';
-  import { bareIdOf } from '../lib/graphUtils.ts';
   import { deriveGraphHighlight } from '../lib/graphHighlightDerivation.ts';
   import { parse as parseSnapshot, serialize as serializeSnapshot } from '../lib/tapeSnapshot.ts';
   import { commandsEntry, tapesEntry } from '../lib/format.ts';
@@ -78,7 +79,7 @@
   // snapshot captured at Build via State.toGraph; null pre-Build.
   // `graphCollapsed` defaults to "open on desktop, closed on mobile" per
   // the issue's UX note; `graphModalOpen` drives the expand-to-modal view.
-  let graph = $state<TuringGraph | null>(null);
+  let graph = $state<Graph | null>(null);
   let graphCollapsed = $state(untrack(() => initialGraphCollapsed(engine)));
   let graphModalOpen = $state(false);
   // Monotonic iter counter, mirrored from worker responses (idle / paused /
