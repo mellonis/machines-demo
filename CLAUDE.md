@@ -35,7 +35,7 @@ src/
 │   ├── Log.svelte           log entries (desktop)
 │   └── IconButton.svelte    shared corner-overlay icon button (reset / clear)
 └── lib/
-    ├── types.ts                Engine, Command, Alphabets, WorkerRequest/Response, TapeSnapshot
+    ├── types.ts                Engine, Command, Alphabets, WorkerRequest/Response (TapeSnapshot + Graph imported from @turing-machine-js/{visuals,machine})
     ├── caps.ts                 numeric caps: VIEWPORT_WIDTH, MAX_STEPS, WORKER_TIMEOUT_MS, MAX_TAPES
     ├── machineRunner.ts        main-thread worker wrapper; WORKER_TIMEOUT_MS per-segment cap; injected workerFactory
     ├── machineRunner.test.ts   Vitest suite for MachineRunner — protocol-shape / timer / pending / error categories (cites R-... / S-... scenario IDs)
@@ -54,7 +54,7 @@ src/
     ├── tapeSnapshot.ts         serialize/parse for tape-block copy+paste snapshots — JSON with `format`/`version` discriminator, categorized ParseError, no DOM/clipboard knowledge
     ├── tapeSnapshot.test.ts    Vitest suite for tapeSnapshot — roundtrip / parse-not-json / wrong-format / unsupported-version / wrong-shape-* / length-mismatch (cites R-snapshot-...)
     ├── defaultCode.ts          starter Turing / Post snippets
-    ├── format.ts               describeAppliedCommand / formatTape / commandsEntry / tapesEntry
+    ├── format.ts               LogEntry assemblers: commandsEntry / tapesEntry / CommandsApplication; per-step string rendering (`formatStepNotation`, `formatTape`) is consumed from `@turing-machine-js/visuals`
     ├── icons.ts                Tabler icon namespace (?raw imports)
     └── theme.svelte.ts         theme (light / dark) state + matchMedia watcher (Svelte 5 .svelte.ts module)
 
