@@ -20,8 +20,10 @@ test.describe('landing', () => {
     // Use the first panel's deep-link explicitly — there are now 3 per engine.
     const link = page.getByRole('link', { name: /Open in editor/ }).first();
     await link.click();
-    await expect(page).toHaveURL(/\/turing\?example=/);
-    // MachineView visible
+    // MachineView mounts at /turing; Phase 2's boot-priority handler consumes
+    // the ?example=<id> param then strips it via history.replaceState (matches
+    // the existing ?snippet=<id> lifecycle), so the URL settles back to /turing.
+    await expect(page).toHaveURL('/turing');
     await expect(page.locator('[data-testid="tape-cell"]').first()).toBeVisible();
   });
 
