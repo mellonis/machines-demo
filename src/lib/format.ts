@@ -1,87 +1,12 @@
-import type { Alphabets, Command, TapeSnapshot } from './types.ts';
+import { formatStepNotation, formatTape, type TapeSnapshot } from '@turing-machine-js/visuals';
+import type { Alphabets, Command } from './types.ts';
 import type { LogEntry } from './log.ts';
 
-/** Engine edge-label format (machines-demo#69) — matches turing-machine-js's
- *  `toMermaid` emit so a logged step's notation lines up byte-for-byte with
- *  the same transition's edge label in the rendered state graph.
- *
- *  Format: `[reads] → [writes]/[moves]` (writes/moves omit the `[reads] →`
- *  prefix when `reads === null`, e.g. manual Apply where no transition
- *  matched).
- *
- *  Per-cell encoding:
- *  - Read cell: `'X'` (literal symbol, always single-quoted) or `B`
- *    (blank — used only for NON-wildcard reads where the transition
- *    matched the blank specifically). Wildcard reads always render the
- *    literal symbol prefixed with `*=` (so `*='a'`, `*=' '`, etc.) — the
- *    whole point of the wildcard marker is to show WHAT `ifOtherSymbol`
- *    actually caught on this iter; the `B` shortcut would hide that.
- *    Wildcard rendering requires per-tape `matchKinds` (sourced from
- *    `MachineState.matchedTransition.matchKinds`); when `matchKinds` is
- *    omitted (manual Apply — no transition fired) every position renders
- *    as a literal.
- *  - Write cell: `'X'` (literal) | `K='X'` (keep, no write — `command.symbol`
- *    is null because the resolved symbol matched current; the read symbol
- *    that remains is appended for clarity, falling back to bare `K` when
- *    reads aren't available e.g. manual Apply) | `E` (erase, write equals
- *    blank).
- *  - Move cell: `L` | `R` | `S`.
- *
- *  Multi-tape: per-tape entries are comma-separated inside one outer
- *  bracket per role: `['1','a'] → ['0','b']/[R,L]`.
- */
-function formatStepNotation(
-  reads: readonly string[] | null,
-  commands: readonly Command[],
-  blanks: readonly string[],
-  matchKinds: readonly ('wildcard' | 'literal')[] | null,
-): string {
-  const writes = commands
-    .map((c, i) => {
-      if (c.symbol === null) {
-        // Augment `K` with the concrete kept symbol — without this the
-        // log shows `['a'] → [K]/[R]` and the reader has to mentally
-        // re-resolve `K` against the read each time. `K='a'/[R]` carries
-        // both the semantic (matched a wildcard, no write) and the
-        // observable outcome (`'a'` stays on the cell).
-        if (reads !== null) {
-          const r = reads[i];
-          if (r !== undefined) return r === blanks[i] ? "K=B" : `K='${r}'`;
-        }
-        return 'K';
-      }
-      if (c.symbol === blanks[i]) return 'E';
-      return `'${c.symbol}'`;
-    })
-    .join(',');
-  const moves = commands.map((c) => c.movement).join(',');
-  const writesPart = `[${writes}]/[${moves}]`;
-
-  if (reads === null) return writesPart;
-
-  const readsStr = reads
-    .map((r, i) => {
-      // Non-wildcard: blank → `B`, literal → `'X'`. Wildcard: always
-      // literal `*='X'` so the user sees WHAT the catch-all caught;
-      // the `B` shortcut would obscure the matched value (especially
-      // bad when the alphabet's blank glyph is something unusual).
-      if (matchKinds?.[i] === 'wildcard') return `*='${r}'`;
-      // Non-wildcard (or no matchKinds → manual Apply): blank → `B`,
-      // literal → `'X'`.
-      return r === blanks[i] ? 'B' : `'${r}'`;
-    })
-    .join(',');
-  return `[${readsStr}] → ${writesPart}`;
-}
-
-export function formatTape(tape: TapeSnapshot): string {
-  // No UI substitution — the user controls their blank glyph. We bracket
-  // the head; `[<blank-char>]` may render an invisible space if blank=' ',
-  // but that's the user's chosen symbol.
-  return tape.symbols
-    .map((sym, i) => (i === tape.position ? `[${sym}]` : sym))
-    .join('');
-}
+// `formatStepNotation` and `formatTape` now come from `@turing-machine-js/visuals`
+// (engine edge-label format `[reads] → [writes]/[moves]` + per-cell `B` / `E` /
+// `K='X'` / `*='X'` encoding). Re-exported below so demo consumers that still
+// import `formatTape` from this module keep working.
+export { formatTape };
 
 /** Quoted, comma-separated rest-of-alphabet (excludes the blank at index 0). */
 function alphabetRest(alphabet: readonly string[]): string {
