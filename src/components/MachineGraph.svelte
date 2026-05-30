@@ -812,7 +812,8 @@
   // `breakpoints` change AND on `svg` change (cache repopulates on SVG
   // re-render). Delegates the rule logic to `applyIndicator`; the ops
   // object below is a thin DOM adapter that toggles `mg-breakpoint` per
-  // node. See `docs/graph-highlight-and-breakpoints.md` §2 + §12.
+  // node. See the rules doc (now in `@turing-machine-js/visuals`):
+  // https://github.com/mellonis/turing-machine-js/blob/v7/packages/visuals/docs/graph-highlight-and-breakpoints.md §2 + §12.
   $effect(() => {
     const bps = breakpoints;
     void svg;
