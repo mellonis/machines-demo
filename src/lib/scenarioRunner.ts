@@ -1,9 +1,10 @@
 import * as turing from '@turing-machine-js/machine';
+import type { Graph } from '@turing-machine-js/machine';
 import { findExample } from './defaultCode.ts';
 import { commandsEntry } from './format.ts';
 import { computeImminentHalt } from './imminentHalt.ts';
 import { formatPauseLine } from './pauseLineFormat.ts';
-import type { Engine, PausedResponse, TuringGraph } from './types.ts';
+import type { Engine, PausedResponse } from './types.ts';
 
 /**
  * Scenario harness for breakpoint + log-line behavior. Drives the engine's
@@ -134,7 +135,7 @@ export async function runScenario(input: ScenarioInput): Promise<ScenarioOutput>
 
   // Engine `Graph` snapshot — passed to computeImminentHalt for frame-id
   // resolution. Built once before the run.
-  const currentGraph = turing.State.toGraph(initialState, machine.tapeBlock) as unknown as TuringGraph;
+  const currentGraph = turing.State.toGraph(initialState, machine.tapeBlock) as unknown as Graph;
 
   // Per-tape alphabet symbols (single-tape today; commandsEntry needs the
   // blank symbol at index 0 for the `B`/`E` rendering).

@@ -1,4 +1,5 @@
-import type { Alphabets, TapeSnapshot } from './types.ts';
+import type { TapeSnapshot } from '@turing-machine-js/visuals';
+import type { Alphabets } from './types.ts';
 
 export const SNAPSHOT_FORMAT = 'machines-demo.tape-snapshot';
 export const SNAPSHOT_VERSION = 1;

@@ -1,5 +1,6 @@
 import * as turing from '@turing-machine-js/machine';
-import type { Command, Movement, TapeSnapshot } from './types';
+import type { TapeSnapshot } from '@turing-machine-js/visuals';
+import type { Command, Movement } from './types';
 
 // --- Movement / command derivation ---
 

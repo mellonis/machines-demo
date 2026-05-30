@@ -1,4 +1,4 @@
-import type { TuringGraph } from './types.ts';
+import type { Graph } from '@turing-machine-js/machine';
 
 /**
  * Engine-pause-time decision: should this `after` pause be tagged as
@@ -45,7 +45,7 @@ export function computeImminentHalt(args: {
   tapeBlock: unknown;
   /** Engine `Graph` snapshot. Used to look up the source state's `frameId`
    *  to distinguish in-frame from real halt. */
-  currentGraph: TuringGraph | null;
+  currentGraph: Graph | null;
   /** Current value of `turing.haltState.debug` (boolean post-#207). The
    *  gate that prevents halt-imminent wording from firing on plain
    *  state-level after-pauses. */
