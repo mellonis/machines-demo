@@ -12,3 +12,15 @@ declare module 'virtual:lib-versions' {
   export const visualsVersion: string;
   export const appVersion: string;
 }
+
+declare module 'virtual:snippets' {
+  import type { Snippet } from '@turing-machine-js/visuals';
+  type SnippetWithMeta = Snippet & {
+    engine: 'turing' | 'post';
+    id: string;
+    description?: string;
+    intervalMs?: number;
+  };
+  const snippets: { turing: SnippetWithMeta[]; post: SnippetWithMeta[] };
+  export default snippets;
+}

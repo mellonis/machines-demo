@@ -5,8 +5,15 @@
   type Props = {
     tapeCount: number;
     caretColors: readonly string[];
+    /** When true, user-facing interactive surfaces on the tape stack are
+     *  disabled. Currently `TapesStack` and `Tape` have no interactive
+     *  handlers of their own (caret-edit and copy/paste live on
+     *  `MachineView`), so this prop is a forward-compat marker for Task 7
+     *  (`setTapeViewport`, etc.). The imperative API (`setFromTape`,
+     *  `clearAll`, `setTransitionsEnabled`) is unaffected. */
+    readOnly?: boolean;
   };
-  let { tapeCount, caretColors }: Props = $props();
+  let { tapeCount, caretColors, readOnly: _readOnly = false }: Props = $props();
 
   let tapeRefs = $state<Array<ReturnType<typeof Tape> | undefined>>([]);
 
@@ -36,6 +43,23 @@
     wrote = false,
   ): void {
     void tapeRefs[i]?.setFromTape(tape, delta, animate, wrote);
+  }
+
+  // Render a pre-windowed cell array directly into tape `i`, bypassing
+  // `turing.Tape.viewport`. Used by `SnippetPanel` — Frame.tape snapshots
+  // are wire-format `TapeSnapshot`s, not live tapes; `tapeViewport()` from
+  // `@turing-machine-js/visuals` is called by the caller to derive the
+  // window from the snapshot, then handed in here as `cells`. `headIndex`
+  // is the head's position within `cells` (currently always the center for
+  // centered viewports; kept for future non-centered layouts). `blank` is
+  // the alphabet's blank symbol so cell-dim styling stays correct.
+  export function setTapeViewport(
+    i: number,
+    cells: string[],
+    headIndex: number,
+    blank: string,
+  ): void {
+    tapeRefs[i]?.setFromCells(cells, headIndex, blank);
   }
 
   export function clearAll(): void {

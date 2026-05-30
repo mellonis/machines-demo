@@ -8,6 +8,10 @@ import type { TapeSnapshot } from '@turing-machine-js/visuals';
 export const ENGINES = ['turing', 'post'] as const;
 export type Engine = (typeof ENGINES)[number];
 
+export type Route =
+  | { kind: 'landing' }
+  | { kind: 'engine'; engine: Engine };
+
 export const MOVEMENTS = ['L', 'S', 'R'] as const;
 export type Movement = (typeof MOVEMENTS)[number];
 

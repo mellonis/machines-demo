@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import { toMermaid, type Graph } from '@turing-machine-js/machine';
-  import {
+    import {
     applyHighlight,
     applyIndicator,
     bareIdOf,
@@ -9,6 +9,7 @@
     indexGraph,
     type GraphHighlight,
     type GraphIndexes,
+    type HighlightOps,
     type NodeKey,
   } from '@turing-machine-js/visuals';
   import type { BreakpointKind } from '../lib/types.ts';
@@ -30,6 +31,13 @@
     stepsApplied?: number;
     collapsed: boolean;
     onToggleCollapsed: () => void;
+    /** When true, all user-facing interactive surfaces are disabled: the
+     *  collapse toggle, zoom/aim/expand header buttons, pan+wheel gestures,
+     *  and the breakpoint context menu on graph nodes. The imperative render
+     *  pipeline (highlight, applyIndicator, scroll-into-view) is unaffected.
+     *  Default `false` preserves the full interactive behaviour for
+     *  `MachineView`. */
+    readOnly?: boolean;
     /** When true, the panel detaches into a fixed-position 80vw×80vh
      *  overlay (single-instance: same mermaid render, no DOM move).
      *  Backdrop + click-out closing are managed by the parent so this
@@ -60,6 +68,12 @@
      *  bare, or wrapper State. Omitted when the parent doesn't want clicks
      *  routed (e.g., view-only contexts). */
     onToggleBreakpoint?: (stateId: number, kind: BreakpointKind) => void;
+    /** Fired when the rendered SVG has mounted and the internal `nodeCache`
+     *  is populated — i.e., the moment imperative consumers (`SnippetPanel`)
+     *  can usefully call `getOps()` / `clearHighlights()` and see the
+     *  highlights actually render. May fire multiple times across re-renders
+     *  (theme swap, direction swap, graph change). Optional. */
+    onReady?: () => void;
   };
 
   let {
@@ -74,6 +88,8 @@
     breakpoints,
     breakpointKinds,
     onToggleBreakpoint,
+    readOnly = false,
+    onReady,
   }: Props = $props();
 
   const instanceId = `mg-${nextInstanceCounter()}`;
@@ -218,6 +234,7 @@
   let panStartScrollTop = 0;
 
   function onBodyPointerDown(e: PointerEvent): void {
+    if (readOnly) return;
     if (e.button !== 0) return; // left mouse only; right is reserved for the BP context menu
     if (!canPan) return; // nothing to scroll → ignore drag (cursor reflects this too)
     if (panActive) return;
@@ -268,6 +285,7 @@
   // content under the pointer stays put (clamping at ZOOM_MIN /
   // ZOOM_MAX absorbs any single-event overshoot).
   function onBodyWheel(e: WheelEvent): void {
+    if (readOnly) return;
     if (!(e.ctrlKey || e.metaKey)) return;
     e.preventDefault();
     const factor = Math.exp(-e.deltaY * 0.012);
@@ -717,7 +735,7 @@
       // singleton (id 0) and halt markers (negative ids) ARE clickable —
       // they all map to the haltState class via `bareIdOf`, surfacing the
       // global breakpoint info in the menu (machines-demo#37 layer 2).
-      if (onToggleBreakpoint && typeof key === 'number') {
+      if (!readOnly && onToggleBreakpoint && typeof key === 'number') {
         el.style.cursor = 'context-menu';
         el.classList.add('node-clickable');
         el.addEventListener(
@@ -808,6 +826,136 @@
     });
   });
 
+  // Showcase context (readOnly) opens centered. Engine pages keep the
+  // default (0, 0) origin so the entry node is visible at first paint —
+  // there the user is about to step / run and orientation matters more
+  // than centroid. Triggered on SVG change only (not zoom), so the
+  // initial frame lands centered without fighting subsequent applies.
+  $effect(() => {
+    void svg;
+    if (!readOnly || !svg || !svgHostEl) return;
+    void tick().then(() => {
+      const body = svgHostEl?.closest<HTMLElement>('.body');
+      if (!body) return;
+      body.scrollLeft = (body.scrollWidth - body.clientWidth) / 2;
+      body.scrollTop = (body.scrollHeight - body.clientHeight) / 2;
+    });
+  });
+
+  // Shared highlight-clear pass: strips the four highlight classes and
+  // restores arrowhead markers. Used by the internal apply-highlight effect
+  // AND the exported `clearHighlights()` method (which `SnippetPanel` calls
+  // before each `applyHighlight` since the visuals contract requires
+  // additive ops over an already-cleared canvas).
+  function _clearHighlightsImpl(root: SVGSVGElement): void {
+    root
+      .querySelectorAll('.mg-highlight-from, .mg-highlight-to, .mg-highlight-strong, .mg-highlight-edge')
+      .forEach((el) => {
+        el.classList.remove(
+          'mg-highlight-from',
+          'mg-highlight-to',
+          'mg-highlight-strong',
+          'mg-highlight-edge',
+        );
+        if (el.tagName === 'path' && el.hasAttribute('data-mg-orig-marker-end')) {
+          el.setAttribute('marker-end', el.getAttribute('data-mg-orig-marker-end')!);
+          el.removeAttribute('data-mg-orig-marker-end');
+        }
+      });
+  }
+
+  /**
+   * Imperative API: wipe previously-applied highlight classes + marker swaps
+   * from the rendered SVG. Required before each `applyHighlight` call per
+   * the visuals contract (`HighlightOps` is purely additive). No-op if the
+   * SVG hasn't mounted yet. Also clears any active frame cluster.
+   *
+   * Used by `SnippetPanel` for prerecorded playback; the internal
+   * apply-highlight effect uses `_clearHighlightsImpl` directly and skips
+   * the frame-active strip (it diffs frame transitions separately).
+   */
+  export function clearHighlights(): void {
+    if (!svgHostEl) return;
+    const root = svgHostEl.querySelector('svg');
+    if (!root) return;
+    _clearHighlightsImpl(root);
+    // External callers don't track lastFrameActiveId, so wipe the active
+    // cluster too — they'll re-set it from the next frame's highlight.
+    root.querySelectorAll('.mg-frame-active').forEach((el) => {
+      el.classList.remove('mg-frame-active');
+    });
+  }
+
+  /**
+   * Imperative API: a fresh `HighlightOps` bound to the current SVG, for
+   * external callers (`SnippetPanel`) that drive `applyHighlight` on their
+   * own schedule. Each call returns a new object — cheap (closes over
+   * cached DOM refs); call before each `applyHighlight` so it picks up any
+   * post-render cache rebuild. Returns `null` when the SVG isn't mounted.
+   *
+   * Unlike the internal apply-highlight effect, this ops impl toggles
+   * `mg-frame-active` directly (no diff against a prior frame) — the
+   * external caller is expected to pair each `applyHighlight` with a
+   * preceding `clearHighlights()`.
+   */
+  export function getOps(): HighlightOps | null {
+    if (!svgHostEl) return null;
+    const root = svgHostEl.querySelector('svg');
+    if (!root) return null;
+    return {
+      addNodeClass(id, cls) {
+        nodeCache.get(id)?.classList.add(cls);
+      },
+      highlightEdge(fromKey, toKey) {
+        for (let ix = 0; ix < 10; ix++) {
+          const els = root.querySelectorAll<SVGElement>(
+            `[data-id="L_${fromKey}_${toKey}_${ix}"]`,
+          );
+          if (els.length === 0) continue;
+          els.forEach((el) => {
+            el.classList.add('mg-highlight-edge');
+            if (el.tagName === 'path') {
+              const orig = el.getAttribute('marker-end');
+              if (orig && !el.hasAttribute('data-mg-orig-marker-end')) {
+                el.setAttribute('data-mg-orig-marker-end', orig);
+                el.setAttribute('marker-end', orig.replace(/\)$/, '-mg-hl)'));
+              }
+            }
+          });
+          return;
+        }
+      },
+      markFrameActive(frameId) {
+        clusterCache.get(frameId)?.classList.add('mg-frame-active');
+      },
+      pulse(id) {
+        nodeCache.get(id)?.animate(
+          [{ opacity: 1 }, { opacity: 0.35 }, { opacity: 1 }],
+          { duration: 220, easing: 'ease-in-out' },
+        );
+      },
+      scrollIntoView(id) {
+        const el = nodeCache.get(id);
+        if (!el) return;
+        void tick().then(() => {
+          const scrollContainer = svgHostEl?.closest<HTMLElement>('.body');
+          if (!scrollContainer) return;
+          scrollIntoViewIfNeeded(scrollContainer, el, 'smooth');
+        });
+      },
+    };
+  }
+
+  // Fire `onReady` when the SVG has mounted AND the cache is populated —
+  // the moment external imperative callers can usefully start applying
+  // frames. Re-fires per render (graph / theme / direction swap).
+  $effect(() => {
+    void svg;
+    if (!svg || !svgHostEl) return;
+    if (nodeCache.size === 0) return;
+    onReady?.();
+  });
+
   // Breakpoint indicator effect (machines-demo#37 layer 1). Runs on
   // `breakpoints` change AND on `svg` change (cache repopulates on SVG
   // re-render). Delegates the rule logic to `applyIndicator`; the ops
@@ -850,22 +998,12 @@
     if (!svgHostEl) return;
     const root = svgHostEl.querySelector('svg');
     if (!root) return;
-    // Clear previous highlight classes + marker-end restore. No inline-
-    // style restore needed — we strip the engine's classDef tags at render
-    // time so all visuals are author-CSS-driven; toggling classes is enough.
-    //
-    // `mg-frame-active` is INTENTIONALLY excluded from this strip-all — it's
-    // toggled below based on what applyHighlight actually requests, so the
-    // active cluster's class persists across consecutive in-frame iters
-    // (no visible blink between).
-    root.querySelectorAll('.mg-highlight-from, .mg-highlight-to, .mg-highlight-strong, .mg-highlight-edge')
-      .forEach((el) => {
-        el.classList.remove('mg-highlight-from', 'mg-highlight-to', 'mg-highlight-strong', 'mg-highlight-edge');
-        if (el.tagName === 'path' && el.hasAttribute('data-mg-orig-marker-end')) {
-          el.setAttribute('marker-end', el.getAttribute('data-mg-orig-marker-end')!);
-          el.removeAttribute('data-mg-orig-marker-end');
-        }
-      });
+    // Clear previous highlight classes + marker-end restore via the shared
+    // `clearHighlights()` helper. `mg-frame-active` is INTENTIONALLY
+    // excluded from the strip — it's toggled below based on what
+    // applyHighlight actually requests, so the active cluster's class
+    // persists across consecutive in-frame iters (no visible blink).
+    _clearHighlightsImpl(root);
 
     // Capture the frame the rule evaluator wants active (if any) so we
     // can diff against `lastFrameActiveId` and toggle only on change.
@@ -954,12 +1092,15 @@
 
 <section class="machine-graph" class:expanded aria-label="Machine graph">
   <header class="header">
-    {#if expanded}
+    {#if expanded || readOnly}
       <!-- In expanded (modal) mode the chevron collapse toggle is hidden:
            collapsing while the modal is open would leave a header-only
            strip floating with no content — a confusing dead state. The
            minimize button (header-actions, right side) is the single
-           way out of modal mode. -->
+           way out of modal mode.
+           In readOnly mode the toggle is also hidden — showcase panels
+           are always expanded and their collapsed state is controlled by
+           the parent. -->
       <span class="title">Machine graph</span>
     {:else}
       <button
@@ -975,7 +1116,7 @@
         <span class="title">Machine graph</span>
       </button>
     {/if}
-    {#if !collapsed}
+    {#if !collapsed && !readOnly}
       <div class="header-actions">
         <button
           type="button"
@@ -1028,10 +1169,10 @@
     <div
       class="body"
       class:panning={panActive}
-      class:can-pan={canPan}
+      class:can-pan={!readOnly && canPan}
       data-testid="machine-graph-body"
-      role="application"
-      aria-label="Machine graph viewport (drag to pan, Ctrl+scroll to zoom)"
+      role={readOnly ? 'img' : 'application'}
+      aria-label={readOnly ? 'Machine graph' : 'Machine graph viewport (drag to pan, Ctrl+scroll to zoom)'}
       onpointerdown={onBodyPointerDown}
       onpointermove={onBodyPointerMove}
       onpointerup={onBodyPointerUp}
