@@ -4,7 +4,9 @@
 
 ## 1. Overview
 
-The demo runs user-typed JavaScript inside a Web Worker that drives a `@turing-machine-js/machine` v7.0.0-alpha.6 machine through a **`DebugSession`** ([engine #102](https://github.com/mellonis/turing-machine-js/issues/102)). The engine's v7 `run()` is sync + callback-free; all interactive observation (breakpoints, step controls, click-pause, throttle) moved into the session. The worker constructs one — `machine.debugRun(...)` for Post (returns a `PostDebugSession`), `new DebugSession(machine, ...)` for Turing — and listens to its `step` / `pause` / `iter` / `halt` events. The main thread tracks the worker's progress with a 7-mode state machine: three resting states (DEMO, IDLE, MANUAL), three running states (RUNNING_AUTO, RUNNING_CONTINUOUS, RUNNING_PAUSED), and one terminal (HALTED).
+The demo runs user-typed JavaScript inside a Web Worker that drives a `@turing-machine-js/machine` v7.0.0-alpha.6 machine through a **`DebugSession`** ([engine #102](https://github.com/mellonis/turing-machine-js/issues/102)). The engine's v7 `run()` is sync + callback-free; all interactive observation (breakpoints, step controls, click-pause, throttle) moved into the session. The worker constructs one — `machine.debugRun(...)` for Post (returns a `PostDebugSession`), `new DebugSession(machine, ...)` for Turing — and listens to its `step` / `pause` / `iter` / `halt` events. The main thread tracks the worker's progress with a 5-mode state machine: one resting state (MANUAL), three running states (RUNNING_AUTO, RUNNING_CONTINUOUS, RUNNING_PAUSED), and one terminal (HALTED).
+
+Engine pages (`/turing`, `/post`) mount in MANUAL. Initial editor content follows a 4-tier boot priority: `?example=<id>` query > `?snippet=<uuid>` query > localStorage `code` > first bundled example for the engine. Implementation lives in `src/lib/initialBoot.ts` as the pure helper `computeInitialBoot(...)`. No tape animation runs until the user clicks Step or Run.
 
 Most user actions are mode transitions; a few — debug toggle, withPause toggle, Apply — are flag changes or in-place mirror writes that don't move the mode.
 
@@ -12,19 +14,7 @@ The diagram below shows every mode-to-mode user-action edge. Conditions appear i
 
 ```mermaid
 stateDiagram-v2
-    [*] --> DEMO
-
-    DEMO --> IDLE : Build
-    DEMO --> RUNNING_PAUSED : Step (cold-start)
-    DEMO --> RUNNING_AUTO : Run [withPause=on]
-    DEMO --> RUNNING_CONTINUOUS : Run [withPause=off]
-    DEMO --> MANUAL : Take Control
-
-    IDLE --> IDLE : Build
-    IDLE --> RUNNING_PAUSED : Step (cold-start)
-    IDLE --> RUNNING_AUTO : Run [withPause=on]
-    IDLE --> RUNNING_CONTINUOUS : Run [withPause=off]
-    IDLE --> MANUAL : Take Control
+    [*] --> MANUAL
 
     MANUAL --> MANUAL : Build or Apply
     MANUAL --> RUNNING_PAUSED : Step (cold-start)
@@ -46,43 +36,31 @@ stateDiagram-v2
     RUNNING_PAUSED --> HALTED : Stop or Continue→halt
     RUNNING_PAUSED --> MANUAL : Take Control
 
-    HALTED --> IDLE : Build [!userTookControl]
-    HALTED --> MANUAL : Build [userTookControl]
+    HALTED --> MANUAL : Build
     HALTED --> RUNNING_PAUSED : Step (cold-start)
     HALTED --> RUNNING_AUTO : Run [withPause=on]
     HALTED --> RUNNING_CONTINUOUS : Run [withPause=off]
-    HALTED --> MANUAL : Take Control [!userTookControl]
 
     note right of HALTED : Error, timeout, truncation, or cold-start build error from any non-resting state lands HALTED.
 ```
 
 ## 2. Mode reference
 
-Three lines per mode: what it means, how it's entered, how it's exited. UI / log detail belongs in §8 Action matrix and §10 walk-throughs.
-
-### DEMO
-Page-load entry state. A timer-based loop generates random commands and applies them to the mirror, demonstrating the machine without user input. `userTookControl` is false; auto-loop is live.
-Entry: page load only.
-Exit: Build (→ IDLE), Step or Run (→ RUNNING_*; cold-start path), Take Control (→ MANUAL).
-
-### IDLE
-Uncommitted resting state. The user has signaled intent (Build / Step / Run from DEMO, or completed a run from IDLE-track) but has not yet taken control. Auto-loop is dead. Apply is hidden. Take Control is visible.
-Entry: Build / Step / Run from DEMO; post-RUNNING_* completion when `!userTookControl`; Build from HALTED when `!userTookControl`.
-Exit: Build (→ IDLE, reload), Take Control (→ MANUAL), Step (→ RUNNING_PAUSED), Run (→ RUNNING_AUTO / RUNNING_CONTINUOUS).
+Three lines per mode: what it means, how it's entered, how it's exited. UI / log detail belongs in §6 Action matrix and §8 walk-throughs.
 
 ### MANUAL
-Committed resting state. The user drives the machine via Apply. Worker is built but idle (no run/step pending). Take Control is hidden (already taken).
-Entry: Take Control from any non-MANUAL mode; post-RUNNING_* completion or Build from HALTED when `userTookControl`.
-Exit: Step / Run via §7 cold-start (→ RUNNING_AUTO / RUNNING_CONTINUOUS / RUNNING_PAUSED), Build (→ MANUAL, reload), Apply (stays MANUAL, writes to mirror).
+The only resting state. Worker is built but idle (no run/step pending); the user drives the machine via Apply. Engine pages mount here; every post-RUNNING_* completion and every Build lands here.
+Entry: page load (initial editor content per the 4-tier boot priority — §1); Build from any mode; Take Control from any RUNNING_*; post-RUNNING_* completion path is HALTED, with the subsequent Build → MANUAL.
+Exit: Step / Run via §5 cold-start (→ RUNNING_AUTO / RUNNING_CONTINUOUS / RUNNING_PAUSED), Build (→ MANUAL, reload), Apply (stays MANUAL, writes to mirror).
 
 ### RUNNING_AUTO
 The worker is running inside the session's `start()` with the throttle on the awaited `iter` event (the `withPause` interval awaited at end-of-iter). Belt animations follow the cadence; the user can click Pause to suspend (the engine's external `pause()`).
-Entry: Run from IDLE / MANUAL / HALTED with `withPause=on`; Continue from RUNNING_PAUSED with `withPause=on`.
+Entry: Run from MANUAL / HALTED with `withPause=on`; Continue from RUNNING_PAUSED with `withPause=on`.
 Exit: Pause (→ RUNNING_PAUSED), debug break with `debug=on` (→ RUNNING_PAUSED), Stop (→ HALTED), run completion (→ HALTED), Take Control (→ MANUAL).
 
 ### RUNNING_CONTINUOUS
 The worker is running inside the session's `start()` with no throttle (the `iter` listener no-ops in this mode) — snap-to-final. Belt animation is suppressed; per-step commands batch-log on completion. Stop is visible as the user's kill-switch; the Step button stays rendered but disabled (no per-iter checkpoint to pause at).
-Entry: Run from IDLE / MANUAL / HALTED with `withPause=off`; Continue from RUNNING_PAUSED with `withPause=off`.
+Entry: Run from MANUAL / HALTED with `withPause=off`; Continue from RUNNING_PAUSED with `withPause=off`.
 Exit: debug break with `debug=on` (→ RUNNING_PAUSED), Stop (→ HALTED), run completion (→ HALTED), Take Control (→ MANUAL).
 
 ### RUNNING_PAUSED
@@ -91,86 +69,47 @@ Entry: cold-start Step (`run({ step: true })` arms `ses.stepIn()` before `ses.st
 Exit: Step (`resume({ step: true })` → the pause listener calls `ses.stepIn()`, → RUNNING_PAUSED via re-pause before the next iter), Continue (`ses.continue()`, → RUNNING_AUTO / RUNNING_CONTINUOUS for the duration of the resume), Stop (`ses.stop()`, terminate worker → HALTED), Take Control (→ MANUAL).
 
 ### HALTED
-Terminal state. The machine reached its halt state, errored, timed out, or hit `MAX_STEPS` truncation. Tape is frozen at the final state. Build / Step / Run reload-from-code. Take Control is visible only when `!userTookControl`.
+Terminal state. The machine reached its halt state, errored, timed out, or hit `MAX_STEPS` truncation. Tape is frozen at the final state. Build / Step / Run reload-from-code.
 Entry: run completion, Stop, error, timeout, or truncation from any RUNNING_*; build error from any cold-start.
-Exit: Build (→ IDLE if `!userTookControl`, → MANUAL if `userTookControl`), Step / Run (→ RUNNING_* via cold-start), Take Control (→ MANUAL, only if `!userTookControl`).
+Exit: Build (→ MANUAL), Step / Run (→ RUNNING_* via cold-start). Take Control is hidden (nothing to take — see §9 for the design question).
 
 ## 3. Flag reference
 
-Four flags govern transitions and per-action behavior. Three are user-visible UI controls; one is a sticky latch.
+Three flags govern transitions and per-action behavior. All three are user-visible UI controls or derived from worker responses; no sticky latches.
 
 - **`debugMode`** — `boolean`. UI checkbox in the Toolbar, persisted to `localStorage:machines-demo:<engine>:debugMode`. Gates whether **breakpoint-cause** pauses (the `pause` event's `cause: 'breakpoint'` — a `state.debug` / `haltState.debug` match) surface; when off, the worker's `pause` listener calls `ses.continue()` and runs through. **Step-cause and manual-cause pauses always surface regardless of `debugMode`** — they're the user's own Step / click-Pause. Mid-run toggle pushes `setDebug(on)` to the worker (flips the worker-side `debugEnabled` gate; the only mode-aware effect on a flag toggle).
 - **`withPause`** — `boolean`. UI checkbox + interval input in the Toolbar. Selects RUNNING_AUTO (with throttle) vs RUNNING_CONTINUOUS (snap-to-final) on the next Run. The toggle itself (`S-withpause-toggle`) has no immediate runtime effect; it's read at Run-click time.
 - **`halted`** — `boolean`. Derived from worker `built` / `ran` / `error` responses. Drives the HALTED-mode transition.
-- **`userTookControl`** — `boolean`. Sticky latch, starts `false`, set `true` on Take Control click, never re-enables. Marks the "manual track": after RUNNING_* / HALTED, post-action mode resolution lands MANUAL when true, IDLE when false.
 
-The `demoEnabled` flag from earlier versions of the code is dropped — the DEMO ↔ IDLE mode distinction encodes "is the auto-loop alive" directly.
+The flag set is minimal by design: with only one resting mode, post-action mode resolution is a function of the source mode + action, no track-selection latch needed. The earlier `userTookControl` latch (chose IDLE vs MANUAL after RUNNING_* / HALTED) and `demoEnabled` flag (whether the auto-loop was alive) both went away with the DEMO + IDLE retirement.
 
-## 4. DEMO mode
+## 4. MANUAL mode
 
-DEMO is the page-load entry state — a teaser that shows the machine reacting to inputs without requiring the user to do anything. The demo loop fires on a timer (~1 Hz) and applies one randomly chosen command per tick, drawn from the current tape's alphabet (40 % chance the head stays put with no write; otherwise pick a random symbol and a random direction).
+MANUAL is the only resting state. Engine pages mount here (no auto-loop, no animation); the worker is built from the initial editor content and the panel is enabled so the user can drive the machine via Apply. The user composes a `Command` (movement + symbol) which writes to the mirror via the same `ifOtherSymbol` one-step state used internally by Step.
 
-The loop is entirely a main-thread effect; the worker doesn't see DEMO. The mirror machine receives commands directly via the same `ifOtherSymbol` one-step write path that §6 MANUAL exposes through Apply.
+MANUAL is sticky in the sense that every cold-start / run / Build cycle eventually returns to it: Build from any mode → MANUAL; RUNNING_* → HALTED → Build → MANUAL.
 
-**Exits.** DEMO → IDLE on Build / Step / Run (cold-start path; the click signals intent and kills the loop); DEMO → MANUAL on Take Control (the user commits to the manual track). Errors during cold-start lead → HALTED via the cold-start error branch.
+**Exits.** Build (→ MANUAL, reload — same code, fresh worker); Step / Run (→ RUNNING_*; cold-start, see §5); Apply (stays MANUAL, in-place mirror write). Errors during cold-start lead → HALTED.
 
-**Visible controls.** Build, Step, Run, Take Control. Apply is hidden (the loop generates commands itself; there's no role for a user-fired Apply in DEMO). Stop is hidden (no worker-side run to interrupt).
-
-**Scenario IDs.**
-- `S-build-demo` — reload, → IDLE.
-- `S-step-demo-{off,on}` — cold-start Step. Worker calls `ses.stepIn()` before `ses.start()`, pauses before iter 1, → RUNNING_PAUSED. Per §7.
-- `S-run-demo-{off,on}-{auto,cont}` — cold-start Run. → RUNNING_AUTO or RUNNING_CONTINUOUS by withPause. Per §7.
-- `S-takectl-demo` — `userTookControl = true`, → MANUAL.
-
-DEMO is entered only on initial page load. After any of the exits above, the user never returns to DEMO.
-
-## 5. IDLE mode
-
-IDLE is the post-interaction, pre-Take-Control resting state. The user has clicked Build / Step / Run (from DEMO or after a previous run) but hasn't committed to the manual track. The auto-loop is dead; the worker is built; the panel mirrors the worker's state but is read-only.
-
-IDLE differs from MANUAL only by the `userTookControl` latch — once Take Control fires, IDLE → MANUAL and never returns.
-
-**Exits.** Build (→ IDLE, reload — same code, fresh worker); Step / Run (→ RUNNING_*; cold-start path); Take Control (→ MANUAL, latch flips). Errors during cold-start lead → HALTED via the cold-start error branch.
-
-**Visible controls.** Build, Step, Run, Take Control. Apply is hidden (Apply is MANUAL-only). Stop is hidden (no run in flight).
-
-**Scenario IDs.**
-- `S-build-idle` — reload, → IDLE.
-- `S-step-idle-{off,on}` — cold-start Step. Per §7.
-- `S-run-idle-{off,on}-{auto,cont}` — cold-start Run. Per §7.
-- `S-takectl-idle` — `userTookControl = true`, → MANUAL.
-
-A user who has run a machine to completion without ever clicking Take Control returns to IDLE — the spec preserves the IDLE track until the user explicitly opts in to MANUAL.
-
-## 6. MANUAL mode
-
-MANUAL is the committed resting state. `userTookControl = true`; the user is driving the machine via Apply. The panel is enabled and the user composes a `Command` (movement + symbol) which writes to the mirror via the same `ifOtherSymbol` one-step state used internally by Step.
-
-Once entered, MANUAL is sticky: subsequent Build / Step / Run / completion all return to MANUAL.
-
-**Exits.** Build (→ MANUAL, reload); Step / Run (→ RUNNING_*; cold-start); Apply (stays MANUAL, in-place mirror write). Errors during cold-start lead → HALTED.
-
-**Visible controls.** Build, Step, Run, Apply. Take Control is hidden (already taken). Stop is hidden (no run in flight).
+**Visible controls.** Build, Step, Run, Apply. Take Control is hidden (resting mode — nothing to take). Stop is hidden (no run in flight).
 
 **Apply scenario.**
 - `S-apply-manual` — main thread applies the user-composed `Command` to `mirrorMachine` via the `ifOtherSymbol` one-step state. No worker round-trip; the worker stays idle. Mode stays MANUAL. The log gets a single command entry per Apply.
 
-The Apply button is **hidden** in DEMO, IDLE, and HALTED — it's MANUAL-only. Earlier code variants displayed a flashing "next random command" Apply button in DEMO; the spec drops that affordance and lets the DEMO loop render its commands inline on the panel.
-
-**Cold-start scenarios from MANUAL.** See §7.
+**Cold-start scenarios from MANUAL.** See §5.
 - `S-build-manual` — reload, → MANUAL.
 - `S-step-manual-{off,on}` — cold-start Step.
 - `S-run-manual-{off,on}-{auto,cont}` — cold-start Run.
 
-## 7. Starting and resuming runs
+## 5. Starting and resuming runs
 
-The cold-start path (Build / Step / Run from IDLE, MANUAL, or HALTED — and DEMO's user-clicked equivalent) is unified: reload the worker, then either land back in a resting mode (Build) or enter `machine.run()` (Step / Run). The Resume sub-section covers Continue from RUNNING_PAUSED, which uses the same in-flight `run()` rather than reloading.
+The cold-start path (Build / Step / Run from MANUAL or HALTED) is unified: reload the worker, then either land back in MANUAL (Build) or enter `machine.run()` (Step / Run). The Resume sub-section covers Continue from RUNNING_PAUSED, which uses the same in-flight `run()` rather than reloading.
 
 ### Cold-start
 
-The path is identical from IDLE, MANUAL, and HALTED. Each Build / Step / Run reloads the worker, builds a fresh mirror, then routes by action:
+The path is identical from MANUAL and HALTED — both are cold-start origins and resolve to MANUAL on Build. Each Build / Step / Run reloads the worker, builds a fresh mirror, then routes by action:
 
-- **Build** — reload only. → IDLE if `!userTookControl`, → MANUAL if `userTookControl`.
+- **Build** — reload only. → MANUAL.
 - **Step** — reload, call `runner.run({ debug: debugMode, step: true })`. The worker calls `ses.stepIn()` *before* `ses.start()`, which arms the step mode so the session pauses **before iter 1** (`m.pause: { side: 'before', cause: 'step' }`) → RUNNING_PAUSED. **No command has been applied yet** — the highlight / pause line point at the *about-to-fire* transition, not a just-applied one. With `debug=on` and a user-authored `state.debug.before` on `initialState`, the pause fires at the same moment but reports `cause: 'breakpoint'` (the engine's `breakpoint > step > manual` precedence when one iter satisfies several triggers); same target mode. **Step is a manual action — it ignores `intervalMs`.** Even if `withPause=on` and `intervalMs=1s`, the Step pause materializes immediately: the throttle lives on the awaited `iter` event, and the `iter` listener early-returns while a step is in flight. The interval applies only to actual RUNNING_AUTO iters; clicking Step is not an auto iter.
 - **Run** — reload, call `runner.run({ debug: debugMode })`. → RUNNING_AUTO (`withPause=on`, `onIter` awaits the throttle) or RUNNING_CONTINUOUS (`withPause=off`, `onIter` no-ops). Debug breaks during the run land → RUNNING_PAUSED.
 
@@ -178,13 +117,11 @@ If the reload itself fails (build error in user code), → HALTED with an error 
 
 ```mermaid
 flowchart TD
-    Start([User clicks Build, Step, or Run from IDLE / MANUAL / HALTED])
+    Start([User clicks Build, Step, or Run from MANUAL / HALTED])
     Start --> Reload[reload worker — build, mirror, alphabets]
     Reload --> Action{which action?}
     Reload -. build error .-> ErrorOut[→ HALTED with error log]
-    Action -->|Build| Resolve1{userTookControl?}
-    Resolve1 -->|true| ManualOut[→ MANUAL]
-    Resolve1 -->|false| IdleOut[→ IDLE]
+    Action -->|Build| ManualOut[→ MANUAL]
     Action -->|Step| RunStep[runner.run debug=debugMode, step=true]
     RunStep --> PauseOut[worker calls ses.stepIn before ses.start, pausing before iter 1 → RUNNING_PAUSED]
     Action -->|Run| WithPause{withPause?}
@@ -194,15 +131,13 @@ flowchart TD
     RunCont --> ContOut[→ RUNNING_CONTINUOUS]
 ```
 
-**Cold-start scenario IDs.** Each origin (IDLE / MANUAL / HALTED) gets the same set:
+**Cold-start scenario IDs.** Each origin (MANUAL / HALTED) gets the same set:
 
-- `S-build-{idle,manual,halted}` — reload, → IDLE / MANUAL by `userTookControl`.
-- `S-step-{idle,manual,halted}-{off,on}` — Step cold-start. Off / on selects `debug` flag.
-- `S-run-{idle,manual,halted}-{off,on}-{auto,cont}` — Run cold-start. Off / on selects `debug`; auto / cont selects `withPause`.
+- `S-build-{manual,halted}` — reload, → MANUAL.
+- `S-step-{manual,halted}-{off,on}` — Step cold-start. Off / on selects `debug` flag.
+- `S-run-{manual,halted}-{off,on}-{auto,cont}` — Run cold-start. Off / on selects `debug`; auto / cont selects `withPause`.
 
-**DEMO origin.** Build / Step / Run from DEMO uses the same cold-start path; the click signals intent (kills the auto-loop) but doesn't flip `userTookControl`, so post-RUNNING_* completion and Build resolution land IDLE. Scenario IDs `S-build-demo`, `S-step-demo-{off,on}`, `S-run-demo-{off,on}-{auto,cont}` mirror the IDLE entries.
-
-**Post-RUNNING_* completion** — when a run reaches halt naturally (or via Stop), the resolution is HALTED. The next Build / Step / Run from HALTED then resolves to IDLE or MANUAL by `userTookControl`. The track is preserved across the run.
+**Post-RUNNING_* completion** — when a run reaches halt naturally (or via Stop), the resolution is HALTED. The next Build / Step / Run from HALTED follows the same cold-start path; Build → MANUAL, Step / Run → RUNNING_*.
 
 ### Resume from PAUSED
 
@@ -211,50 +146,48 @@ The Run / Continue button (labelled "Continue" throughout any RUNNING_*; only cl
 - `S-continue-paused-off` — `runner.resume({ step: false })`. Breakpoint-cause pauses are not honored (worker-side `debugEnabled = false`, so the `pause` listener auto-`continue()`s past any `cause: 'breakpoint'`), so the run continues to halt → HALTED on completion. Stop / error / timeout still terminate the worker normally.
 - `S-continue-paused-on` — `runner.resume({ step: false })`. Breakpoint pauses fire as encountered → next RUNNING_PAUSED. The user can click Continue again, repeating across multiple paused / resume cycles until halt or Stop.
 
-The button's label is "Run" in the resting modes (DEMO / IDLE / MANUAL / HALTED) where the action is a cold start, and "Continue" in every RUNNING_* mode (resume / let the run finish). The button is enabled in resting modes and in RUNNING_PAUSED; disabled in RUNNING_AUTO / RUNNING_CONTINUOUS (the run is already advancing on its own).
+The button's label is "Run" in MANUAL and HALTED where the action is a cold start, and "Continue" in every RUNNING_* mode (resume / let the run finish). The button is enabled in MANUAL / HALTED and in RUNNING_PAUSED; disabled in RUNNING_AUTO / RUNNING_CONTINUOUS (the run is already advancing on its own).
 
 Walk-through 3 expands these scenarios with per-segment timer behavior, log replay, and edge cases.
 
-## 8. Action matrix
+## 6. Action matrix
 
 Mode-transition outcomes for user actions across the three running / paused modes. Each cell is a scenario ID + one-line outcome, or `—` for hidden / disabled.
 
-**Matrix scope.** The matrix lists *user-action* exits only. Event-driven transitions — debug break firing, run completion, error, timeout, truncation — are not matrix rows. They appear in three other places: §1's master state diagram (edges), each mode's "Exit" line in §2 Mode reference, and walk-throughs 2 and 7-9. A reader looking only at the matrix should not conclude that, e.g., RUNNING_CONTINUOUS exits only via Stop or Take Control.
+**Matrix scope.** The matrix lists *user-action* exits only. Event-driven transitions — debug break firing, run completion, error, timeout, truncation — are not matrix rows. They appear in three other places: §1's master state diagram (edges), each mode's "Exit" line in §2 Mode reference, and walk-throughs 2 and 7-9. A reader looking only at the matrix should not conclude that, e.g., RUNNING_CONTINUOUS exits only via Stop or Take Control. The resting/terminal modes (MANUAL, HALTED) are not matrix columns either — see §4 and §7.
 
 | Action | RUNNING_AUTO | RUNNING_CONTINUOUS | RUNNING_PAUSED |
 |---|---|---|---|
 | **Step (debug=off)** | `S-step-auto-off`: pause label — `ses.pause()`, → PAUSED | — | `S-step-paused-off`: resume(step) → `ses.stepIn()`, before-side, → PAUSED |
 | **Step (debug=on)** | `S-step-auto-on`: pause label — `ses.pause()`, → PAUSED | — | `S-step-paused-on`: resume(step) → `ses.stepIn()`, before-side, → PAUSED (a breakpoint may report `cause:'breakpoint'` if it lands on the same iter) |
 | **Stop** | `S-stop-auto`: terminate, → HALTED | `S-stop-cont`: terminate, → HALTED | `S-stop-paused`: terminate, suppress failHalted, → HALTED |
-| **Take Control** | `S-takectl-auto`: latch userTookControl=true, terminate, → MANUAL | `S-takectl-cont`: latch, terminate, → MANUAL | `S-takectl-paused`: latch, terminate, → MANUAL |
+| **Take Control** | `S-takectl-auto`: terminate, → MANUAL | `S-takectl-cont`: terminate, → MANUAL | `S-takectl-paused`: terminate, → MANUAL |
 
 Notes:
 - Every cell is a mode transition (or `—` for hidden / disabled). Flag-change actions (debug toggle, withPause toggle) live in §3 — they don't cause mode transitions.
 - **Build is rendered but disabled across all RUNNING_* (AUTO / CONTINUOUS / PAUSED)** — a pending worker request blocks Build, including the paused-but-still-pending case. To rebuild, the user clicks Stop or Take Control first (terminate the worker), then Build is available from HALTED / MANUAL. The Stop → Build sequence keeps the worker tear-down explicit instead of silently destroying paused state on a stray Build click.
 - All RUNNING_* paths drive the same `DebugSession`. "Pause" from RUNNING_AUTO calls the engine's external `ses.pause()` — the session pauses at the next iter's before-side (`cause: 'manual'`) and lands in PAUSED, the same paused state used by breakpoints and Step. The worker also `cancelThrottle()`s so an in-flight RUNNING_AUTO interval doesn't delay the pause. The Pause affordance is the Step button with its label and icon flipped while RUNNING_AUTO; clicking it sends a `pause` request to the worker. In RUNNING_CONTINUOUS that same button stays labelled `Step` and is disabled (no per-iter checkpoint), so the user's only kill-switch is Stop.
 - **RUNNING_CONTINUOUS shares most of RUNNING_AUTO's control surface** — Stop, Take Control, debug toggle all available. The throttle / animation differ, and the Step-→-Pause affordance is suppressed in CONTINUOUS (button rendered but disabled). Take Control mid-CONTINUOUS can lose the race to completion, but no race produces a broken state — terminate-or-complete are both clean exits.
-- Run / Continue is a single-column action (only meaningful from RUNNING_PAUSED). It's documented in §7 Resume from PAUSED rather than in the matrix.
-- DEMO, IDLE, MANUAL, HALTED are not matrix columns — they have their own sections (§4, §5, §6, §9).
+- Run / Continue is a single-column action (only meaningful from RUNNING_PAUSED). It's documented in §5 Resume from PAUSED rather than in the matrix.
 
-## 9. HALTED mode
+## 7. HALTED mode
 
-HALTED is the terminal state — the machine reached its halt state, was stopped, or hit an error / timeout / `MAX_STEPS` truncation. The tape is frozen at the final state; the worker is alive but idle (no run in flight). Build / Step / Run reload-from-code; Take Control flips the latch.
+HALTED is the terminal state — the machine reached its halt state, was stopped, or hit an error / timeout / `MAX_STEPS` truncation. The tape is frozen at the final state; the worker is alive but idle (no run in flight). Build / Step / Run reload-from-code.
 
-**Exits.** Build (→ IDLE if `!userTookControl`, → MANUAL if `userTookControl`), Step / Run (→ RUNNING_* via cold-start, see §7), Take Control (→ MANUAL, only when `!userTookControl` — otherwise the button is hidden).
+**Exits.** Build (→ MANUAL), Step / Run (→ RUNNING_* via cold-start, see §5). Take Control is hidden (terminal mode — nothing to take; see §9 for the design question).
 
-**Visible controls.** Build, Step, Run. Take Control if `!userTookControl`. Apply hidden (Apply is MANUAL-only). Stop hidden (nothing to stop).
+**Visible controls.** Build, Step, Run. Apply hidden (Apply is MANUAL-only). Stop hidden (nothing to stop). Take Control hidden.
 
 **Scenario IDs.**
-- `S-build-halted` — reload, → IDLE / MANUAL by `userTookControl`. See §7.
-- `S-step-halted-{off,on}` — cold-start Step. See §7.
-- `S-run-halted-{off,on}-{auto,cont}` — cold-start Run. See §7.
-- `S-takectl-halted` — `userTookControl = true`, → MANUAL. Available only when `!userTookControl`.
+- `S-build-halted` — reload, → MANUAL. See §5.
+- `S-step-halted-{off,on}` — cold-start Step. See §5.
+- `S-run-halted-{off,on}-{auto,cont}` — cold-start Run. See §5.
 
-HALTED can be reached from any non-resting state. Build / Step / Run from HALTED, plus error and timeout handling, are walk-throughs in §10.
+HALTED can be reached from any RUNNING_* mode (run completion, Stop, error, timeout, truncation) or from a cold-start build error. Build / Step / Run from HALTED, plus error and timeout handling, are walk-throughs in §8.
 
-## 10. Scenario walk-throughs
+## 8. Scenario walk-throughs
 
-Each walk-through expands a contested or non-obvious path with sequence, log entries, worker calls, and edge cases. Boundary cases only — straightforward paths (Build, Apply, cold-start Run with no breaks) are sufficiently covered by the matrix and §7.
+Each walk-through expands a contested or non-obvious path with sequence, log entries, worker calls, and edge cases. Boundary cases only — straightforward paths (Build, Apply, cold-start Run with no breaks) are sufficiently covered by the matrix and §5.
 
 ### `S-step-paused-off` / `S-step-paused-on` — Step from break
 
@@ -366,7 +299,7 @@ The `debugMode` UI checkbox is reactive across mode transitions. A change while 
 
 - `S-debug-toggle-auto` / `S-debug-toggle-cont` — `runner.setDebug(on)` posts a fire-and-forget message. Worker flips an internal `debugEnabled` flag; the `pause` listener gates breakpoint-cause pauses by it, so subsequent breaks honor the new value (no run restart).
 - `S-debug-toggle-paused` — same `setDebug()` send. The current paused state is unaffected; the next break (after Continue) is gated by the new flag value.
-- In DEMO / IDLE / MANUAL / HALTED — flag flip only; no worker call (the worker is idle, the flag is read at the next `run()`).
+- In MANUAL / HALTED — flag flip only; no worker call (the worker is idle, the flag is read at the next `run()`).
 
 **Log entries**
 - (none — toggle is silent)
@@ -375,11 +308,9 @@ The `debugMode` UI checkbox is reactive across mode transitions. A change while 
 
 ### Walk-through 6 — Take Control mid-run
 
-Take Control is visible in DEMO, IDLE (visible during cold-start RUNNING_*), HALTED (when `!userTookControl`), and any RUNNING_* mode.
+Take Control is visible only in the RUNNING_* modes (AUTO / CONTINUOUS / PAUSED). It's distinct from Stop: both terminate the worker, but Stop lands HALTED (tape frozen at the final state, no further interaction beyond Build / Step / Run), while Take Control lands MANUAL (the user keeps driving the partial run state via Apply).
 
-- `S-takectl-auto` / `S-takectl-cont` / `S-takectl-paused` — main thread calls `runner.terminate()`. Worker is killed; `runner.run()` rejects via `rejectAll`. `userTookControl = true`. `failHalted` is suppressed via the same path as `S-stop-paused`. Mode → MANUAL.
-- `S-takectl-demo` / `S-takectl-idle` — no run in flight, just latch + mode change. → MANUAL.
-- `S-takectl-halted` — `userTookControl = true`, → MANUAL. Available only when `!userTookControl`.
+- `S-takectl-auto` / `S-takectl-cont` / `S-takectl-paused` — main thread calls `runner.terminate()`. Worker is killed; `runner.run()` rejects via `rejectAll`. `failHalted` is suppressed via the same path as `S-stop-paused`. Mode → MANUAL.
 
 **Log entries**
 - `took control`
@@ -400,7 +331,7 @@ Both surface as `WorkerError` in the runner; main thread's `failHalted` rebuilds
 **Log entries**
 - `error: <message>`
 
-**Edge case.** Cold-start build errors don't have running-mode-specific scenario IDs in the matrix because they happen before any RUNNING_* mode is entered. Tested against from each cold-start origin (IDLE / MANUAL / HALTED / DEMO) — see §7's flowchart error branch.
+**Edge case.** Cold-start build errors don't have running-mode-specific scenario IDs in the matrix because they happen before any RUNNING_* mode is entered. Tested against from each cold-start origin (MANUAL / HALTED) — see §5's flowchart error branch.
 
 ### Walk-through 8 — Truncation (`S-truncate-{auto,cont}`)
 
@@ -425,41 +356,41 @@ A run that doesn't halt naturally hits `MAX_STEPS = 100_000` inside the worker's
 
 **Edge case.** Today's API doesn't expose any callback hook to user code — `state.debug.before` / `state.debug.after` are filter values (`true | string[] | null`), not user-supplied functions, and the worker's `DebugSession` listeners (`step` / `pause`) wrap the run on the demo side. So a "stall via async user callback" isn't reachable in the current surface. The per-segment cap defends against the cases that *are* reachable: infinite loops in user code, hung worker-side Promises, and any future API surface that might let user-supplied async logic interpose.
 
-## 11. Current divergences from spec
+## 9. Current divergences from spec
 
 A punchlist of where today's code differs from the spec, each with a tracking-issue link. Acts as a TODO list for follow-up PRs; #47 cites scenario IDs and `it.skip` divergent ones until they close.
 
-- **IDLE mode does not exist.** Today's code encodes the post-Build, pre-Take-Control resting state via `(executionMode = DEMO, demoEnabled = false)`. The `ExecutionMode` union in `MachineView.svelte` has no `IDLE` member. Affects all `S-*-idle-*` IDs — they're served by `S-*-demo-*` paths today. Step from DEMO completes back to a still-running auto-loop that overwrites the result. Implementation tracked alongside [#46](https://github.com/mellonis/machines-demo/issues/46) (this spec); follow-up PR introduces IDLE and drops `demoEnabled`.
+- **Take Control's scope narrowed** — only meaningful from RUNNING_* (terminate the worker and land MANUAL, distinct from Stop which lands HALTED). Hidden from MANUAL (already the resting mode) and HALTED (terminal — nothing to take). Open design question: should Take Control collapse into Stop with a "preserve mirror" flag, or stay as its own affordance to keep the user-visible semantics ("take control of this partial run" vs "abandon this run") distinct? No tracking issue yet.
 
-> ⚠️ The two former entries here — "halting iter's `state.debug.after` never fires" and "`haltState.debug.after` silently ignored" — are **resolved** under the v7 `DebugSession` model. Step no longer arms `.after` (it uses the engine's `stepIn()`, before-side), and `haltState.debug` is now a `boolean` ([turing-machine-js#207](https://github.com/mellonis/turing-machine-js/issues/207)) whose pause fires reliably on the after-side of the halt-triggering iter. Neither divergence applies anymore.
+> ⚠️ The former entries here — "IDLE mode does not exist", "halting iter's `state.debug.after` never fires", "`haltState.debug.after` silently ignored" — are all **resolved**. IDLE was retired entirely with the DEMO + IDLE removal; Step no longer arms `.after` (it uses the engine's `stepIn()`, before-side); `haltState.debug` is now a `boolean` ([turing-machine-js#207](https://github.com/mellonis/turing-machine-js/issues/207)) whose pause fires reliably on the after-side of the halt-triggering iter. None of these divergences apply anymore.
 
-## 12. Engine quirks
+## 10. Engine quirks
 
 Upstream behaviors the spec encodes (won't change without a major upstream version, so the spec works around them):
 
 - The `DebugSession` `step` event is fire-and-forget and synchronous (per-iter, mid-iter, between any before-pause and after-pause). The demo's `step` listener uses it purely to buffer commands / reads / match-kinds and track `prevYieldedStateId` — it never awaits. Per-iter **awaited** coordination lives on the `iter` event (the engine awaits it, sequenced after any after-pause), which the demo uses for the RUNNING_AUTO throttle. The `pause` event is also awaited (the engine blocks on its internal resume-promise until `continue` / `stepIn` / `stop`). Cross-ref [turing-machine-js#102](https://github.com/mellonis/turing-machine-js/issues/102) for the `DebugSession` reshape.
 
-§11 vs §12: §11 lists demo-side gaps to be closed; §12 lists engine semantics that won't change. Items can move from §12 to §11 if the upstream issue lands and a corresponding demo-side simplification becomes possible.
+§9 vs §10: §9 lists demo-side gaps to be closed; §10 lists engine semantics that won't change. Items can move from §10 to §9 if the upstream issue lands and a corresponding demo-side simplification becomes possible.
 
-## 13. Cross-references
+## 11. Cross-references
 
 - [`CLAUDE.md`](../CLAUDE.md) — working conventions, file structure, build commands. Runtime-behavior content moved here.
 - [`docs/superpowers/specs/2026-05-08-worker-run-mode-design.md`](superpowers/specs/2026-05-08-worker-run-mode-design.md) — the [#40](https://github.com/mellonis/machines-demo/issues/40) design; gives the *why* behind RUNNING_PAUSED and the worker contract.
 - [#47](https://github.com/mellonis/machines-demo/issues/47) — test infrastructure that consumes the scenario IDs defined in this doc.
 - [#46](https://github.com/mellonis/machines-demo/issues/46) — issue this spec resolves.
 
-## 14. Scenario ID grammar
+## 12. Scenario ID grammar
 
 `<prefix>-<action-or-topic>-<context-or-facet>-<flags?>`
 
 | Slot | Values |
 |---|---|
-| `S-` | literal prefix; marks the token as a UI-scenario reference. Used throughout §§4–10. |
+| `S-` | literal prefix; marks the token as a UI-scenario reference. Used throughout §§4–8. |
 | `R-` | runner / worker / helper internal scenarios (no UI counterpart). Format `R-<topic>-<facet>`, e.g. `R-protocol-build`, `R-timer-suspend-on-paused`. Used in `*.test.ts` files alongside `S-...` IDs. |
 | `C-` | component-test scenarios. Format `C-<component>-<facet>`, e.g. `C-toolbar-run-label-default`, `C-toolbar-disabled-build`. Used in component test files (`*.test.ts` co-located with `.svelte` files). |
 | `E-` | end-to-end scenarios — full UI flow including worker round-trip. Format `E-<from-state-or-context>-<facet>`, e.g. `E-cold-start-run-debug-off`. Used in `e2e/*.spec.ts`. |
 | `<action>` (S only) | `build`, `step`, `run`, `continue`, `stop`, `takectl`, `apply`, `debug-toggle`, `withpause-toggle`, `error`, `truncate`, `timeout` |
-| `<from-state>` (S only) | `demo`, `idle`, `manual`, `auto`, `cont`, `paused`, `halted` |
+| `<from-state>` (S only) | `manual`, `auto`, `cont`, `paused`, `halted` |
 | `<topic>` (R / C / E) | `machineRunner.test.ts`: `protocol`, `timer`, `pending`, `error`. `workerHelpers.test.ts`: `movement-code`, `commands`, `snapshot`, `phase-guard`, `step-arm`. `logStore.test.ts`: `buffer-append`, `cap-overflow`, `cap-boundary`, `separator-skip-empty`, `latest-skips-separator`, `latest-synchronous`, `clear`, `dispose`, `flush-coalesce`, `flush-no-pending-timer`. `tapeSnapshot.test.ts`: `roundtrip`, `parse-not-json`, `parse-wrong-format`, `parse-unsupported-version`, `parse-wrong-shape-tapes`, `parse-wrong-shape-alphabets`, `parse-length-mismatch`. `Toolbar.test.ts`: `run-label`, `disabled`, `visibility`, `interval`, `callbacks`. `e2e/cold-start.spec.ts`: `cold-start`, `continue-from-step`, `stop-while-paused`. |
 | `<facet>` (R only) | short descriptor — `build`, `step-cycle`, `suspend-on-paused`, `reject-overlap`, `wraps-error-with-tapes`, etc. |
 | `<flags?>` (S only) | optional flag suffix(es); `on` / `off` (debug), `auto` / `cont` (withPause when ambiguous), or compound like `off-auto` |
@@ -472,7 +403,7 @@ Conventions:
 - All four prefixes follow the regex `\b[SRCE]-[a-z-]+`. Tests / CI grep this to find every cited scenario.
 
 Where IDs live:
-- **Matrix cells** (§8): `S-step-paused-off: arm .after, resume(step), → PAUSED`. Text after `:` is the one-line outcome.
-- **Walk-throughs** (§10): each opens with `### \`S-step-paused-off\` / \`S-step-paused-on\` — Step from break` so the ID is the section anchor.
+- **Matrix cells** (§6): `S-step-paused-off: arm .after, resume(step), → PAUSED`. Text after `:` is the one-line outcome.
+- **Walk-throughs** (§8): each opens with `### \`S-step-paused-off\` / \`S-step-paused-on\` — Step from break` so the ID is the section anchor.
 - **Tests** ([#47](https://github.com/mellonis/machines-demo/issues/47)): each `it()` cites at least one ID. UI-flow tests cite `S-...` (component / E2E layers); runner / worker / helper tests cite `R-...`. Failing tests point straight at the spec rule they broke.
-- **§11 entries**: cite the IDs they affect when describing today's divergences.
+- **§9 entries**: cite the IDs they affect when describing today's divergences.
