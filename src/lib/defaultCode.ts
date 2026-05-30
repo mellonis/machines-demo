@@ -4,6 +4,11 @@ export type Example = {
   id: string;
   title: string;
   code: string;
+  // Phase 1: showcase flag drives the Vite snippet recorder; description appears
+  // as the panel caption; intervalMs overrides the playback default (800ms).
+  showcase?: boolean;
+  description?: string;
+  intervalMs?: number;
 };
 
 const TURING_REPLACE_B = `// Task: replace every 'b' on the tape with '*'.
@@ -187,13 +192,25 @@ return { machine };
 `;
 
 const TURING_EXAMPLES: readonly Example[] = [
-  { id: 'replace-b', title: "Replace 'b' with '*'", code: TURING_REPLACE_B },
+  {
+    id: 'replace-b',
+    title: "Replace 'b' with '*'",
+    code: TURING_REPLACE_B,
+    showcase: true,
+    description: 'Scan right over a mixed tape and replace every "b" with "*", leaving other symbols untouched.',
+  },
   { id: 'copy-two-tapes', title: 'Copy tape (multi-tape)', code: TURING_COPY_TWO_TAPES },
   { id: 'callable-subtree', title: 'Callable subtree (withOverriddenHaltState)', code: TURING_CALLABLE_SUBTREE },
 ];
 
 const POST_EXAMPLES: readonly Example[] = [
-  { id: 'walk-mark', title: 'Walk right; mark first blank', code: POST_WALK_MARK },
+  {
+    id: 'walk-mark',
+    title: 'Walk right; mark first blank',
+    code: POST_WALK_MARK,
+    showcase: true,
+    description: 'Walk right over marked cells and place a mark in the first blank cell found.',
+  },
 ];
 
 export function examples(engine: Engine): readonly Example[] {
