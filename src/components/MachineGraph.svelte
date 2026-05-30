@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import { toMermaid, type Graph } from '@turing-machine-js/machine';
-  import {
+    import {
     applyHighlight,
     applyIndicator,
     bareIdOf,
@@ -9,6 +9,7 @@
     indexGraph,
     type GraphHighlight,
     type GraphIndexes,
+    type HighlightOps,
     type NodeKey,
   } from '@turing-machine-js/visuals';
   import type { BreakpointKind } from '../lib/types.ts';
@@ -67,6 +68,12 @@
      *  bare, or wrapper State. Omitted when the parent doesn't want clicks
      *  routed (e.g., view-only contexts). */
     onToggleBreakpoint?: (stateId: number, kind: BreakpointKind) => void;
+    /** Fired when the rendered SVG has mounted and the internal `nodeCache`
+     *  is populated — i.e., the moment imperative consumers (`SnippetPanel`)
+     *  can usefully call `getOps()` / `clearHighlights()` and see the
+     *  highlights actually render. May fire multiple times across re-renders
+     *  (theme swap, direction swap, graph change). Optional. */
+    onReady?: () => void;
   };
 
   let {
@@ -82,6 +89,7 @@
     breakpointKinds,
     onToggleBreakpoint,
     readOnly = false,
+    onReady,
   }: Props = $props();
 
   const instanceId = `mg-${nextInstanceCounter()}`;
@@ -818,6 +826,120 @@
     });
   });
 
+  // Shared highlight-clear pass: strips the four highlight classes and
+  // restores arrowhead markers. Used by the internal apply-highlight effect
+  // AND the exported `clearHighlights()` method (which `SnippetPanel` calls
+  // before each `applyHighlight` since the visuals contract requires
+  // additive ops over an already-cleared canvas).
+  function _clearHighlightsImpl(root: SVGSVGElement): void {
+    root
+      .querySelectorAll('.mg-highlight-from, .mg-highlight-to, .mg-highlight-strong, .mg-highlight-edge')
+      .forEach((el) => {
+        el.classList.remove(
+          'mg-highlight-from',
+          'mg-highlight-to',
+          'mg-highlight-strong',
+          'mg-highlight-edge',
+        );
+        if (el.tagName === 'path' && el.hasAttribute('data-mg-orig-marker-end')) {
+          el.setAttribute('marker-end', el.getAttribute('data-mg-orig-marker-end')!);
+          el.removeAttribute('data-mg-orig-marker-end');
+        }
+      });
+  }
+
+  /**
+   * Imperative API: wipe previously-applied highlight classes + marker swaps
+   * from the rendered SVG. Required before each `applyHighlight` call per
+   * the visuals contract (`HighlightOps` is purely additive). No-op if the
+   * SVG hasn't mounted yet. Also clears any active frame cluster.
+   *
+   * Used by `SnippetPanel` for prerecorded playback; the internal
+   * apply-highlight effect uses `_clearHighlightsImpl` directly and skips
+   * the frame-active strip (it diffs frame transitions separately).
+   */
+  export function clearHighlights(): void {
+    if (!svgHostEl) return;
+    const root = svgHostEl.querySelector('svg');
+    if (!root) return;
+    _clearHighlightsImpl(root);
+    // External callers don't track lastFrameActiveId, so wipe the active
+    // cluster too — they'll re-set it from the next frame's highlight.
+    root.querySelectorAll('.mg-frame-active').forEach((el) => {
+      el.classList.remove('mg-frame-active');
+    });
+  }
+
+  /**
+   * Imperative API: a fresh `HighlightOps` bound to the current SVG, for
+   * external callers (`SnippetPanel`) that drive `applyHighlight` on their
+   * own schedule. Each call returns a new object — cheap (closes over
+   * cached DOM refs); call before each `applyHighlight` so it picks up any
+   * post-render cache rebuild. Returns `null` when the SVG isn't mounted.
+   *
+   * Unlike the internal apply-highlight effect, this ops impl toggles
+   * `mg-frame-active` directly (no diff against a prior frame) — the
+   * external caller is expected to pair each `applyHighlight` with a
+   * preceding `clearHighlights()`.
+   */
+  export function getOps(): HighlightOps | null {
+    if (!svgHostEl) return null;
+    const root = svgHostEl.querySelector('svg');
+    if (!root) return null;
+    return {
+      addNodeClass(id, cls) {
+        nodeCache.get(id)?.classList.add(cls);
+      },
+      highlightEdge(fromKey, toKey) {
+        for (let ix = 0; ix < 10; ix++) {
+          const els = root.querySelectorAll<SVGElement>(
+            `[data-id="L_${fromKey}_${toKey}_${ix}"]`,
+          );
+          if (els.length === 0) continue;
+          els.forEach((el) => {
+            el.classList.add('mg-highlight-edge');
+            if (el.tagName === 'path') {
+              const orig = el.getAttribute('marker-end');
+              if (orig && !el.hasAttribute('data-mg-orig-marker-end')) {
+                el.setAttribute('data-mg-orig-marker-end', orig);
+                el.setAttribute('marker-end', orig.replace(/\)$/, '-mg-hl)'));
+              }
+            }
+          });
+          return;
+        }
+      },
+      markFrameActive(frameId) {
+        clusterCache.get(frameId)?.classList.add('mg-frame-active');
+      },
+      pulse(id) {
+        nodeCache.get(id)?.animate(
+          [{ opacity: 1 }, { opacity: 0.35 }, { opacity: 1 }],
+          { duration: 220, easing: 'ease-in-out' },
+        );
+      },
+      scrollIntoView(id) {
+        const el = nodeCache.get(id);
+        if (!el) return;
+        void tick().then(() => {
+          const scrollContainer = svgHostEl?.closest<HTMLElement>('.body');
+          if (!scrollContainer) return;
+          scrollIntoViewIfNeeded(scrollContainer, el, 'smooth');
+        });
+      },
+    };
+  }
+
+  // Fire `onReady` when the SVG has mounted AND the cache is populated —
+  // the moment external imperative callers can usefully start applying
+  // frames. Re-fires per render (graph / theme / direction swap).
+  $effect(() => {
+    void svg;
+    if (!svg || !svgHostEl) return;
+    if (nodeCache.size === 0) return;
+    onReady?.();
+  });
+
   // Breakpoint indicator effect (machines-demo#37 layer 1). Runs on
   // `breakpoints` change AND on `svg` change (cache repopulates on SVG
   // re-render). Delegates the rule logic to `applyIndicator`; the ops
@@ -860,22 +982,12 @@
     if (!svgHostEl) return;
     const root = svgHostEl.querySelector('svg');
     if (!root) return;
-    // Clear previous highlight classes + marker-end restore. No inline-
-    // style restore needed — we strip the engine's classDef tags at render
-    // time so all visuals are author-CSS-driven; toggling classes is enough.
-    //
-    // `mg-frame-active` is INTENTIONALLY excluded from this strip-all — it's
-    // toggled below based on what applyHighlight actually requests, so the
-    // active cluster's class persists across consecutive in-frame iters
-    // (no visible blink between).
-    root.querySelectorAll('.mg-highlight-from, .mg-highlight-to, .mg-highlight-strong, .mg-highlight-edge')
-      .forEach((el) => {
-        el.classList.remove('mg-highlight-from', 'mg-highlight-to', 'mg-highlight-strong', 'mg-highlight-edge');
-        if (el.tagName === 'path' && el.hasAttribute('data-mg-orig-marker-end')) {
-          el.setAttribute('marker-end', el.getAttribute('data-mg-orig-marker-end')!);
-          el.removeAttribute('data-mg-orig-marker-end');
-        }
-      });
+    // Clear previous highlight classes + marker-end restore via the shared
+    // `clearHighlights()` helper. `mg-frame-active` is INTENTIONALLY
+    // excluded from the strip — it's toggled below based on what
+    // applyHighlight actually requests, so the active cluster's class
+    // persists across consecutive in-frame iters (no visible blink).
+    _clearHighlightsImpl(root);
 
     // Capture the frame the rule evaluator wants active (if any) so we
     // can diff against `lastFrameActiveId` and toggle only on change.

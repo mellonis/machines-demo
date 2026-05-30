@@ -75,6 +75,27 @@
     cellEl.classList.add('write-flash');
   }
 
+  // Render a pre-windowed cell array directly, bypassing `turing.Tape.viewport`.
+  // Used by `SnippetPanel` for prerecorded playback (Frame.tape snapshots are
+  // wire-format `TapeSnapshot`s, not live tapes). `cells.length` is expected
+  // to equal `VIEWPORT_WIDTH`; `headIndex` is the head's position within
+  // `cells` (currently always `MIDDLE_INDEX` for centered viewports, kept as
+  // a parameter for future non-centered layouts). `blank` is the alphabet's
+  // blank symbol — cells matching it render dimmed via `.cell.blank` CSS.
+  // No animation: prerecorded frames don't slide.
+  export function setFromCells(
+    cells: string[],
+    _headIndex: number,
+    blank: string,
+  ): void {
+    const padded: Cell[] = new Array(VIEWPORT_WIDTH).fill(null).map(blankCell);
+    for (let i = 0; i < VIEWPORT_WIDTH && i < cells.length; i++) {
+      const sym = cells[i];
+      padded[i] = { sym, blank: sym === blank };
+    }
+    viewport = padded;
+  }
+
   export function setTransitionsEnabled(on: boolean): void {
     if (!stripEl) return;
     if (on) {

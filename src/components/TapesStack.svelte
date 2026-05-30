@@ -45,6 +45,23 @@
     void tapeRefs[i]?.setFromTape(tape, delta, animate, wrote);
   }
 
+  // Render a pre-windowed cell array directly into tape `i`, bypassing
+  // `turing.Tape.viewport`. Used by `SnippetPanel` — Frame.tape snapshots
+  // are wire-format `TapeSnapshot`s, not live tapes; `tapeViewport()` from
+  // `@turing-machine-js/visuals` is called by the caller to derive the
+  // window from the snapshot, then handed in here as `cells`. `headIndex`
+  // is the head's position within `cells` (currently always the center for
+  // centered viewports; kept for future non-centered layouts). `blank` is
+  // the alphabet's blank symbol so cell-dim styling stays correct.
+  export function setTapeViewport(
+    i: number,
+    cells: string[],
+    headIndex: number,
+    blank: string,
+  ): void {
+    tapeRefs[i]?.setFromCells(cells, headIndex, blank);
+  }
+
   export function clearAll(): void {
     tapeRefs.forEach((r) => void r?.setFromTape(null));
   }
