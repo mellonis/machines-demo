@@ -159,6 +159,81 @@ const initialState = walkToBlank.withOverriddenHaltState(writeMarker);
 return { machine, initialState };
 `;
 
+const TURING_TOGGLE_BITS = `// Task: toggle every bit on the tape (0 ↔ 1) until blank.
+
+/*
+ * Available imports (named exports of @turing-machine-js/machine):
+ *   Alphabet, State, Tape, TapeBlock, TuringMachine,
+ *   haltState, ifOtherSymbol, movements, ...
+ *
+ * Return: { machine, initialState, tape }
+ *
+ * Note: the demo runs the machine; do not call .run() or .runStepByStep() yourself.
+ */
+
+const {
+  Alphabet, State, Tape, TapeBlock, TuringMachine,
+  haltState, ifOtherSymbol, movements,
+} = imports;
+
+const alphabet = new Alphabet([' ', '0', '1']);
+const tape = new Tape({ alphabet, symbols: ['0', '1', '1', '0', '1'] });
+const tapeBlock = TapeBlock.fromTapes([tape]);
+const machine = new TuringMachine({ tapeBlock });
+
+// Two literal patterns flip each cell; ifOtherSymbol matches the blank
+// and halts. The State returns the first matching key, so the literals
+// listed before ifOtherSymbol win when they match.
+const initialState = new State({
+  [tapeBlock.symbol(['0'])]: {
+    command: [{ symbol: '1', movement: movements.right }],
+  },
+  [tapeBlock.symbol(['1'])]: {
+    command: [{ symbol: '0', movement: movements.right }],
+  },
+  [ifOtherSymbol]: {
+    command: [{ movement: movements.stay }],
+    nextState: haltState,
+  },
+});
+
+return { machine, initialState, tape };
+`;
+
+const POST_MARK_AND_STEP = `// Task: mark the current cell, step right, mark again, step right. Halt.
+// Pure-sequential program — no branching. The simplest interesting
+// Post-machine pattern: mutate the tape, advance the head, repeat.
+
+/*
+ * Available imports (named exports of @post-machine-js/machine):
+ *   PostMachine, Tape, alphabet, blankSymbol, markSymbol,
+ *   call, check, erase, left, mark, noop, right, stop, ...
+ *
+ * Return: { machine } — initialState and tape default from the machine.
+ */
+
+const { PostMachine, Tape, mark, right, stop } = imports;
+
+const machine = new PostMachine(
+  {
+    10: mark,
+    20: right,
+    30: mark,
+    40: right,
+    50: mark,
+    60: stop,
+  },
+  { blankSymbol: '␣', markSymbol: '•' },
+);
+
+machine.replaceTapeWith(new Tape({
+  alphabet: machine.tape.alphabet,
+  symbols: ['␣', '␣', '␣'],
+}));
+
+return { machine };
+`;
+
 const POST_WALK_MARK = `// Task: walk right while marked; mark the first blank cell found.
 
 /*
@@ -191,25 +266,89 @@ machine.replaceTapeWith(new Tape({
 return { machine };
 `;
 
+const POST_CALL_SUBROUTINE = `// Task: walk to the first blank and mark it; step past; walk to the
+// next blank and mark it. Halt.
+// Demonstrates 'call' — a string-keyed subroutine reused from main.
+// 'stop' inside the subroutine = return to caller's continuation.
+// In the rendered graph, 'walkToBlank' sits inside a dashed subgraph
+// frame; the frame's border lights up while execution is inside it.
+
+/*
+ * Available imports (named exports of @post-machine-js/machine):
+ *   PostMachine, Tape, alphabet, blankSymbol, markSymbol,
+ *   call, check, erase, left, mark, noop, right, stop, ...
+ */
+
+const { PostMachine, Tape, call, check, mark, right, stop } = imports;
+
+const machine = new PostMachine({
+  walkToBlank: {
+    1: check(2, 3),  // marked? continue walking, else return
+    2: right(1),     // walk right, loop
+    3: stop,         // blank reached → return to caller
+  },
+  10: call('walkToBlank'),
+  20: mark,
+  30: right,         // step past the just-marked cell
+  40: call('walkToBlank'),
+  50: mark,
+  60: stop,
+}, { blankSymbol: '␣', markSymbol: '•' });
+
+machine.replaceTapeWith(new Tape({
+  alphabet: machine.tape.alphabet,
+  symbols: ['•', '•', '␣', '•', '•', '␣', '␣'],
+}));
+
+return { machine };
+`;
+
 const TURING_EXAMPLES: readonly Example[] = [
   {
     id: 'replace-b',
     title: "Replace 'b' with '*'",
     code: TURING_REPLACE_B,
     showcase: true,
-    description: 'Scan right over a mixed tape and replace every "b" with "*", leaving other symbols untouched.',
+    description: "Replace each 'b' with '*'; halt at blank.",
+  },
+  {
+    id: 'toggle-bits',
+    title: 'Toggle bits (0 ↔ 1)',
+    code: TURING_TOGGLE_BITS,
+    showcase: true,
+    description: 'Flip each bit (0↔1); halt at blank.',
+  },
+  {
+    id: 'callable-subtree',
+    title: 'Callable subtree (withOverriddenHaltState)',
+    code: TURING_CALLABLE_SUBTREE,
+    showcase: true,
+    description: 'Subroutine: walk to blank, then mark; the subgraph frame highlights during the call.',
   },
   { id: 'copy-two-tapes', title: 'Copy tape (multi-tape)', code: TURING_COPY_TWO_TAPES },
-  { id: 'callable-subtree', title: 'Callable subtree (withOverriddenHaltState)', code: TURING_CALLABLE_SUBTREE },
 ];
 
 const POST_EXAMPLES: readonly Example[] = [
   {
+    id: 'mark-and-step',
+    title: 'Mark, step, mark, step, mark',
+    code: POST_MARK_AND_STEP,
+    showcase: true,
+    description: 'Mark, step right, repeat — pure sequential, no branches.',
+  },
+  {
     id: 'walk-mark',
-    title: 'Walk right; mark first blank',
+    title: 'Walk past marks; mark first blank',
     code: POST_WALK_MARK,
     showcase: true,
-    description: 'Walk right over marked cells and place a mark in the first blank cell found.',
+    description: 'Skip past marks; mark the first blank cell.',
+  },
+  {
+    id: 'call-subroutine',
+    title: 'Subroutine: walk-to-blank, called twice',
+    code: POST_CALL_SUBROUTINE,
+    showcase: true,
+    description: 'Subroutine: walk to a blank and mark it; called twice from main.',
   },
 ];
 
