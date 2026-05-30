@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { turingVersion, postVersion, appVersion } from 'virtual:lib-versions';
+  import { turingVersion, postVersion, visualsVersion, appVersion } from 'virtual:lib-versions';
   import MachineView from './components/MachineView.svelte';
   import { icons } from './lib/icons.ts';
   import { theme } from './lib/theme.svelte.ts';
@@ -122,6 +122,13 @@
       rel="noopener"
       title="@post-machine-js/machine on npm"
     >post v{postVersion}</a>
+    <span class="sep" aria-hidden="true">·</span>
+    <a
+      href="https://www.npmjs.com/package/@turing-machine-js/visuals"
+      target="_blank"
+      rel="noopener"
+      title="@turing-machine-js/visuals on npm"
+    >visuals v{visualsVersion}</a>
   </span>
   <a
     class="repo-link"
