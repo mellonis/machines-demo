@@ -826,6 +826,22 @@
     });
   });
 
+  // Showcase context (readOnly) opens centered. Engine pages keep the
+  // default (0, 0) origin so the entry node is visible at first paint —
+  // there the user is about to step / run and orientation matters more
+  // than centroid. Triggered on SVG change only (not zoom), so the
+  // initial frame lands centered without fighting subsequent applies.
+  $effect(() => {
+    void svg;
+    if (!readOnly || !svg || !svgHostEl) return;
+    void tick().then(() => {
+      const body = svgHostEl?.closest<HTMLElement>('.body');
+      if (!body) return;
+      body.scrollLeft = (body.scrollWidth - body.clientWidth) / 2;
+      body.scrollTop = (body.scrollHeight - body.clientHeight) / 2;
+    });
+  });
+
   // Shared highlight-clear pass: strips the four highlight classes and
   // restores arrowhead markers. Used by the internal apply-highlight effect
   // AND the exported `clearHighlights()` method (which `SnippetPanel` calls
