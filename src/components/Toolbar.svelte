@@ -6,7 +6,7 @@
   // Execution-mode strings the toolbar cares about. Kept loose (string union
   // matching MachineView's ExecutionMode) so we don't duplicate the type.
   type Mode =
-    | 'DEMO' | 'MANUAL'
+    | 'MANUAL'
     | 'RUNNING_AUTO' | 'RUNNING_CONTINUOUS'
     | 'RUNNING_PAUSED'
     | 'HALTED';
@@ -237,8 +237,7 @@
   // button could take is "resume / let the run finish", so it reads as
   // `Continue` — enabled in RUNNING_PAUSED, disabled in RUNNING_AUTO /
   // RUNNING_CONTINUOUS where the run is already advancing on its own. In
-  // resting modes (DEMO/IDLE/MANUAL/HALTED) it's a fresh-start action and
-  // reads `Run`.
+  // resting modes (MANUAL/HALTED) it's a fresh-start action and reads `Run`.
   const runLabel = $derived(
     executionMode === 'RUNNING_AUTO' ||
       executionMode === 'RUNNING_CONTINUOUS' ||

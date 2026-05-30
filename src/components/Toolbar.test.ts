@@ -6,14 +6,14 @@ import type { Example } from '../lib/defaultCode';
 import type { Snippets } from '../lib/persist';
 
 type Mode =
-  | 'DEMO' | 'MANUAL'
+  | 'MANUAL'
   | 'RUNNING_AUTO' | 'RUNNING_CONTINUOUS'
   | 'RUNNING_PAUSED'
   | 'HALTED';
 
 function defaultProps() {
   return {
-    executionMode: 'DEMO' as Mode,
+    executionMode: 'MANUAL' as Mode,
     loadDisabled: false,
     stepDisabled: false,
     runDisabled: false,
@@ -44,7 +44,7 @@ describe('Toolbar', () => {
 
   describe('runLabel', () => {
     it('C-toolbar-run-label-default: shows "Run" outside paused', () => {
-      render(Toolbar, { props: { ...defaultProps(), executionMode: 'DEMO' } });
+      render(Toolbar, { props: { ...defaultProps(), executionMode: 'MANUAL' } });
       expect(screen.getByRole('button', { name: /^run$/i })).toBeInTheDocument();
     });
 
@@ -67,7 +67,7 @@ describe('Toolbar', () => {
     });
 
     it('C-toolbar-step-label-default: shows "Step" outside running-auto', () => {
-      render(Toolbar, { props: { ...defaultProps(), executionMode: 'DEMO' } });
+      render(Toolbar, { props: { ...defaultProps(), executionMode: 'MANUAL' } });
       expect(screen.getByRole('button', { name: /^step$/i })).toBeInTheDocument();
     });
 
@@ -90,7 +90,7 @@ describe('Toolbar', () => {
     });
 
     it('C-toolbar-disabled-run-cascade: runDisabled disables Run + with-pause + debug', () => {
-      render(Toolbar, { props: { ...defaultProps(), executionMode: 'DEMO', runDisabled: true } });
+      render(Toolbar, { props: { ...defaultProps(), executionMode: 'MANUAL', runDisabled: true } });
       expect(screen.getByRole('button', { name: /^run$/i })).toBeDisabled();
       expect(screen.getByRole('checkbox', { name: /with pause/i })).toBeDisabled();
       expect(screen.getByRole('checkbox', { name: /^debug$/i })).toBeDisabled();
@@ -98,8 +98,8 @@ describe('Toolbar', () => {
   });
 
   describe('visibility', () => {
-    it('C-toolbar-config-visible-demo: with-pause + debug checkboxes render in DEMO', () => {
-      render(Toolbar, { props: { ...defaultProps(), executionMode: 'DEMO' } });
+    it('C-toolbar-config-visible-manual: with-pause + debug checkboxes render in MANUAL', () => {
+      render(Toolbar, { props: { ...defaultProps(), executionMode: 'MANUAL' } });
       expect(screen.getByRole('checkbox', { name: /with pause/i })).toBeInTheDocument();
       expect(screen.getByRole('checkbox', { name: /^debug$/i })).toBeInTheDocument();
     });
@@ -142,7 +142,7 @@ describe('Toolbar', () => {
       render(Toolbar, {
         props: {
           ...defaultProps(),
-          executionMode: 'DEMO',
+          executionMode: 'MANUAL',
           withPause: true,
           intervalIsValid: false,
         },

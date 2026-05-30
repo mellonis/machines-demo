@@ -59,7 +59,6 @@
   ];
 
   type ExecutionMode =
-    | 'DEMO'
     | 'MANUAL'
     | 'RUNNING_AUTO'
     | 'RUNNING_CONTINUOUS'
