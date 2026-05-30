@@ -24,6 +24,7 @@
     "@post-machine-js/machine": "^7.0.0-alpha.6",
     "@tabler/icons": "^3.44.0",
     "@turing-machine-js/machine": "^7.0.0-alpha.6",
+    "@turing-machine-js/visuals": "^7.0.0-alpha.6",
     "codemirror": "^6.0.2",
     "mermaid": "^11.15.0",
     "svelte-codemirror-editor": "^2.1.0"
