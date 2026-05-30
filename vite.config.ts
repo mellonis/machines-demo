@@ -1,6 +1,7 @@
 import { defineConfig, type Plugin } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { readFileSync } from 'node:fs';
+import { createSnippetsPlugin } from './src/vite-plugins/snippets.ts';
 
 const pkgVersion = (pkg: string): string =>
   JSON.parse(readFileSync(`./node_modules/${pkg}/package.json`, 'utf-8')).version;
@@ -30,5 +31,5 @@ export const appVersion = ${JSON.stringify(app)};
 });
 
 export default defineConfig({
-  plugins: [svelte(), libVersions()],
+  plugins: [svelte(), libVersions(), createSnippetsPlugin()],
 });
