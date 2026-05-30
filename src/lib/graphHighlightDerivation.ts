@@ -1,5 +1,5 @@
-import { bareIdOf } from './graphUtils.ts';
-import type { GraphHighlight, TuringGraph } from './types.ts';
+import { bareIdOf, type GraphHighlight } from '@turing-machine-js/visuals';
+import type { Graph } from '@turing-machine-js/machine';
 
 /** Inline mirror of MachineView's local `ExecutionMode` union. The
  *  derivation reads only three values; if MachineView adds modes that
@@ -41,7 +41,7 @@ export type ExecutionMode =
  * value: DEMO, MANUAL, RUNNING_CONTINUOUS, HALTED).
  */
 export function deriveGraphHighlight(args: {
-  graph: TuringGraph | null;
+  graph: Graph | null;
   executionMode: ExecutionMode;
   currentStateId: number | null;
   nextStateId: number | null;
