@@ -1,16 +1,22 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { toMermaid } from '@turing-machine-js/machine';
-  import type { BreakpointKind, GraphHighlight, TuringGraph } from '../lib/types.ts';
+  import { toMermaid, type Graph } from '@turing-machine-js/machine';
+  import {
+    applyHighlight,
+    applyIndicator,
+    bareIdOf,
+    equivalentIds,
+    indexGraph,
+    type GraphHighlight,
+    type GraphIndexes,
+    type NodeKey,
+  } from '@turing-machine-js/visuals';
+  import type { BreakpointKind } from '../lib/types.ts';
   import { theme } from '../lib/theme.svelte.ts';
   import { icons } from '../lib/icons.ts';
-  import { applyHighlight, applyIndicator } from '../lib/applyHighlight.ts';
-  import { indexGraph, type GraphIndexes } from '../lib/graphIndexes.ts';
-  import type { NodeKey } from '../lib/highlightOps.ts';
-  import { bareIdOf, equivalentIds } from '../lib/graphUtils.ts';
 
   type Props = {
-    graph: TuringGraph | null;
+    graph: Graph | null;
     /** `from + edge + to` triple to highlight in the SVG. `null` clears any
      *  active highlight. Driven by MachineView mode + pause-response data
      *  (machines-demo#10). */
@@ -583,7 +589,7 @@
 
   async function renderGraph(
     m: typeof import('mermaid').default,
-    g: TuringGraph,
+    g: Graph,
     direction: 'LR' | 'TD',
   ): Promise<void> {
     const source = applyDirection(stripEngineStyling(toMermaid(g)), direction);
@@ -806,7 +812,8 @@
   // `breakpoints` change AND on `svg` change (cache repopulates on SVG
   // re-render). Delegates the rule logic to `applyIndicator`; the ops
   // object below is a thin DOM adapter that toggles `mg-breakpoint` per
-  // node. See `docs/graph-highlight-and-breakpoints.md` §2 + §12.
+  // node. See the rules doc (now in `@turing-machine-js/visuals`):
+  // https://github.com/mellonis/turing-machine-js/blob/v7/packages/visuals/docs/graph-highlight-and-breakpoints.md §2 + §12.
   $effect(() => {
     const bps = breakpoints;
     void svg;

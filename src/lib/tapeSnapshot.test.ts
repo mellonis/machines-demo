@@ -5,7 +5,8 @@ import {
   parse,
   serialize,
 } from './tapeSnapshot.ts';
-import type { Alphabets, TapeSnapshot } from './types.ts';
+import type { TapeSnapshot } from '@turing-machine-js/visuals';
+import type { Alphabets } from './types.ts';
 
 describe('tapeSnapshot', () => {
   describe('roundtrip', () => {

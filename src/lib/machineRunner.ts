@@ -8,10 +8,10 @@ import {
   type PausedResponse,
   type RanResponse,
   type SteppedResponse,
-  type TapeSnapshot,
   type WorkerRequest,
   type WorkerResponse,
 } from './types.ts';
+import type { TapeSnapshot } from '@turing-machine-js/visuals';
 
 /**
  * Thrown when the worker rejected with `{ type: 'error' }`. Carries the

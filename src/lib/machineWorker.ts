@@ -26,10 +26,10 @@ import {
 import { computeImminentHalt } from './imminentHalt';
 
 import { MAX_STEPS, MAX_TAPES } from './caps.ts';
+import type { Graph } from '@turing-machine-js/machine';
 import {
   type Command,
   type Engine,
-  type TuringGraph,
   type WorkerRequest,
   type WorkerResponse,
 } from './types.ts';
@@ -153,7 +153,7 @@ let pendingCommand: MachineYield | null = null;
 // "is this state a wrapper?" and skip dispatch — wrappers are structural
 // devices (call-stack push), not meaningful program points, so a breakpoint
 // on a shared #debugRef pauses only at the bare (machines-demo#37 layer 1).
-let currentGraph: TuringGraph | null = null;
+let currentGraph: Graph | null = null;
 
 /** Resolve the display name for an engine State, collapsing wrappers to
  *  their bare. Pause-line logs use the bare name for every iter so the
@@ -662,7 +662,7 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
       currentGraph = turing.State.toGraph(
         initialState as turing.State,
         machine!.tapeBlock as unknown as turing.TapeBlock,
-      ) as TuringGraph;
+      ) as Graph;
       send({
         type: 'built',
         tapes: snapshotTapes(tapes),

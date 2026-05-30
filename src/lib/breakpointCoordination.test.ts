@@ -3,7 +3,8 @@ import { mergeDebugKinds } from './breakpointCoordination.ts';
 
 /**
  * Unit tests for the pure worker-side coordination helpers. Companion to
- * `docs/graph-highlight-and-breakpoints.md`:
+ * the highlight + breakpoints rules doc (now in `@turing-machine-js/visuals`):
+ * https://github.com/mellonis/turing-machine-js/blob/v7/packages/visuals/docs/graph-highlight-and-breakpoints.md
  *
  *   §15  → mergeDebugKinds (per-kind toggle that preserves the other bit)
  *
