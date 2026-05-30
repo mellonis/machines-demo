@@ -7,6 +7,23 @@ test.describe('cold-start', () => {
     await expect(page.getByTestId('tapes-stack')).toBeVisible();
   });
 
+  test('M-boot-no-demo: tape is static on load; no movement within 500ms', async ({ page }) => {
+    // DEMO mode was removed (Task 4). The machine now boots with executionMode='MANUAL'
+    // and the tape sits still until the user clicks Step or Run. This test asserts that
+    // the tape cells rendered immediately after the initial build remain unchanged for 500ms.
+    const tape = page.getByTestId('tape').first();
+    const cells = tape.getByTestId('tape-cell');
+    // Wait until the initial auto-build completes and a non-blank cell is visible.
+    // The default Turing example has tape ['a','b','c','b','a'], so 'a' must appear.
+    await expect(cells.filter({ hasText: 'a' }).first()).toBeVisible({ timeout: 5_000 });
+    // Snapshot the fully-built tape state.
+    const before = await cells.allInnerTexts();
+    // Wait 500ms — enough to catch any DEMO-loop tick. No movement expected.
+    await page.waitForTimeout(500);
+    const after = await cells.allInnerTexts();
+    expect(after).toEqual(before);
+  });
+
   test('E-cold-start-run-debug-off: Run advances tape, halt logged', async ({ page }) => {
     await page.getByRole('button', { name: /^run$/i }).click();
     await expect(
@@ -237,5 +254,26 @@ test.describe('cold-start', () => {
     await expect(page.getByRole('button', { name: /^run$/i })).toBeEnabled();
     await expect(page.getByRole('button', { name: /^step$/i })).toBeEnabled();
     await expect(page.getByRole('button', { name: /^stop$/i })).not.toBeVisible();
+  });
+
+  test('E-boot-example-query: ?example=toggle-bits deep-link loads that example into the editor', async ({ page }) => {
+    // Navigation happens outside beforeEach (which always goes to /turing).
+    // Go directly to /turing?example=toggle-bits — MachineView's boot priority:
+    // ?example=<id> > ?snippet= > localStorage > default.
+    await page.goto('/turing?example=toggle-bits');
+
+    // Tape cells must be visible — MachineView mounted and the initial build ran.
+    await expect(page.getByTestId('tape-cell').first()).toBeVisible();
+
+    // The editor should contain the toggle-bits source. CodeMirror renders its
+    // content inside a [contenteditable] .cm-content div; check that the
+    // distinctive first-line comment is present.
+    const editorContent = page.locator('.cm-content');
+    await expect(editorContent).toBeVisible();
+    await expect(editorContent).toContainText('toggle every bit');
+
+    // The ?example= param is consumed on boot and dropped from the URL
+    // (MachineView calls history.replaceState after loading the example).
+    await expect(page).not.toHaveURL(/example=/);
   });
 });
