@@ -641,87 +641,125 @@ Expected: FAIL — component not defined.
 
 - [ ] **Step 3: Implement `SnippetPanel.svelte`**
 
+Frame stepping uses `SnippetPlayer` from `@turing-machine-js/visuals` (alpha.7.1). Frame application is split: graph highlight via `applyHighlight` (re-uses the same DOM-ops pattern MachineView already uses for pause highlights), tape via `tapeViewport` per `MachineGraph.svelte` reflowed-to-snapshot pattern. One `AbortController` scopes the autoplay timer, IntersectionObserver, and Replay click handler.
+
 ```svelte
 <script lang="ts">
   import { onMount } from 'svelte';
+  import {
+    SnippetPlayer, applyHighlight, indexGraph, tapeViewport,
+    type Frame, type HighlightOps, type Snippet,
+  } from '@turing-machine-js/visuals';
   import MachineGraph from './MachineGraph.svelte';
   import TapesStack from './TapesStack.svelte';
-  import type { Snippet } from '@turing-machine-js/visuals';
 
-  type Props = { snippet: Snippet & { id: string; description?: string; intervalMs?: number } };
+  type SnippetWithMeta = Snippet & {
+    engine: 'turing' | 'post';
+    id: string;
+    description?: string;
+    intervalMs?: number;
+  };
+  type Props = { snippet: SnippetWithMeta };
   let { snippet }: Props = $props();
 
   const DEFAULT_INTERVAL_MS = 800;
   const intervalMs = snippet.intervalMs ?? DEFAULT_INTERVAL_MS;
 
+  const player = new SnippetPlayer(snippet);
+  const indexes = indexGraph(snippet.graph);
+
+  // Reactive view of the player — read by the markup; written by applyFrame().
   let frameIndex = $state(0);
-  let playing = $state(false);
   let done = $state(false);
-  let reducedMotion = false;
+  let reducedMotion = $state(false);
+
   let panelEl: HTMLDivElement;
-  let timer: ReturnType<typeof setInterval> | null = null;
+  let machineGraphRef: { getOps(): HighlightOps; clearHighlights(): void } | null = null;
+  let tapesStackRef: { setTapeViewport(i: number, cells: string[], headIndex: number): void } | null = null;
+  let prevHighlight: Parameters<typeof applyHighlight>[3] = null;
 
-  function advance() {
-    if (frameIndex >= snippet.frames.length - 1) {
-      stop();
-      done = true;
-      return;
+  function applyFrame(): void {
+    const frame: Frame = player.currentFrame;
+    frameIndex = player.frameIndex;
+    done = player.done;
+
+    // Tape: per-tape window via tapeViewport. Blank is snippet.alphabets[i][0]
+    // by convention of how the snippets plugin builds alphabets (verify with
+    // the plugin's snapshotAlphabets shape if drift surfaces).
+    frame.tape.forEach((snap, i) => {
+      const blank = snippet.alphabets[i]?.[0] ?? ' ';
+      const { cells, headIndex } = tapeViewport(snap, VIEWPORT_WIDTH, blank);
+      tapesStackRef?.setTapeViewport(i, cells, headIndex);
+    });
+
+    // Graph highlight: wipe previous classes then apply current.
+    const ops = machineGraphRef?.getOps();
+    if (!ops) return;
+    machineGraphRef?.clearHighlights();
+    if (frame.highlight) {
+      prevHighlight = applyHighlight(frame.highlight, snippet.graph, indexes, prevHighlight, ops).nextPrev;
+    } else {
+      prevHighlight = null;
     }
-    frameIndex += 1;
-    applyFrame();
-  }
-
-  function applyFrame() {
-    // (apply highlight to the graph + tape snapshot to TapesStack imperatively
-    // via refs — exact shape depends on MachineGraph/TapesStack APIs)
-  }
-
-  function play() {
-    if (playing) return;
-    playing = true;
-    timer = setInterval(advance, intervalMs);
-  }
-
-  function stop() {
-    playing = false;
-    if (timer !== null) { clearInterval(timer); timer = null; }
-  }
-
-  function replay() {
-    stop();
-    frameIndex = 0;
-    done = false;
-    applyFrame();
-    play();
   }
 
   onMount(() => {
+    const controller = new AbortController();
+    const { signal } = controller;
+
     reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
     if (reducedMotion) {
-      frameIndex = snippet.frames.length - 1; // halt frame
-      done = true;
+      player.goTo(snippet.frames.length - 1);
       applyFrame();
-    } else {
-      const io = new IntersectionObserver(
-        ([entry]) => { if (entry.isIntersecting) { io.disconnect(); play(); } },
-        { threshold: 0.5 },
-      );
-      io.observe(panelEl);
-      return () => io.disconnect();
+      return () => controller.abort();
     }
+
+    applyFrame(); // frame 0 visible before scroll-in
+
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting) return;
+        io.disconnect();
+        const timerId = window.setInterval(() => {
+          if (!player.forward()) { window.clearInterval(timerId); return; }
+          applyFrame();
+        }, intervalMs);
+        signal.addEventListener('abort', () => window.clearInterval(timerId), { once: true });
+      },
+      { threshold: 0.5 },
+    );
+    io.observe(panelEl);
+    signal.addEventListener('abort', () => io.disconnect(), { once: true });
+
+    return () => controller.abort();
   });
 
-  $effect(() => { applyFrame(); }); // re-apply on mount
+  function onReplay(): void {
+    player.reset();
+    prevHighlight = null;
+    applyFrame();
+    // Auto-play kicks back in via the existing IntersectionObserver lifecycle?
+    // No — IO already disconnected after first intersect. Re-run a fresh timer.
+    const timerId = window.setInterval(() => {
+      if (!player.forward()) { window.clearInterval(timerId); return; }
+      applyFrame();
+    }, intervalMs);
+    // Caller of onReplay is responsible for clearing; in practice this fires
+    // off a fresh, unmanaged timer that ends on its own at the last frame.
+    // If we want strict teardown on unmount during replay, hoist timerId into
+    // a $state and clear in onMount's controller.abort listener.
+  }
 </script>
 
 <div class="snippet-panel" bind:this={panelEl}>
   <h3>{snippet.description ?? snippet.id}</h3>
-  <MachineGraph graph={snippet.graph} readOnly />
-  <TapesStack tapeCount={snippet.tape.tapes.length} readOnly />
+  <MachineGraph bind:this={machineGraphRef} graph={snippet.graph} readOnly />
+  <TapesStack bind:this={tapesStackRef} tapeCount={snippet.frames[0].tape.length} readOnly />
   <div class="meta" data-testid="snippet-frame-index">{frameIndex}</div>
   <div class="controls">
     {#if done}
-      <button type="button" onclick={replay}>{reducedMotion ? 'Play' : 'Replay'}</button>
+      <button type="button" onclick={onReplay}>{reducedMotion ? 'Play' : 'Replay'}</button>
     {/if}
     <a href={`/${snippet.engine}?example=${snippet.id}`} class="open-in-editor">
       Open in editor
@@ -734,7 +772,11 @@ Expected: FAIL — component not defined.
 </style>
 ```
 
-NOTE: applying frames imperatively to `MachineGraph` / `TapesStack` likely requires they expose imperative methods or accept a reactive `highlight` / `tape` prop. Decide during implementation; if a refactor is needed it may bleed back into Task 6.
+NOTES for the implementer:
+1. **`MachineGraph.svelte` / `TapesStack.svelte` exposed APIs.** Current MachineGraph builds HighlightOps internally for paused-state highlight; for SnippetPanel reuse, expose `getOps(): HighlightOps` and `clearHighlights(): void` as imperative methods on the component (bind via `bind:this={machineGraphRef}`). Similarly `TapesStack` likely already has a `setFromTape(i, tape, …)` imperative method — extend with `setTapeViewport(i, cells, headIndex)` that takes the pre-windowed cells (skipping `Tape.viewport`'s normalise). If the MachineGraph extraction is large enough to be its own task, surface it and split.
+2. **`VIEWPORT_WIDTH`** is the existing constant at `src/lib/caps.ts:VIEWPORT_WIDTH = 23` — import from there.
+3. **Blank symbol convention.** `snippet.alphabets[i][0]` is a guess based on the snippets plugin's likely shape. Verify against the actual plugin output (Task 3): the plugin builds `alphabets` from `tapes.map(t => [...t.alphabet.symbols])`, and `Alphabet`'s symbols start with the blank by convention in this codebase (`new Alphabet([' ', 'a', 'b'])`). If the recorder uses a different ordering, fix at the plugin or expose `blankSymbol` explicitly on the snippet extension shape.
+4. **Replay timer is unmanaged in the sketch above.** If you find this unacceptable, hoist `timerId` into a `$state` field and clear it in the AbortController abort listener. Probably fine for Phase 1 since the timer naturally ends at the last frame.
 
 - [ ] **Step 4: Run tests until they pass**
 
