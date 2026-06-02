@@ -6,7 +6,6 @@ import type { Graph } from '@turing-machine-js/machine';
  *  affect highlight, extend here AND there. (Could be promoted to a
  *  shared type in `types.ts` if any third consumer materializes.) */
 export type ExecutionMode =
-  | 'DEMO'
   | 'MANUAL'
   | 'RUNNING_AUTO'
   | 'RUNNING_CONTINUOUS'
@@ -38,7 +37,7 @@ export type ExecutionMode =
  *    diagram should agree on the FROM side.
  *
  * Returns `null` when no highlight applies (modes that have no truth
- * value: DEMO, MANUAL, RUNNING_CONTINUOUS, HALTED).
+ * value: MANUAL, RUNNING_CONTINUOUS, HALTED).
  */
 export function deriveGraphHighlight(args: {
   graph: Graph | null;

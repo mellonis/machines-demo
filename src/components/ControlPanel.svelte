@@ -35,24 +35,6 @@
     }
   });
 
-  // How long the Apply button stays in the `.pressed` (flash) state after a
-  // demo-driven apply. Long enough to read as a press, short enough to fall
-  // well within DEMO_REFLECT_DELAY_MS (700) so each tick's flash resolves
-  // before the next reflect.
-  const APPLY_FLASH_MS = 240;
-
-  let flashing = $state(false);
-  let flashTimeoutId: ReturnType<typeof setTimeout> | null = null;
-
-  export function flashApply(): void {
-    flashing = true;
-    if (flashTimeoutId !== null) clearTimeout(flashTimeoutId);
-    flashTimeoutId = setTimeout(() => {
-      flashing = false;
-      flashTimeoutId = null;
-    }, APPLY_FLASH_MS);
-  }
-
   export function reflect(commands: Command[]): void {
     if (commands.length !== alphabets.length) return;
     movements = commands.map((c) => c.movement);
@@ -186,7 +168,6 @@
       <button
         type="button"
         class="cp-btn apply"
-        class:pressed={flashing}
         title="Apply"
         aria-label="Apply"
         onclick={fireApply}
@@ -404,14 +385,6 @@
       background: color-mix(in srgb, var(--accent) 20%, transparent);
       border-color: var(--accent);
       color: var(--accent);
-    }
-
-    &.pressed {
-      background: color-mix(in srgb, var(--accent) 40%, transparent);
-      border-color: var(--accent);
-      color: var(--accent);
-      transform: scale(0.96);
-      transition: background-color 80ms ease, transform 80ms ease;
     }
 
     :global(svg) {

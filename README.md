@@ -104,7 +104,8 @@ src/
     ├── log.ts                  # log-entry types + helpers
     ├── logStore.svelte.ts      # per-MachineView log store — buffer + throttled view + overflow cap
     ├── logStore.test.ts        # Vitest suite for LogStore
-    ├── demoLoop.ts             # idle-mode random-command loop
+    ├── initialBoot.ts          # pure helper — engine-page boot priority (?example > ?snippet > localStorage > default)
+    ├── initialBoot.test.ts     # Vitest suite for initialBoot
     ├── completions.ts          # CodeMirror autocomplete from machine namespace
     ├── syntaxLinter.ts         # Lezer-based syntax-error markers
     ├── persist.ts              # localStorage helpers per engine

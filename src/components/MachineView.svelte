@@ -14,7 +14,6 @@
   import { type Alphabets, type BreakpointKind, type Command, type Engine, type IdleResponse, type PausedResponse } from '../lib/types.ts';
   import type { Graph } from '@turing-machine-js/machine';
   import { bareIdOf, type GraphHighlight, type TapeSnapshot } from '@turing-machine-js/visuals';
-  import { startDemoLoop } from '../lib/demoLoop.ts';
   import { parseInterval } from '../lib/interval.ts';
   import { deriveGraphHighlight } from '../lib/graphHighlightDerivation.ts';
   import { parse as parseSnapshot, serialize as serializeSnapshot } from '../lib/tapeSnapshot.ts';
@@ -26,6 +25,7 @@
     findExample,
     type Example,
   } from '../lib/defaultCode.ts';
+  import { computeInitialBoot } from '../lib/initialBoot.ts';
   import {
     loadCode,
     loadExampleId,
@@ -59,7 +59,6 @@
   ];
 
   type ExecutionMode =
-    | 'DEMO'
     | 'MANUAL'
     | 'RUNNING_AUTO'
     | 'RUNNING_CONTINUOUS'
@@ -68,9 +67,7 @@
 
   /* ───── state ───── */
 
-  let executionMode = $state<ExecutionMode>('DEMO');
-  let userTookControl = $state(false);
-  let demoEnabled = $state(true);
+  let executionMode = $state<ExecutionMode>('MANUAL');
   let halted = $state(false);
   let alphabets = $state<Alphabets>([]);
   const log = new LogStore();
@@ -165,25 +162,22 @@
     const persistedId = loadExampleId(engine);
     return (persistedId && findExample(engine, persistedId)) || defaultExample(engine);
   });
-  let selectedExampleId = $state<string>(initialExample.id);
   const initialSnippets = untrack(() => loadSnippets(engine));
   let snippets = $state<Snippets>(initialSnippets);
-  // Active snippet is read from the URL (`?snippet=<uuid>`) — bookmarkable,
-  // shareable, and the future-#24 share key. When the URL points at a snippet
-  // that exists locally, its code becomes the editor's code; otherwise we fall
-  // back to localStorage and report the bad UUID once on mount.
-  const initial = untrack(() => {
-    const raw = new URL(window.location.href).searchParams.get('snippet');
-    const urlId = raw !== null && raw !== '' ? raw : null;
-    if (urlId !== null && urlId in initialSnippets) {
-      return { loadedSnippetId: urlId, code: initialSnippets[urlId].code, badUrlId: null as string | null };
-    }
-    return {
-      loadedSnippetId: null as string | null,
-      code: loadCode(engine) ?? initialExample.code,
-      badUrlId: urlId,
-    };
-  });
+  // Resolve the initial editor state from URL query + localStorage. Boot
+  // priority: ?example=<id> > ?snippet=<uuid> > localStorage code > the
+  // bundled default. Unknown ?example=/?snippet= ids fall through and are
+  // surfaced once on mount via the badExampleId/badUrlId log entries.
+  const initial = untrack(() =>
+    computeInitialBoot({
+      engine,
+      url: new URL(window.location.href),
+      snippets: initialSnippets,
+      loadedCode: loadCode(engine),
+      initialExample,
+    }),
+  );
+  let selectedExampleId = $state<string>(initial.selectedExampleId);
   let loadedSnippetId = $state<string | null>(initial.loadedSnippetId);
   let code = $state<string>(initial.code);
 
@@ -248,17 +242,13 @@
   const tapeCount = $derived(lastSnapshots?.length ?? 1);
   const showTapeLabels = $derived(tapeCount > 1);
   const panelEnabled = $derived(executionMode === 'MANUAL');
-  const applyVisible = $derived(
-    executionMode === 'DEMO' || executionMode === 'MANUAL',
-  );
+  const applyVisible = $derived(executionMode === 'MANUAL');
   const takeControlVisible = $derived(
     executionMode !== 'MANUAL' &&
     executionMode !== 'RUNNING_CONTINUOUS' &&
     executionMode !== 'RUNNING_PAUSED',
   );
-  const pasteEnabled = $derived(
-    executionMode === 'MANUAL' || executionMode === 'DEMO',
-  );
+  const pasteEnabled = $derived(executionMode === 'MANUAL');
   const beltTransitionsOn = $derived(
     executionMode !== 'RUNNING_CONTINUOUS' &&
     executionMode !== 'RUNNING_PAUSED',
@@ -285,7 +275,7 @@
   //   `intervalMs`; strobe risk is the user's knob to manage.
   //
   // Other modes return null:
-  //  - DEMO/MANUAL: no truth value (random / user-chosen commands).
+  //  - MANUAL: no truth value (user-chosen commands).
   //  - RUNNING_CONTINUOUS: no per-iter signal (worker doesn't send `idle`).
   //  - HALTED: follow-up sub-branch (highlight last edge + halt node).
   const graphHighlight = $derived<GraphHighlight | null>(deriveGraphHighlight({
@@ -429,7 +419,7 @@
   // Promise so the cadence stays correct even at 80ms.
   let renderChain: Promise<void> = Promise.resolve();
 
-  // Per-step render path — used in DEMO, MANUAL Apply, and RUNNING_*
+  // Per-step render path — used in MANUAL Apply, and RUNNING_*
   // (except RUNNING_CONTINUOUS, which rebuilds in one shot). Advances the
   // mirror with `commands`, then has each <Tape> read its updated mirror
   // tape's `.viewport` and play the slide animation if requested.
@@ -445,9 +435,7 @@
   }
 
   // Reloads the worker + rebuilds mirrorMachine. `source` defaults to the
-  // current editor `code`; `doLoad` passes `selectedExample.code` instead for
-  // non-user-initiated DEMO loads. Does NOT change executionMode — callers
-  // own that.
+  // current editor `code`. Does NOT change executionMode — callers own that.
   async function reloadWorker(source: string = code): Promise<boolean> {
     pendingOp = 'load';
     try {
@@ -537,18 +525,13 @@
     panelRef?.reflect(neutrals);
   }
 
-  async function doLoad({ userInitiated = false } = {}): Promise<void> {
-    if (userInitiated) demoEnabled = false;
+  async function doLoad(): Promise<void> {
     log.reportSeparator();
-    log.report(userInitiated ? 'loading…' : 'demo machine is loading…');
+    log.report('loading…');
 
-    // For DEMO (initial / non-user load), always run the canonical example —
-    // user's persisted edits in the editor may be incomplete or broken; the
-    // demo should always show a working machine. Build button uses live code.
-    const source = userInitiated ? code : selectedExample.code;
-    const ok = await reloadWorker(source);
+    const ok = await reloadWorker();
 
-    executionMode = userTookControl ? 'MANUAL' : 'DEMO';
+    executionMode = 'MANUAL';
 
     if (!ok) return;
 
@@ -557,7 +540,7 @@
     log.appendBatch(tapesEntry(lastSnapshots!, alphabets, CARET_COLORS));
     log.report(halted ? 'loaded — halted immediately' : 'loaded — ready', 'ok');
     await tick();
-    if (userTookControl) reflectNeutral();
+    reflectNeutral();
   }
 
   async function doStep(): Promise<void> {
@@ -581,7 +564,7 @@
       return;
     }
 
-    // Cold-start Step (DEMO / MANUAL / HALTED): reload + run-mode with step:true.
+    // Cold-start Step (MANUAL / HALTED): reload + run-mode with step:true.
     // Worker arms the initial state's debug.after so iter 1's after-fire is
     // the step boundary; user-authored state.debug.before still fires naturally.
     // onPausedHandler takes over; subsequent Step clicks resume(step: true).
@@ -589,7 +572,7 @@
     log.report('loading…');
     const ok = await reloadWorker();
     if (!ok) {
-      executionMode = userTookControl ? 'MANUAL' : 'DEMO';
+      executionMode = 'MANUAL';
       return;
     }
     if (halted) {
@@ -755,7 +738,7 @@
     log.report('loading…');
     const ok = await reloadWorker();
     if (!ok) {
-      executionMode = userTookControl ? 'MANUAL' : 'DEMO';
+      executionMode = 'MANUAL';
       return;
     }
     reflectNeutral();
@@ -881,14 +864,6 @@
       return;
     }
 
-    // DEMO auto-take-control. After this, executionMode is MANUAL and
-    // demoEnabled is false, matching the existing Apply-during-DEMO transition.
-    if (executionMode === 'DEMO') {
-      demoEnabled = false;
-      userTookControl = true;
-      executionMode = 'MANUAL';
-    }
-
     alphabets = result.alphabets;
     lastSnapshots = result.tapes;
     _buildMirrorMachine(result.tapes, result.alphabets);
@@ -902,7 +877,6 @@
 
   function takeControl(): void {
     log.report('user took control', 'ok');
-    userTookControl = true;
     executionMode = 'MANUAL';
     reflectNeutral();
   }
@@ -982,26 +956,17 @@
     const url = new URL(window.location.href);
     if (loadedSnippetId !== null) url.searchParams.set('snippet', loadedSnippetId);
     else url.searchParams.delete('snippet');
+    // `?example=` is a one-shot deep-link consumed at boot; once the
+    // MachineView has mounted, `selectedExampleId` is the in-memory carrier
+    // and the URL param is dropped so subsequent state changes (loading a
+    // snippet, editing, taking control) don't leave it stranded.
+    url.searchParams.delete('example');
     history.replaceState(null, '', url);
   });
 
   /* ───── effects ─────
-   * Demo loop, auto-step loop, and belt-transitions all derive from state.
+   * Auto-step loop and belt-transitions derive from state.
    */
-
-  // DEMO loop is array-shape for both engines now (Post is length-1, Turing
-  // length-N). Drives ControlPanel.reflect / .flashApply uniformly.
-  $effect(() => {
-    if (executionMode !== 'DEMO' || !demoEnabled) return;
-    return startDemoLoop({
-      reflect: (commands) => panelRef?.reflect(commands),
-      apply: (commands) => {
-        panelRef?.flashApply();
-        void renderFromMirror(commands, true);
-      },
-      getAlphabets: () => alphabets,
-    });
-  });
 
   $effect(() => {
     tapesStackRef?.setTransitionsEnabled(beltTransitionsOn);
@@ -1026,6 +991,7 @@
   /* ───── lifecycle ───── */
 
   onMount(() => {
+    if (initial.badExampleId !== null) log.report(`example not found: ${initial.badExampleId}`, 'error');
     if (initial.badUrlId !== null) log.report(`snippet not found: ${initial.badUrlId}`, 'error');
     void doLoad();
   });
@@ -1126,7 +1092,7 @@
       bind:withPause
       bind:debugMode
       bind:intervalText
-      onBuild={() => doLoad({ userInitiated: true })}
+      onBuild={() => doLoad()}
       onStep={doStep}
       onRun={doRun}
       onStop={stopMachine}
