@@ -1346,24 +1346,12 @@
     overflow: hidden;
   }
 
-  /* Expanded ("modal") mode: same DOM node, fixed-positioned over the
-     viewport. Single MachineGraph instance — no second mermaid render,
-     no DOM move, no duplicate effect pipelines (machines-demo#9 +
-     post-#37 follow-up). The inline slot the panel normally occupies
-     goes empty during expansion; the parent renders a dimmed backdrop
-     under this z-index so the rest of the app reads as modal. */
-  .machine-graph.expanded {
-    position: fixed;
-    top: 10vh;
-    left: 10vw;
-    width: 80vw;
-    height: 80vh;
-    z-index: 50;
-    box-shadow: 0 8px 32px rgb(0 0 0 / 0.3);
-  }
-  /* Let the body fill the remaining card height in expanded mode so the
-     graph uses the modal's full visible area (default `.body` is a
-     fixed 360px). */
+  /* Expanded ("modal") mode: the parent renders this component inside a
+     native <dialog> (machines-demo#9 → #95 B2). The dialog provides the
+     centered 80vw × 80vh box, focus trap, Escape, and ::backdrop dimmer;
+     all this component does in expanded mode is fill its container and
+     drop the inline 360px body cap so the graph uses the modal's full
+     height. */
   .machine-graph.expanded .body {
     height: auto;
     flex: 1 1 auto;

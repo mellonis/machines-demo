@@ -79,6 +79,19 @@
   let graph = $state<Graph | null>(null);
   let graphCollapsed = $state(untrack(() => initialGraphCollapsed(engine)));
   let graphModalOpen = $state(false);
+  // Native <dialog> ref for the expanded-graph modal (machines-demo#95 B2).
+  // Replaces the previous `<div role="presentation">` backdrop + manual
+  // Escape / outside-click handlers — `showModal()` gives focus trap,
+  // Escape, return-focus to the opener, and scroll-lock for free, and
+  // the browser's `cancel`/`close` events keep `graphModalOpen` in sync
+  // with user-driven closes (Escape, ::backdrop click).
+  let graphDialog = $state<HTMLDialogElement | null>(null);
+  $effect(() => {
+    const dialog = graphDialog;
+    if (!dialog) return;
+    if (graphModalOpen && !dialog.open) dialog.showModal();
+    else if (!graphModalOpen && dialog.open) dialog.close();
+  });
   // Monotonic iter counter, mirrored from worker responses (idle / paused /
   // ran). Passed to MachineGraph purely as a reactivity tick: when two
   // consecutive paused events have identical currentStateId / nextStateId /
@@ -1009,20 +1022,38 @@
   <div class="panel-tape">
     <TapesStack bind:this={tapesStackRef} {tapeCount} caretColors={CARET_COLORS} />
 
-    {#if graphModalOpen}
-      <!-- Single-instance expanded mode (machines-demo#9 + post-#37
-           follow-up): the same inline `<MachineGraph>` below detaches
-           via `expanded` prop into a fixed-positioned panel. This div
-           is just the dimmed backdrop + click-out / Esc close affordance.
-           The graph itself sits at z-index 50 above this backdrop. -->
-      <div
-        class="graph-modal-backdrop"
-        role="presentation"
-        onclick={() => { graphModalOpen = false; }}
-        onkeydown={(e) => { if (e.key === 'Escape') graphModalOpen = false; }}
-        tabindex="-1"
-      ></div>
-    {/if}
+    <!-- Expanded ("modal") graph (machines-demo#9 + post-#37, reshaped
+         for #95 B2). Native <dialog> opened via `showModal()` — browser
+         provides focus trap, Escape, return-focus to the opener, and
+         scroll-lock. `oncancel`/`onclose` mirror user-driven closes
+         (Escape, ::backdrop programmatic close) back to `graphModalOpen`
+         so the component state stays the source of truth. When closed,
+         the inline `<MachineGraph>` below renders normally; when open,
+         it renders inside the dialog instead (single instance at a time,
+         re-render on toggle is the cost of the focus-trap a11y win). -->
+    <dialog
+      bind:this={graphDialog}
+      class="graph-dialog"
+      aria-label="Machine graph"
+      onclose={() => { graphModalOpen = false; }}
+      oncancel={() => { graphModalOpen = false; }}
+    >
+      {#if graphModalOpen}
+        <MachineGraph
+          {graph}
+          highlight={graphHighlight}
+          {stepsApplied}
+          breakpoints={breakpointIndicatorSet}
+          breakpointKinds={breakpoints}
+          {onToggleBreakpoint}
+          collapsed={graphCollapsed}
+          onToggleCollapsed={() => { graphCollapsed = !graphCollapsed; }}
+          expanded={true}
+          onExpand={() => { graphModalOpen = false; }}
+          onRenderError={(msg: string) => log.report(msg, 'error')}
+        />
+      {/if}
+    </dialog>
 
     <div class="panel-enter-clip">
       <ControlPanel
@@ -1065,19 +1096,21 @@
     </div>
 
     <div class="machine-graph-row">
-      <MachineGraph
-        {graph}
-        highlight={graphHighlight}
-        {stepsApplied}
-        breakpoints={breakpointIndicatorSet}
-        breakpointKinds={breakpoints}
-        {onToggleBreakpoint}
-        collapsed={graphCollapsed}
-        onToggleCollapsed={() => { graphCollapsed = !graphCollapsed; }}
-        expanded={graphModalOpen}
-        onExpand={() => { graphModalOpen = !graphModalOpen; }}
-        onRenderError={(msg: string) => log.report(msg, 'error')}
-      />
+      {#if !graphModalOpen}
+        <MachineGraph
+          {graph}
+          highlight={graphHighlight}
+          {stepsApplied}
+          breakpoints={breakpointIndicatorSet}
+          breakpointKinds={breakpoints}
+          {onToggleBreakpoint}
+          collapsed={graphCollapsed}
+          onToggleCollapsed={() => { graphCollapsed = !graphCollapsed; }}
+          expanded={false}
+          onExpand={() => { graphModalOpen = true; }}
+          onRenderError={(msg: string) => log.report(msg, 'error')}
+        />
+      {/if}
     </div>
 
     <Log entries={log.entries} onClear={() => log.clear()} />
@@ -1169,16 +1202,33 @@
     margin-top: 12px;
   }
 
-  /* Backdrop for the expanded MachineGraph panel (#9 — single-instance
-     redesign). The graph itself is rendered by MachineGraph at z-index
-     50; this sits just below at 49 so clicks outside the graph land
-     here and trigger close. No flex / no padding — the backdrop just
-     dims the viewport. */
-  .graph-modal-backdrop {
-    position: fixed;
-    inset: 0;
+  /* Native <dialog> for the expanded MachineGraph (#9 → #95 B2). Sized
+     to mirror the previous fixed-positioned panel (80vw × 80vh, centered).
+     `<dialog>` opened via `showModal()` is placed in the browser's top
+     layer with implicit aria-modal + focus trap + Escape; the centering
+     comes from the UA stylesheet (`margin: auto`). Override the UA's
+     default padding so the inner MachineGraph fills the dialog and its
+     own border + radius show as the modal surface. `::backdrop` is the
+     dimmer — replaces the previous `.graph-modal-backdrop` div. */
+  .graph-dialog {
+    width: 80vw;
+    height: 80vh;
+    max-width: none;
+    max-height: none;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    overflow: visible;
+    box-shadow: 0 8px 32px rgb(0 0 0 / 0.3);
+  }
+
+  .graph-dialog::backdrop {
     background: rgba(0, 0, 0, 0.5);
-    z-index: 49;
+  }
+
+  .graph-dialog :global(.machine-graph) {
+    width: 100%;
+    height: 100%;
   }
 
   /* Clips the control-panel's enter animation so translateY(20px) can't
