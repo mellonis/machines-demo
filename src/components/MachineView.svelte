@@ -1003,6 +1003,9 @@
 </script>
 
 <section class="tab">
+  <!-- a11y: per-page <h1>. Visually hidden because the engine identity is
+       already obvious from the active tab + the visible app brand. -->
+  <h1 class="sr-only">{engine === 'turing' ? 'Turing machine demo' : 'Post machine demo'}</h1>
   <div class="panel-tape">
     <TapesStack bind:this={tapesStackRef} {tapeCount} caretColors={CARET_COLORS} />
 
@@ -1108,6 +1111,8 @@
     />
     <div
       class="status"
+      role="status"
+      aria-live="polite"
       class:error={latestEntry?.kind === 'error'}
       class:warn={latestEntry?.kind === 'warn'}
       class:ok={latestEntry?.kind === 'ok'}

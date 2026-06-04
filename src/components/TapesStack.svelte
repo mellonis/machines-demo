@@ -95,7 +95,11 @@
     display: flex;
     flex-direction: column;
     gap: var(--tape-gap);
-    animation: enter var(--anim-belt-enter-ms) ease-out backwards;
+
+    /* prefers-reduced-motion: skip the enter slide-in. */
+    @media not (prefers-reduced-motion: reduce) {
+      animation: enter var(--anim-belt-enter-ms) ease-out backwards;
+    }
 
     @media (max-width: 768px) { --cell-h: 36px; }
     @media (max-width: 480px) { --cell-h: 34px; }

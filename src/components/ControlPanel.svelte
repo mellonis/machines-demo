@@ -187,7 +187,11 @@
     border: 1px solid var(--surface-border);
     border-radius: var(--surface-radius);
     background: var(--surface-bg);
-    animation: enter var(--anim-belt-enter-ms) ease-out var(--anim-belt-enter-delay-panel-ms) backwards;
+
+    /* prefers-reduced-motion: skip the enter slide-in. */
+    @media not (prefers-reduced-motion: reduce) {
+      animation: enter var(--anim-belt-enter-ms) ease-out var(--anim-belt-enter-delay-panel-ms) backwards;
+    }
 
     /* Pointer-event suppression now lives on the `inert` attribute (see
        the .interactive div). CSS only owns the visual dim. */

@@ -73,9 +73,8 @@
       font-size: 13px;
     }
 
-    :global(.cm-editor.cm-focused) {
-      outline: none;
-    }
+    /* CodeMirror's default focus outline removed; keyboard users still get
+       the global `:focus-visible` ring from app.css on the focused element. */
 
     :global(.cm-scroller) {
       font-family: ui-monospace, 'SF Mono', Consolas, monospace;

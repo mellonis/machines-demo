@@ -444,6 +444,7 @@
         class:invalid={!intervalIsValid}
         bind:value={intervalText}
         placeholder="1s"
+        aria-label="Step interval (e.g. 1s, 250ms)"
       />
     {/if}
     <label class="checkbox" title="When on, breaks set via state.debug pause execution at a Continue/Step prompt.">
@@ -688,8 +689,13 @@
       border-radius: 4px;
 
       &:focus {
-        outline: none;
         border-color: var(--accent);
+      }
+
+      /* Mouse-only focus suppression — border-color swap is enough cue for
+         mouse users. Keyboard focus keeps the global `:focus-visible` ring. */
+      &:focus:not(:focus-visible) {
+        outline: none;
       }
 
       &.conflict {
@@ -818,8 +824,13 @@
       box-sizing: border-box;
 
       &:focus {
-        outline: none;
         border-color: var(--accent);
+      }
+
+      /* Mouse-only focus suppression — border-color swap is enough cue for
+         mouse users. Keyboard focus keeps the global `:focus-visible` ring. */
+      &:focus:not(:focus-visible) {
+        outline: none;
       }
     }
 
@@ -956,8 +967,13 @@
     border-radius: 4px;
 
     &:focus {
-      outline: none;
       border-color: var(--accent);
+    }
+
+    /* Mouse-only focus suppression — border-color swap is enough cue for
+       mouse users. Keyboard focus keeps the global `:focus-visible` ring. */
+    &:focus:not(:focus-visible) {
+      outline: none;
     }
 
     &.invalid {

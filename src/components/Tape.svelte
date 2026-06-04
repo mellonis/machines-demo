@@ -225,8 +225,12 @@
     height: 100%;
     transform: translateX(0);
 
-    &.transitions-on {
-      transition: transform var(--anim-belt-slide-ms) ease;
+    /* prefers-reduced-motion: drop the strip-slide transition; the strip
+       still translates, but the move is instant. */
+    @media not (prefers-reduced-motion: reduce) {
+      &.transitions-on {
+        transition: transform var(--anim-belt-slide-ms) ease;
+      }
     }
   }
 

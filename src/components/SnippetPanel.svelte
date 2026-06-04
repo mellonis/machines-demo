@@ -182,7 +182,8 @@
 </script>
 
 <div class="snippet-panel" bind:this={panelEl} data-testid="snippet-panel">
-  <h3 class="caption">{caption}</h3>
+  <!-- a11y: page heading hierarchy is <h1> (Landing) → <h2> (per snippet panel). -->
+  <h2 class="caption">{caption}</h2>
   <div class="graph">
     <MachineGraph
       bind:this={machineGraphRef}
