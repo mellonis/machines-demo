@@ -22,7 +22,13 @@
   {#if entries.length > 0}
     <IconButton icon="eraser" title="Clear log" onClick={onClear} />
   {/if}
-  <div class="content" bind:this={scrollEl}>
+  <div
+    class="content"
+    bind:this={scrollEl}
+    role="log"
+    aria-live="polite"
+    aria-atomic="false"
+  >
     {#each entries as entry, i (i)}
       {#if entry.separator}
         <hr class="sep" />

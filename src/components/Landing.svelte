@@ -36,11 +36,13 @@
     <button
       type="button"
       class:active={engine === 'turing'}
+      aria-current={engine === 'turing' ? 'page' : undefined}
       onclick={() => setEngine('turing')}
     >Turing snippets</button>
     <button
       type="button"
       class:active={engine === 'post'}
+      aria-current={engine === 'post' ? 'page' : undefined}
       onclick={() => setEngine('post')}
     >Post snippets</button>
   </nav>

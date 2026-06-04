@@ -56,7 +56,9 @@
 </script>
 
 <header>
-  <h1>
+  <!-- a11y: the brand title is a persistent navigation control (returns to /),
+       not a page heading. The per-page <h1> lives in Landing or MachineView. -->
+  <div class="brand">
     <button
       type="button"
       class="home-link"
@@ -64,11 +66,12 @@
       title="Back to landing"
       aria-label="Back to landing"
     ><span class="title-prefix">machines&nbsp;</span>demo</button>
-  </h1>
+  </div>
   <nav class="tabs">
     <button
       type="button"
       class:active={route.kind === 'engine' && route.engine === 'turing'}
+      aria-current={route.kind === 'engine' && route.engine === 'turing' ? 'page' : undefined}
       onclick={() => selectRoute({ kind: 'engine', engine: 'turing' })}
     >
       Turing
@@ -76,6 +79,7 @@
     <button
       type="button"
       class:active={route.kind === 'engine' && route.engine === 'post'}
+      aria-current={route.kind === 'engine' && route.engine === 'post' ? 'page' : undefined}
       onclick={() => selectRoute({ kind: 'engine', engine: 'post' })}
     >
       Post
@@ -147,7 +151,7 @@
     padding: 12px 24px;
     border-bottom: 1px solid var(--cell-border);
 
-    h1 {
+    .brand {
       font-size: 16px;
       margin: 0;
       font-weight: 500;

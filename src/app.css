@@ -167,6 +167,31 @@
   box-sizing: border-box;
 }
 
+/* Global keyboard-focus indicator. Applies to every focusable element by
+   default so keyboard navigation is always visible. Components that already
+   render their own keyboard cue (e.g. a border-color swap on inputs) opt
+   out of the mouse-only path via `:focus:not(:focus-visible) { outline:
+   none }` — keyboard users keep the global ring, mouse clicks stay clean. */
+*:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Visually hidden, but exposed to assistive tech. Standard sr-only pattern
+   used for the per-page <h1> in MachineView (the engine name is obvious
+   visually from the active tab + brand, but needs a programmatic heading). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 html,
 body {
   margin: 0;
