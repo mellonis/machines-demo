@@ -15,6 +15,7 @@
   import type { BreakpointKind } from '../lib/types.ts';
   import { theme } from '../lib/theme.svelte.ts';
   import { icons } from '../lib/icons.ts';
+  import { summariseGraph } from '../lib/graphSummary.ts';
 
   type Props = {
     graph: Graph | null;
@@ -91,6 +92,12 @@
     readOnly = false,
     onReady,
   }: Props = $props();
+
+  // Screen-reader-friendly summary of the graph (machines-demo#95 B1).
+  // The rendered SVG carries no text alternative; this is the parallel
+  // structural view AT users get. Rendered into the `.sr-only` block
+  // below — visible UI unchanged.
+  const summary = $derived(graph ? summariseGraph(graph) : null);
 
   const instanceId = `mg-${nextInstanceCounter()}`;
   let mermaidModule: typeof import('mermaid').default | null = $state(null);
@@ -1162,6 +1169,42 @@
       </div>
     {/if}
   </header>
+
+  {#if summary}
+    <!-- a11y: text alternative for the rendered SVG (machines-demo#95 B1).
+         Always rendered when a graph exists — must remain available when
+         visually collapsed, since the rendered SVG is the only path for
+         sighted users and this is the only path for AT users. Derived
+         purely from the engine `Graph` snapshot via `summariseGraph`. -->
+    <section class="sr-only" aria-label="Machine graph text representation">
+      <p>
+        State diagram with {summary.stateCount}
+        {summary.stateCount === 1 ? 'state' : 'states'}{#if summary.haltCount > 0}, {summary.haltCount} halt {summary.haltCount === 1 ? 'marker' : 'markers'}{/if}.
+      </p>
+      {#if summary.states.length > 0}
+        <ol>
+          {#each summary.states as state (state.id)}
+            <li>
+              <strong>{state.name}</strong>{#if state.isWrapper}
+                — wrapper, calls subroutine
+              {/if}
+              {#if state.transitions.length === 0}
+                <span> — no outgoing transitions</span>
+              {:else}
+                <ul>
+                  {#each state.transitions as t, ix (ix)}
+                    <li>
+                      On {t.readsPhrase}: {t.commandsPhrase}, then goes to <strong>{t.targetName}</strong>.
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
+            </li>
+          {/each}
+        </ol>
+      {/if}
+    </section>
+  {/if}
 
   {#if !collapsed}
     <!-- role="application" tells AT this region has its own keyboard /
