@@ -34,7 +34,7 @@ describe('summariseGraph', () => {
     });
     const summary = summariseGraph(g);
     expect(summary.stateCount).toBe(2);
-    expect(summary.hasHalt).toBe(true);
+    expect(summary.haltCount).toBe(1);
     expect(summary.states.map((s) => s.name)).toEqual(['q0', 'q1']);
   });
 
@@ -53,11 +53,11 @@ describe('summariseGraph', () => {
     });
     const summary = summariseGraph(g);
     expect(summary.stateCount).toBe(1);
-    expect(summary.hasHalt).toBe(true);
+    expect(summary.haltCount).toBe(1);
     expect(summary.states.map((s) => s.name)).toEqual(['q0']);
   });
 
-  it('R-summary-no-halt: hasHalt false when no halt node present', () => {
+  it('R-summary-no-halt: haltCount 0 when no halt node present', () => {
     const g = makeGraph({
       1: {
         id: 1, name: 'q0', isHalt: false, isHaltMarker: false, isWrapper: false,
@@ -67,7 +67,7 @@ describe('summariseGraph', () => {
     });
     const summary = summariseGraph(g);
     expect(summary.stateCount).toBe(1);
-    expect(summary.hasHalt).toBe(false);
+    expect(summary.haltCount).toBe(0);
   });
 
   it('R-summary-literal: decodes literal read + literal write + move', () => {

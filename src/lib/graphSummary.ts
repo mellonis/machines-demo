@@ -13,7 +13,7 @@ import type { Graph, GraphNode, GraphTransition } from '@turing-machine-js/machi
 
 export type GraphSummary = {
   stateCount: number;
-  hasHalt: boolean;
+  haltCount: number;
   states: SummaryState[];
 };
 
@@ -48,15 +48,16 @@ export function summariseGraph(graph: Graph): GraphSummary {
   // `isHalt: true`) and per-call-site halt markers (`isHaltMarker: true`,
   // one per call site that reaches halt). Both are excluded from the
   // states list — they have no outgoing transitions and listing them as
-  // separate entries adds noise without information. Their presence is
-  // surfaced once via `hasHalt` so the SR summary can say "ending at
-  // halt" rather than emitting an empty "no outgoing transitions" line.
+  // separate entries would surface engine-internal sentinels as "no
+  // outgoing transitions" entries. Their total is surfaced via
+  // `haltCount` so the SR summary can announce "N halt nodes" alongside
+  // the regular state count.
   const regular = sorted.filter((n) => !n.isHaltMarker && !n.isHalt);
-  const hasHalt = regular.length < sorted.length;
+  const haltCount = sorted.length - regular.length;
 
   return {
     stateCount: regular.length,
-    hasHalt,
+    haltCount,
     states: regular.map((node) => summariseNode(node, graph)),
   };
 }
