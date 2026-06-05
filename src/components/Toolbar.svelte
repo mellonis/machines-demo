@@ -93,8 +93,22 @@
   let saveOpen = $state(false);
   let saveName = $state('');
   let pendingOverwrite = $state(false);
-  let saveMenuEl: HTMLDivElement | undefined;
   let nameInputEl = $state<HTMLInputElement | undefined>(undefined);
+  // Native <dialog> ref for the save popover (machines-demo#95 M4).
+  // Opened via showModal() so the browser handles focus trap, native
+  // Escape (via the cancel event), return-focus to the save button on
+  // close, and scroll-lock. Positioning uses CSS anchor positioning
+  // (Baseline newly available — Chrome 125+, Safari 18+); Firefox
+  // without anchor support falls back to UA-centered <dialog> default,
+  // which still functions correctly (just not anchored under the save
+  // button).
+  let saveDialogEl = $state<HTMLDialogElement | null>(null);
+  $effect(() => {
+    const dialog = saveDialogEl;
+    if (!dialog) return;
+    if (saveOpen && !dialog.open) dialog.showModal();
+    else if (!saveOpen && dialog.open) dialog.close();
+  });
 
   const loadedSnippet = $derived(
     loadedSnippetId !== null ? snippets[loadedSnippetId] ?? null : null,
@@ -103,22 +117,6 @@
   const snippetTitles = $derived(new Set(Object.values(snippets).map((s) => s.title)));
   const saveNameExists = $derived(trimmedName !== '' && snippetTitles.has(trimmedName));
   const saveEnabled = $derived(trimmedName !== '');
-
-  $effect(() => {
-    if (!saveOpen) return;
-    const onPointer = (e: MouseEvent): void => {
-      if (!saveMenuEl?.contains(e.target as Node)) closeSavePopover();
-    };
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') closeSavePopover();
-    };
-    document.addEventListener('mousedown', onPointer);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onPointer);
-      document.removeEventListener('keydown', onKey);
-    };
-  });
 
   $effect(() => {
     if (saveOpen && nameInputEl) nameInputEl.focus();
@@ -367,7 +365,7 @@
     {/if}
   </div>
 
-  <div class="save-menu" bind:this={saveMenuEl}>
+  <div class="save-menu">
     <button
       type="button"
       class="icon-only"
@@ -380,43 +378,53 @@
     >
       {@html icons.saveFloppy}
     </button>
-    {#if saveOpen}
-      <div class="save-popover" role="dialog" aria-label="Save snippet">
-        {#if loadedSnippet !== null}
-          <button
-            type="button"
-            class="save-changes"
-            disabled={!dirty}
-            onclick={() => { onSaveChanges(); closeSavePopover(); }}
-          >
-            Save changes to "{loadedSnippet.title}"
-          </button>
-          <div class="popover-section-label">or save as new</div>
-        {/if}
-        <input
-          type="text"
-          bind:this={nameInputEl}
-          bind:value={saveName}
-          placeholder="Snippet name"
-          maxlength="80"
-          onkeydown={(e) => {
-            if (e.key === 'Enter') doSave();
-            if (e.key === 'Escape') closeSavePopover();
-          }}
-        />
-        {#if pendingOverwrite}
-          <div class="overwrite-confirm">
-            <span>Overwrite "{trimmedName}"?</span>
-            <button type="button" class="confirm-yes" onclick={doSave}>Yes</button>
-            <button type="button" onclick={() => (pendingOverwrite = false)}>No</button>
-          </div>
-        {:else}
-          <button type="button" disabled={!saveEnabled} onclick={doSave}>
-            {loadedSnippet !== null ? 'Save as new' : 'Save'}
-          </button>
-        {/if}
-      </div>
-    {/if}
+    <!-- Native <dialog> with showModal() — focus trap, return-focus to the
+         save button, and native Escape handling are all UA-provided.
+         Backdrop click closes via the onclick handler (e.target is the
+         dialog itself when the click hits the ::backdrop, not when it
+         hits content inside the dialog). Positioning is anchored to the
+         save button via CSS anchor positioning; Firefox without anchor
+         support falls back to UA-centered dialog placement. -->
+    <dialog
+      bind:this={saveDialogEl}
+      class="save-popover"
+      aria-label="Save snippet"
+      oncancel={(e) => { e.preventDefault(); closeSavePopover(); }}
+      onclick={(e) => { if (e.target === saveDialogEl) closeSavePopover(); }}
+    >
+      {#if loadedSnippet !== null}
+        <button
+          type="button"
+          class="save-changes"
+          disabled={!dirty}
+          onclick={() => { onSaveChanges(); closeSavePopover(); }}
+        >
+          Save changes to "{loadedSnippet.title}"
+        </button>
+        <div class="popover-section-label">or save as new</div>
+      {/if}
+      <input
+        type="text"
+        bind:this={nameInputEl}
+        bind:value={saveName}
+        placeholder="Snippet name"
+        maxlength="80"
+        onkeydown={(e) => {
+          if (e.key === 'Enter') doSave();
+        }}
+      />
+      {#if pendingOverwrite}
+        <div class="overwrite-confirm">
+          <span>Overwrite "{trimmedName}"?</span>
+          <button type="button" class="confirm-yes" onclick={doSave}>Yes</button>
+          <button type="button" onclick={() => (pendingOverwrite = false)}>No</button>
+        </div>
+      {:else}
+        <button type="button" disabled={!saveEnabled} onclick={doSave}>
+          {loadedSnippet !== null ? 'Save as new' : 'Save'}
+        </button>
+      {/if}
+    </dialog>
   </div>
 
   <button type="button" disabled={loadDisabled} onclick={onBuild}>
@@ -793,15 +801,31 @@
   }
 
   .save-menu {
-    position: relative;
     display: inline-flex;
+
+    /* Anchor target for the save popover dialog (machines-demo#95 M4).
+       The popover is a native <dialog> opened via showModal(), so it
+       renders in the top layer and uses CSS anchor positioning to
+       attach below the save button. Firefox without anchor-positioning
+       support falls back to UA-centered dialog placement. */
+    > button:first-child {
+      anchor-name: --save-button-anchor;
+    }
   }
 
   .save-popover {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    z-index: 20;
+    /* Override the UA-default <dialog> styling: borderless container
+       (border re-added below), no default padding/margin, no max-width
+       constraint. The element renders in the top layer when opened via
+       showModal(); anchor positioning attaches it to the save button. */
+    position: fixed;
+    position-anchor: --save-button-anchor;
+    top: anchor(bottom);
+    left: anchor(start);
+    margin: 4px 0 0 0;
+    max-width: none;
+    max-height: none;
+    inset: auto;
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -811,6 +835,13 @@
     border: 1px solid var(--surface-border);
     border-radius: 6px;
     box-shadow: 0 8px 24px var(--shadow);
+
+    /* Hide ::backdrop — anchored popover shouldn't dim the page behind
+       it. Click on the (transparent) backdrop still closes via the
+       onclick handler on the <dialog>. */
+    &::backdrop {
+      background: transparent;
+    }
 
     input[type='text'] {
       background: var(--cell-bg);
