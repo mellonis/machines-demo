@@ -14,7 +14,7 @@ function makeGraph(nodes: Record<number, unknown>): never {
 }
 
 describe('summariseGraph', () => {
-  it('R-summary-counts: counts regular states and groups halt markers', () => {
+  it('R-summary-counts: counts regular states and excludes halt markers', () => {
     const g = makeGraph({
       1: {
         id: 1, name: 'q0', isHalt: false, isHaltMarker: false, isWrapper: false,
@@ -34,8 +34,40 @@ describe('summariseGraph', () => {
     });
     const summary = summariseGraph(g);
     expect(summary.stateCount).toBe(2);
-    expect(summary.haltCount).toBe(1);
+    expect(summary.hasHalt).toBe(true);
     expect(summary.states.map((s) => s.name)).toEqual(['q0', 'q1']);
+  });
+
+  it('R-summary-halt-singleton: excludes the haltState singleton (isHalt: true) from states', () => {
+    const g = makeGraph({
+      0: {
+        id: 0, name: 'id:0', isHalt: true, isHaltMarker: false, isWrapper: false,
+        bareStateId: null, frameId: null, overriddenHaltStateId: null, tags: [],
+        transitions: [],
+      },
+      1: {
+        id: 1, name: 'q0', isHalt: false, isHaltMarker: false, isWrapper: false,
+        bareStateId: null, frameId: null, overriddenHaltStateId: null, tags: [],
+        transitions: [],
+      },
+    });
+    const summary = summariseGraph(g);
+    expect(summary.stateCount).toBe(1);
+    expect(summary.hasHalt).toBe(true);
+    expect(summary.states.map((s) => s.name)).toEqual(['q0']);
+  });
+
+  it('R-summary-no-halt: hasHalt false when no halt node present', () => {
+    const g = makeGraph({
+      1: {
+        id: 1, name: 'q0', isHalt: false, isHaltMarker: false, isWrapper: false,
+        bareStateId: null, frameId: null, overriddenHaltStateId: null, tags: [],
+        transitions: [],
+      },
+    });
+    const summary = summariseGraph(g);
+    expect(summary.stateCount).toBe(1);
+    expect(summary.hasHalt).toBe(false);
   });
 
   it('R-summary-literal: decodes literal read + literal write + move', () => {

@@ -1179,7 +1179,7 @@
     <section class="sr-only" aria-label="Machine graph text representation">
       <p>
         State diagram with {summary.stateCount}
-        {summary.stateCount === 1 ? 'state' : 'states'}{#if summary.haltCount > 0}, {summary.haltCount} halt {summary.haltCount === 1 ? 'marker' : 'markers'}{/if}.
+        {summary.stateCount === 1 ? 'state' : 'states'}{#if summary.hasHalt}, ending at halt{/if}.
       </p>
       {#if summary.states.length > 0}
         <ol>
