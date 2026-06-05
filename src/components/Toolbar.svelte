@@ -843,6 +843,13 @@
       background: transparent;
     }
 
+    /* Restore the UA-default `dialog:not([open]) { display: none }` that
+       the `display: flex` rule above would otherwise override. Without
+       this the popover stays rendered (and visible) even when closed. */
+    &:not([open]) {
+      display: none;
+    }
+
     input[type='text'] {
       background: var(--cell-bg);
       border: 1px solid var(--cell-border);
