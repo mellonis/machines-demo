@@ -15,6 +15,7 @@
   import type { BreakpointKind } from '../lib/types.ts';
   import { theme } from '../lib/theme.svelte.ts';
   import { icons } from '../lib/icons.ts';
+  import { summariseGraph } from '../lib/graphSummary.ts';
 
   type Props = {
     graph: Graph | null;
@@ -91,6 +92,12 @@
     readOnly = false,
     onReady,
   }: Props = $props();
+
+  // Screen-reader-friendly summary of the graph (machines-demo#95 B1).
+  // The rendered SVG carries no text alternative; this is the parallel
+  // structural view AT users get. Rendered into the `.sr-only` block
+  // below — visible UI unchanged.
+  const summary = $derived(graph ? summariseGraph(graph) : null);
 
   const instanceId = `mg-${nextInstanceCounter()}`;
   let mermaidModule: typeof import('mermaid').default | null = $state(null);
@@ -1163,6 +1170,42 @@
     {/if}
   </header>
 
+  {#if summary}
+    <!-- a11y: text alternative for the rendered SVG (machines-demo#95 B1).
+         Always rendered when a graph exists — must remain available when
+         visually collapsed, since the rendered SVG is the only path for
+         sighted users and this is the only path for AT users. Derived
+         purely from the engine `Graph` snapshot via `summariseGraph`. -->
+    <section class="sr-only" aria-label="Machine graph text representation">
+      <p>
+        State diagram with {summary.stateCount}
+        {summary.stateCount === 1 ? 'state' : 'states'}{#if summary.haltCount > 0}, {summary.haltCount} halt {summary.haltCount === 1 ? 'node' : 'nodes'}{/if}.
+      </p>
+      {#if summary.states.length > 0}
+        <ol>
+          {#each summary.states as state (state.id)}
+            <li>
+              <strong>{state.name}</strong>{#if state.isWrapper}
+                — wrapper, calls subroutine
+              {/if}
+              {#if state.transitions.length === 0}
+                <span> — no outgoing transitions</span>
+              {:else}
+                <ul>
+                  {#each state.transitions as t, ix (ix)}
+                    <li>
+                      On {t.readsPhrase}: {t.commandsPhrase}, then goes to <strong>{t.targetName}</strong>.
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
+            </li>
+          {/each}
+        </ol>
+      {/if}
+    </section>
+  {/if}
+
   {#if !collapsed}
     <!-- role="application" tells AT this region has its own keyboard /
          pointer model (pan + zoom) and isn't a generic text region. -->
@@ -1303,24 +1346,12 @@
     overflow: hidden;
   }
 
-  /* Expanded ("modal") mode: same DOM node, fixed-positioned over the
-     viewport. Single MachineGraph instance — no second mermaid render,
-     no DOM move, no duplicate effect pipelines (machines-demo#9 +
-     post-#37 follow-up). The inline slot the panel normally occupies
-     goes empty during expansion; the parent renders a dimmed backdrop
-     under this z-index so the rest of the app reads as modal. */
-  .machine-graph.expanded {
-    position: fixed;
-    top: 10vh;
-    left: 10vw;
-    width: 80vw;
-    height: 80vh;
-    z-index: 50;
-    box-shadow: 0 8px 32px rgb(0 0 0 / 0.3);
-  }
-  /* Let the body fill the remaining card height in expanded mode so the
-     graph uses the modal's full visible area (default `.body` is a
-     fixed 360px). */
+  /* Expanded ("modal") mode: the parent renders this component inside a
+     native <dialog> (machines-demo#9 → #95 B2). The dialog provides the
+     centered 80vw × 80vh box, focus trap, Escape, and ::backdrop dimmer;
+     all this component does in expanded mode is fill its container and
+     drop the inline 360px body cap so the graph uses the modal's full
+     height. */
   .machine-graph.expanded .body {
     height: auto;
     flex: 1 1 auto;

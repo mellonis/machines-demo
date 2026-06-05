@@ -29,6 +29,48 @@ const STUB_GRAPH = {
   nodes: {},
 } as never; // structural-cast — the component only forwards to toMermaid
 
+// Minimal two-state graph for the text-alternative test (#95 B1). Shape
+// mirrors the engine's `Graph` type — see `@turing-machine-js/machine`'s
+// `utilities/graph.d.ts`. `pattern` / `command[].symbol` / `.movement`
+// strings are the engine's pre-decoded edge-label vocabulary.
+const SUMMARY_GRAPH = {
+  initialId: 1,
+  alphabets: [[' ', 'a', 'b']],
+  nodes: {
+    1: {
+      id: 1,
+      name: 'q0',
+      isHalt: false,
+      isHaltMarker: false,
+      isWrapper: false,
+      bareStateId: null,
+      frameId: null,
+      overriddenHaltStateId: null,
+      tags: [],
+      transitions: [
+        {
+          id: '1.0',
+          pattern: "'a'",
+          command: [{ symbol: "'b'", movement: 'R' }],
+          nextStateId: 2,
+        },
+      ],
+    },
+    2: {
+      id: 2,
+      name: 'q1',
+      isHalt: false,
+      isHaltMarker: false,
+      isWrapper: false,
+      bareStateId: null,
+      frameId: null,
+      overriddenHaltStateId: null,
+      tags: [],
+      transitions: [],
+    },
+  },
+} as never;
+
 describe('MachineGraph (component smoke)', () => {
   afterEach(() => cleanup());
 
@@ -94,5 +136,32 @@ describe('MachineGraph (component smoke)', () => {
       onExpand: () => {},
     });
     expect(screen.queryByLabelText('Open machine graph in modal')).not.toBeInTheDocument();
+  });
+
+  it('C-graph-sr-summary: renders the screen-reader text alternative', () => {
+    render(MachineGraph, {
+      graph: SUMMARY_GRAPH,
+      collapsed: false,
+      onToggleCollapsed: () => {},
+      onExpand: () => {},
+    });
+    const summary = screen.getByLabelText('Machine graph text representation');
+    expect(summary).toBeInTheDocument();
+    expect(summary).toHaveTextContent(/2 states/);
+    expect(summary).toHaveTextContent(/q0/);
+    expect(summary).toHaveTextContent(/q1/);
+  });
+
+  it('C-graph-sr-summary-collapsed: text alternative stays available when visually collapsed', () => {
+    render(MachineGraph, {
+      graph: SUMMARY_GRAPH,
+      collapsed: true,
+      onToggleCollapsed: () => {},
+      onExpand: () => {},
+    });
+    // The visual body is hidden (covered by C-graph-collapsed-hides-body
+    // above), but the text alternative must remain — for AT users the
+    // collapsed state shouldn't drop the entire structural view.
+    expect(screen.getByLabelText('Machine graph text representation')).toBeInTheDocument();
   });
 });
