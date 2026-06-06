@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { mergeDebugKinds } from './breakpointCoordination.ts';
+import { mergeDebugKinds, scanCanonicalBreakpoints } from './breakpointCoordination.ts';
+import type { Graph } from '@turing-machine-js/machine';
 
 /**
  * Unit tests for the pure worker-side coordination helpers. Companion to
@@ -70,5 +71,13 @@ describe('mergeDebugKinds (§15 per-kind toggle)', () => {
       next: { before: true, after: false },
       debugValue: { before: true },
     });
+  });
+});
+
+describe('scanCanonicalBreakpoints (machines-demo#78)', () => {
+  it('returns [] for an empty state map', () => {
+    const stateMap = new Map();
+    const graph: Graph = { initialId: 0, alphabets: [[' ']], nodes: {} } as Graph;
+    expect(scanCanonicalBreakpoints(stateMap, graph)).toEqual([]);
   });
 });

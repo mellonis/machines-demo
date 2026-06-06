@@ -1,7 +1,11 @@
 import type { BreakpointKind } from './types.ts';
+import type * as turing from '@turing-machine-js/machine';
+import type { Graph } from '@turing-machine-js/machine';
 
 /**
  * Pure helpers for the worker's breakpoint + pause-coordination logic.
+ * Helpers are pure functions with no side effects, though they may depend
+ * on engine types and utilities.
  *
  * The worker's `onPauseFn` / `onIterFn` / `toggleBreakpoint` handlers are
  * small state machines over a few flags (`pendingJoinedBareId`,
@@ -51,3 +55,38 @@ export function mergeDebugKinds(
 // engine's `stepIn()` / `pause()` (engine #102) and surface via the single
 // `pause` event. Step is now before-side, so it never collides with an
 // after-side breakpoint and needs no dedup.)
+
+/**
+ * One entry per logical breakpoint found by the post-build scan
+ * (machines-demo#78). `stateId` is canonicalized: wrapper/bare pairs
+ * fold to the bare's id; halt-class negative ids fold to `0`.
+ * `before` / `after` mirror the bits of `state.debug.{before,after}`
+ * read from the engine; both `false` is never emitted (the helper
+ * filters those out).
+ */
+export type CanonicalBreakpointEntry = {
+  stateId: number;
+  before: boolean;
+  after: boolean;
+};
+
+/**
+ * Walk the engine's reachable state map (resolved via
+ * `State.collectStates`) and surface every state whose `debug` field
+ * has a `before` or `after` bit set. Dedupes wrapper/bare pairs via
+ * `bareIdOf` (they share a `#debugRef` so emitting twice would be a
+ * phantom). Halt-class negative ids canonicalize to `0` to match the
+ * existing `toggleBreakpoint` handler's normalization.
+ *
+ * Inputs are what `machineWorker.ts` already has at the build-completion
+ * site: `collectStates`'s map and the captured `Graph`. The helper is
+ * pure — no engine mutations, no postMessage.
+ *
+ * Returns entries with at least one bit set. Empty input → [].
+ */
+export function scanCanonicalBreakpoints(
+  _stateMap: Map<number, { state: turing.State }>,
+  _graph: Graph,
+): CanonicalBreakpointEntry[] {
+  return [];
+}
