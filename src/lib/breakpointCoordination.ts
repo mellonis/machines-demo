@@ -1,5 +1,5 @@
 import type { BreakpointKind } from './types.ts';
-import type * as turing from '@turing-machine-js/machine';
+import * as turing from '@turing-machine-js/machine';
 import type { Graph } from '@turing-machine-js/machine';
 import { bareIdOf } from '@turing-machine-js/visuals';
 
@@ -91,18 +91,28 @@ export function scanCanonicalBreakpoints(
 ): CanonicalBreakpointEntry[] {
   const seen = new Set<number>();
   const entries: CanonicalBreakpointEntry[] = [];
+
+  // haltState (engine #207) — debug is a single boolean, not a DebugConfig.
+  // Surface as a `before: true` entry under canonical id 0 (matches the UI's
+  // single "Pause" toggle for halt and the toggleBreakpoint handler's
+  // stateId 0 normalization).
+  if (turing.haltState.debug === true) {
+    entries.push({ stateId: 0, before: true, after: false });
+    seen.add(0);
+  }
+
   for (const [id, { state }] of stateMap) {
     const debug = state.debug;
     if (debug === null || typeof debug !== 'object') continue;
     const before = (debug as { before?: boolean }).before === true;
     const after = (debug as { after?: boolean }).after === true;
     if (!before && !after) continue;
-    // Canonicalize via bareIdOf so wrapper/bare pairs (sharing a
-    // #debugRef) emit once on the bare's id.
-    const canonicalId = bareIdOf(id, graph);
-    if (seen.has(canonicalId)) continue;
-    seen.add(canonicalId);
-    entries.push({ stateId: canonicalId, before, after });
+    // Negative ids are halt-class markers — fold to 0 (matches the
+    // toggleBreakpoint handler at machineWorker.ts).
+    const rawId = id < 0 ? 0 : bareIdOf(id, graph);
+    if (seen.has(rawId)) continue;
+    seen.add(rawId);
+    entries.push({ stateId: rawId, before, after });
   }
   return entries;
 }

@@ -207,4 +207,30 @@ describe('scanCanonicalBreakpoints (machines-demo#78)', () => {
     expect(entries).toHaveLength(1);
     expect(entries[0].before).toBe(true);
   });
+
+  it('R-scan-halt-canonical: haltState.debug → entry with stateId 0', () => {
+    const alphabet = new turing.Alphabet([' ', 'a']);
+    const tapeBlock = turing.TapeBlock.fromAlphabets([alphabet]);
+    const state = new turing.State(
+      {
+        [tapeBlock.symbol([' '])]: { nextState: turing.haltState },
+      },
+      's0',
+    );
+    // Save + restore haltState.debug so this test doesn't leak global state.
+    const previous = turing.haltState.debug;
+    try {
+      turing.haltState.debug = true;
+      const stateMap = turing.State.collectStates(state, tapeBlock);
+      const graph = turing.State.toGraph(state, tapeBlock);
+      const entries = scanCanonicalBreakpoints(stateMap, graph);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].stateId).toBe(0);
+      // haltState debug is a single boolean → we surface it as `before: true`
+      // by convention (matches the existing UI which shows one "Pause" toggle).
+      expect(entries[0].before).toBe(true);
+    } finally {
+      turing.haltState.debug = previous;
+    }
+  });
 });
