@@ -258,6 +258,14 @@ export type BusyResponse = { type: 'busy' };
  * absent breakpoint, `'off'` after toggling a previously-present one. The
  * main thread updates its `breakpointsByStateId` registry on receipt so the
  * indicator dot in the rendered graph reflects the engine's actual state.
+ *
+ * Also fired **unsolicited** per non-empty `state.debug` bit found by the
+ * worker's post-build scan (machines-demo#78). When user code in the
+ * worker writes `state.debug = { before: true }` programmatically, the
+ * worker walks the state map after build (via `scanCanonicalBreakpoints`)
+ * and emits one of these per (stateId, kind) before sending `built`. The
+ * main thread treats both triggers identically — the indicator lights up
+ * regardless of whether the click or the code set the breakpoint.
  */
 export type BreakpointToggledResponse = {
   type: 'breakpointToggled';
