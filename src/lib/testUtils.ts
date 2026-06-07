@@ -1,5 +1,12 @@
 import type { MachineWorkerLike, WorkerFactory } from './machineRunner';
 import type { WorkerRequest, WorkerResponse } from './types';
+import { EditorState } from '@codemirror/state';
+import { CompletionContext, type CompletionResult } from '@codemirror/autocomplete';
+import { javascript } from '@codemirror/lang-javascript';
+import type { Engine } from './types.ts';
+import { getSchema } from './completions/schema/index.ts';
+import type { EngineSchema } from './completions/schema/types.ts';
+import { localsField } from './completions/scan/locals.ts';
 
 /**
  * Test double for the Web Worker that `MachineRunner` posts to.
@@ -68,4 +75,21 @@ export function makeFakeFactory(): {
     },
     all: () => fakes.slice(),
   };
+}
+
+export type SourceEnv = { engine: Engine; schema: EngineSchema };
+export type SourceFactory = (env: SourceEnv) => (ctx: CompletionContext) => CompletionResult | null;
+
+export function completionAt(marked: string, engine: Engine, makeSource: SourceFactory): CompletionResult | null {
+  const cursorPos = marked.indexOf('▮');
+  if (cursorPos === -1) throw new Error('completionAt: source must contain ▮');
+  const doc = marked.slice(0, cursorPos) + marked.slice(cursorPos + 1);
+  const env: SourceEnv = { engine, schema: getSchema(engine) };
+  const state = EditorState.create({
+    doc,
+    extensions: [javascript(), localsField],
+    selection: { anchor: cursorPos },
+  });
+  const ctx = new CompletionContext(state, cursorPos, true);
+  return makeSource(env)(ctx);
 }
