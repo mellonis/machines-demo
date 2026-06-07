@@ -1,6 +1,7 @@
 import type { BreakpointKind } from './types.ts';
 import type * as turing from '@turing-machine-js/machine';
 import type { Graph } from '@turing-machine-js/machine';
+import { bareIdOf } from '@turing-machine-js/visuals';
 
 /**
  * Pure helpers for the worker's breakpoint + pause-coordination logic.
@@ -86,8 +87,9 @@ export type CanonicalBreakpointEntry = {
  */
 export function scanCanonicalBreakpoints(
   stateMap: Map<number, { state: turing.State }>,
-  _graph: Graph,
+  graph: Graph,
 ): CanonicalBreakpointEntry[] {
+  const seen = new Set<number>();
   const entries: CanonicalBreakpointEntry[] = [];
   for (const [id, { state }] of stateMap) {
     const debug = state.debug;
@@ -95,7 +97,12 @@ export function scanCanonicalBreakpoints(
     const before = (debug as { before?: boolean }).before === true;
     const after = (debug as { after?: boolean }).after === true;
     if (!before && !after) continue;
-    entries.push({ stateId: id, before, after });
+    // Canonicalize via bareIdOf so wrapper/bare pairs (sharing a
+    // #debugRef) emit once on the bare's id.
+    const canonicalId = bareIdOf(id, graph);
+    if (seen.has(canonicalId)) continue;
+    seen.add(canonicalId);
+    entries.push({ stateId: canonicalId, before, after });
   }
   return entries;
 }

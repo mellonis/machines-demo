@@ -180,4 +180,31 @@ describe('scanCanonicalBreakpoints (machines-demo#78)', () => {
     const graph = turing.State.toGraph(state, tapeBlock);
     expect(scanCanonicalBreakpoints(stateMap, graph)).toEqual([]);
   });
+
+  it('R-scan-wrapper-dedup: wrapper + bare share debugRef → one entry on bare', () => {
+    const alphabet = new turing.Alphabet([' ', 'a']);
+    const tapeBlock = turing.TapeBlock.fromAlphabets([alphabet]);
+    const bare = new turing.State(
+      {
+        [tapeBlock.symbol([' '])]: { nextState: turing.haltState },
+      },
+      'foo',
+    );
+    const continuation = new turing.State(
+      {
+        [tapeBlock.symbol([' '])]: { nextState: turing.haltState },
+      },
+      'cont',
+    );
+    const wrapper = bare.withOverriddenHaltState(continuation);
+    // Setting debug on the wrapper propagates to the bare via #debugRef.
+    wrapper.debug = { before: true };
+    const stateMap = turing.State.collectStates(wrapper, tapeBlock);
+    const graph = turing.State.toGraph(wrapper, tapeBlock);
+    const entries = scanCanonicalBreakpoints(stateMap, graph);
+    // Even though both wrapper and bare appear in the state map, the
+    // canonical entry sits on the bare's id (bareIdOf folds wrapper → bare).
+    expect(entries).toHaveLength(1);
+    expect(entries[0].before).toBe(true);
+  });
 });
