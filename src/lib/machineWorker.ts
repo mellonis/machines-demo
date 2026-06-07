@@ -33,7 +33,7 @@ import {
   type WorkerRequest,
   type WorkerResponse,
 } from './types.ts';
-import { mergeDebugKinds } from './breakpointCoordination.ts';
+import { mergeDebugKinds, scanCanonicalBreakpoints } from './breakpointCoordination.ts';
 
 /* ───── dynamic-eval side: deliberately loose typing ─────
  *
@@ -663,6 +663,29 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
         initialState as turing.State,
         machine!.tapeBlock as unknown as turing.TapeBlock,
       ) as Graph;
+
+      // machines-demo#78: mirror code-set state.debug writes into the UI.
+      // User code in the worker may have set state.debug programmatically
+      // during `userFn`. Walk the state map, emit one `breakpointToggled`
+      // per non-empty bit so the main thread's existing onBreakpointToggled
+      // handler (MachineView.svelte:229) populates the breakpoints SvelteMap
+      // before the graph renders.
+      {
+        const stateMap = turing.State.collectStates(
+          initialState as turing.State,
+          machine!.tapeBlock as unknown as turing.TapeBlock,
+        );
+        const codeSetBPs = scanCanonicalBreakpoints(stateMap, currentGraph);
+        for (const entry of codeSetBPs) {
+          if (entry.before) {
+            send({ type: 'breakpointToggled', stateId: entry.stateId, kind: 'before', value: 'on' });
+          }
+          if (entry.after) {
+            send({ type: 'breakpointToggled', stateId: entry.stateId, kind: 'after', value: 'on' });
+          }
+        }
+      }
+
       send({
         type: 'built',
         tapes: snapshotTapes(tapes),
