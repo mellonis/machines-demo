@@ -20,11 +20,18 @@ Per-iter / per-pause scanning is deliberately rejected: it would add an `O(|stat
 
 Code-set breakpoints render with the same red dot as click-set ones. No filled-vs-hollow distinction, no tooltip branch. Rationale: matches #37's own spec note that having the indicator is the educational value; tracking origin adds protocol surface for low return. Clicking a code-set indicator clears it just like a click-set one (engine setter accepts the write regardless of source).
 
-### Protocol shape: reuse the existing `breakpointToggled` response, fired unsolicited
+### Protocol shape: bundle in the `built` response
 
-The worker emits a `breakpointToggled` response per non-empty bit found during the post-build scan. The response shape is unchanged — `{ type, stateId, kind, value }` — only the trigger expands. The main thread's existing `runner.onBreakpointToggled` handler at `MachineView.svelte:229` ingests them into the `breakpoints` SvelteMap unchanged; the indicator effect re-runs automatically via the existing `$derived` chain.
+The worker computes code-set BPs via `scanCanonicalBreakpoints`, then attaches the resulting entries as an optional `codeSetBreakpoints: Array<{stateId, before, after}>` field on the `built` response. The main thread's build success path applies them after `graph` is set and after the UI-clicked-BP replay loop has filtered out their ids — see "Why bundled instead of unsolicited `breakpointToggled`" below.
 
-Alternative considered: a new `breakpointSnapshot` response carrying the full Map atomically. Rejected because (a) it requires a new message type and main-side handler, (b) replacement semantics conflict with any UI-side optimistic state, and (c) the diff path through the existing channel is exactly what #78's body sketches.
+**Why bundled instead of unsolicited `breakpointToggled` (the initially-shipped design that broke).** The first attempt emitted code-set BPs as separate unsolicited `breakpointToggled` messages preceding `built` (reusing PR #76's echo channel). That broke for two compounding reasons surfaced during smoke testing:
+
+1. **`graph` is null when the unsolicited messages arrive.** Main's `onBreakpointToggled` handler at `MachineView.svelte:229` calls `bareIdOf(data.stateId, graph)` to canonicalize. `bareIdOf` is null-safe (returns the raw id when graph is null), so the map gets populated with the worker-emitted canonical id — fine on its own. But:
+2. **The UI-clicked-BP replay loop double-toggles them OFF.** When `built` arrives and the build success path runs, the replay at `MachineView.svelte:473-476` iterates the `breakpoints` map and calls `runner.toggleBreakpoint(id, kind)` for every entry — including the just-set code-set entries. The worker toggles `state.debug` (which user code set to `{before: true}` or similar), getting back to `null`, and echoes `breakpointToggled` with `value: 'off'`. The main handler removes the entry. Net effect: indicator never appears.
+
+The bundled approach avoids both problems: (a) `graph` is set in the same handler tick before the code-set entries are applied, so `bareIdOf` works correctly; (b) the replay loop is filtered to skip ids present in `res.codeSetBreakpoints`, so no double-toggle.
+
+Alternative considered earlier: a new `breakpointSnapshot` response carrying the full Map atomically. Rejected because (a) it requires a new message type and main-side handler, (b) replacement semantics conflict with any UI-side optimistic state. The bundled `codeSetBreakpoints` field on `built` is essentially a snapshot but scoped to code-set entries only and processed alongside the existing graph-replay flow.
 
 ## Components
 
@@ -60,27 +67,29 @@ The helper is pure and engine-agnostic (works for both Turing and Post). All can
 
 ### Worker wiring
 
-In `src/lib/machineWorker.ts`, in the `build` handler, after the machine is constructed and the `Graph` snapshot is captured but **before** the `built` response is sent:
+In `src/lib/machineWorker.ts`, in the `build` handler, after the machine is constructed and the `Graph` snapshot is captured, call `scanCanonicalBreakpoints` and attach the result to the `built` response as `codeSetBreakpoints`. Omit the field when the scan returns `[]` so the on-the-wire `built` shape stays minimal for the common case.
 
 ```ts
-const codeSetBPs = scanCanonicalBreakpoints(initialState, tapeBlock);
-for (const entry of codeSetBPs) {
-  if (entry.before) {
-    self.postMessage({ type: 'breakpointToggled', stateId: entry.stateId, kind: 'before', value: 'on' });
-  }
-  if (entry.after) {
-    self.postMessage({ type: 'breakpointToggled', stateId: entry.stateId, kind: 'after', value: 'on' });
-  }
-}
+const codeSetBPs = scanCanonicalBreakpoints(stateMap, currentGraph);
+send({
+  type: 'built',
+  tapes, alphabets, halted, graph: currentGraph,
+  codeSetBreakpoints: codeSetBPs.length > 0 ? codeSetBPs : undefined,
+});
 ```
 
-(Pseudocode — actual placement matches existing `postMessage` patterns in the file; emit shape matches `BreakpointToggledResponse` in `types.ts`.)
+(`stateMap` is the result of `turing.State.collectStates(initialState, tapeBlock)`.)
 
-Ordering matters: `breakpointToggled` messages must precede `built` so the main thread has the SvelteMap populated when the graph component renders for the first time.
+### Main side: extend the build success path
 
-### Main side: zero changes
+In `MachineView.svelte`'s build success path, AFTER `graph = res.graph` and BEFORE the existing replay loop:
 
-The existing `runner.onBreakpointToggled` handler at `MachineView.svelte:229` already does `set` / `delete` on the `breakpoints` SvelteMap based on `value === 'on'` vs `'off'`. The new emits drop in unchanged. The `$derived` chain that produces `breakpointIndicatorSet` re-runs reactively. The graph component re-renders with indicators.
+1. Build `codeSetIds = new Set<number>(res.codeSetBreakpoints?.map((e) => bareIdOf(e.stateId, graph)) ?? [])`.
+2. Run the existing stale-prune over the `breakpoints` map (unchanged).
+3. Run the existing UI-clicked-BP replay — but **skip any id present in `codeSetIds`**. Those are already in the worker (set by user code during `userFn`); replaying them would toggle them OFF.
+4. After replay, walk `res.codeSetBreakpoints` and write each entry into the `breakpoints` SvelteMap directly (no `toggleBreakpoint` round-trip — the worker already has them). Canonicalize via `bareIdOf` so the map's key matches the click-set convention. Code wins on overlap with a stale UI click.
+
+The `$derived` chain that produces `breakpointIndicatorSet` re-runs reactively from the map updates; the graph component re-renders with indicators.
 
 ## Data flow
 
@@ -88,21 +97,25 @@ The existing `runner.onBreakpointToggled` handler at `MachineView.svelte:229` al
 main → worker:  build { engine, code }
 worker:         userFn(imports, ...) runs (user code)
 worker:         machine constructed, Graph captured
-worker:         scanCanonicalBreakpoints(initialState, tapeBlock) → entries[]
-worker → main:  breakpointToggled × K   (K = total non-empty bits across all states)
-worker → main:  built { tapes, alphabets, halted, graph }
-main:           onBreakpointToggled fires K times → breakpoints Map populated
-main:           onBuilt fires → graph rendered with indicators already lit
+worker:         scanCanonicalBreakpoints(stateMap, graph) → entries[]
+worker → main:  built { tapes, alphabets, halted, graph, codeSetBreakpoints? }
+main:           graph set; codeSetIds computed
+main:           stale-prune over breakpoints map
+main:           UI-clicked-BP replay (skip codeSetIds)
+main:           apply codeSetBreakpoints to breakpoints map
+main:           graph renders with indicators
 ```
 
-Worst case `K = 2 × |states|` (every state has both `before` and `after` set). Realistic case: `K ≤ 10` for typical educational examples.
+The single message preserves ordering naturally — code-set BPs are applied in the same handler tick as `graph` is set, before the graph component first renders.
 
 ## Edge cases
 
-- **Re-build clears stale BPs.** `MachineView.svelte:470-472` already deletes BPs for state ids absent from the new graph after each `built` arrives. The new emits only ADD; cleanup unchanged.
+- **Re-build clears stale BPs.** `MachineView.svelte:470-472` already deletes BPs for state ids absent from the new graph after each `built` arrives. The new code-set entries run AFTER the prune; cleanup unchanged.
 - **Wrapper/bare canonicalization.** Engine `state.debug` is shared via `#debugRef`. The scan dedupes by canonical bare id; one emit per logical BP regardless of how many wrappers reference the same bare.
 - **Halt class.** Negative ids canonicalize to `0`, matching the existing `toggleBreakpoint` handler's normalization. Halt markers (per-call-site sentinels with `isHaltMarker: true`) and the `haltState` singleton (`isHalt: true`) both fold into the halt-class indicator.
-- **Empty machines / no programmatic writes.** Scan returns `[]`; no emits; build proceeds normally.
+- **Empty machines / no programmatic writes.** Scan returns `[]`; `codeSetBreakpoints` field omitted from `built`; build proceeds normally.
+
+- **Overlap with stale UI click.** When the previous build had a UI-clicked BP on state X and the new code also sets `state.debug` on X, the code-set entry overwrites the map entry (code wins). The UI click is lost — acceptable per the spec's "same indicator regardless of source" design.
 - **Mid-run mutations.** Not supported. User code does not run between iters in this demo. If a future change adds user-defined callbacks invoked during run, per-iter scanning can be added incrementally without changing the message protocol.
 
 ## Testing
@@ -145,9 +158,9 @@ The doc surfaces that summarize the worker protocol have drifted since PR #76 la
 Current table covers `build` / `step` / `run` / `resume` / `setDebug` requests + `built` / `stepped` / `ran` / `paused` responses + `paused` interleave semantics. Missing rows:
 
 - **Request:** `pause` (click-pause from RUNNING_AUTO), `toggleBreakpoint` (UI → engine, shipped in PR #76)
-- **Response:** `idle` / `busy` (auto-mode throttle gates), `breakpointToggled` (echo for `toggleBreakpoint` AND unsolicited after build scan per this PR)
+- **Response:** `idle` / `busy` (auto-mode throttle gates), `breakpointToggled` (echo for `toggleBreakpoint` only — code-set BPs flow through the new `BuiltResponse.codeSetBreakpoints` field instead, not through this response)
 
-Add a paragraph noting `breakpointToggled` now fires unsolicited on build scan, not only as an echo. Reference #78.
+Add a paragraph noting the bundled `codeSetBreakpoints` field on `built` and why the seemingly-simpler "unsolicited `breakpointToggled`" approach was rejected (replay-loop interaction in the build handler). Reference #78.
 
 ### `README.md` lines 70-71
 
@@ -158,11 +171,11 @@ requests:   build / step / run / resume / setDebug
 responses:  built / stepped / ran / paused / error
 ```
 
-Update to include `pause` / `toggleBreakpoint` in requests, and `idle` / `busy` / `breakpointToggled` in responses.
+Update to include `pause` / `toggleBreakpoint` in requests, and `idle` / `busy` / `breakpointToggled` in responses. The `built` response now also carries an optional `codeSetBreakpoints` field; the README's terse summary doesn't need to enumerate per-message fields, but the type changed.
 
 ### `src/lib/types.ts` `BreakpointToggledResponse` JSDoc
 
-Currently describes the response as the echo for `toggleBreakpoint`. Add a sentence: also fires unsolicited per non-empty `state.debug` bit found during the worker's post-build scan (this PR / #78). The main thread treats both triggers identically.
+Currently describes the response as the echo for `toggleBreakpoint`. Add a sentence noting that code-set BPs (#78) do NOT flow through this response — they're carried in `BuiltResponse.codeSetBreakpoints` instead — and briefly explain the replay-loop reason. Also expand `BuiltResponse`'s JSDoc to describe the new `codeSetBreakpoints` field.
 
 ## Out of scope
 

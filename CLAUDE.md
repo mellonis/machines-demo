@@ -91,7 +91,7 @@ All shapes are TS discriminated unions in `src/lib/types.ts`. Single canonical `
 
 | Request | Response |
 |---|---|
-| `{ type: 'build', engine, code }` | `{ type: 'built', tapes, alphabets, halted, graph }` (preceded by 0..N unsolicited `breakpointToggled` for code-set `state.debug` — see "Bidirectional breakpoints" below) |
+| `{ type: 'build', engine, code }` | `{ type: 'built', tapes, alphabets, halted, graph, codeSetBreakpoints? }` (the optional `codeSetBreakpoints` field carries one entry per non-empty `state.debug` bit user code set during `userFn` — see "Bidirectional breakpoints" below) |
 | `{ type: 'step' }` | `{ type: 'stepped', halted, commands, nextCommands, stepsApplied }` |
 | `{ type: 'run', maxSteps?, debug?, step?, intervalMs? }` | `{ type: 'ran', tapes, truncated, commands, startStep, stepsApplied }` (or interleaved `paused`s, see below) |
 | `{ type: 'resume', step?, intervalMs? }` | `paused` (next break) or `ran` (halt) |
@@ -103,7 +103,7 @@ All shapes are TS discriminated unions in `src/lib/types.ts`. Single canonical `
 **Bidirectional breakpoints (machines-demo#37, #78).** Two paths set `state.debug`:
 
 - **UI → engine** (PR #76, scope option 1). User clicks a state node in the graph; main sends `toggleBreakpoint { stateId, kind }`; worker mutates `state.debug` via `mergeDebugKinds` and echoes `breakpointToggled { stateId, kind, value }`.
-- **Engine → UI** (PR for #78, scope option 2/3). User code sets `state.debug` programmatically; the worker scans the state map once after build (via `scanCanonicalBreakpoints`), dedupes wrapper/bare via `bareIdOf`, canonicalizes halt-class negative ids to `0`, and emits one **unsolicited** `breakpointToggled` per non-empty bit *before* the `built` response. Main's `runner.onBreakpointToggled` at `MachineView.svelte:229` handles both echo and unsolicited paths identically — the indicator dot in the graph reflects the engine's actual `state.debug` state regardless of which direction set it.
+- **Engine → UI** (PR for #78, scope option 2/3). User code sets `state.debug` programmatically; the worker scans the state map once after build (via `scanCanonicalBreakpoints`), dedupes wrapper/bare via `bareIdOf`, canonicalizes halt-class negative ids to `0`, and bundles the entries in the **`built` response's `codeSetBreakpoints` field**. The main thread's build success path applies them DIRECTLY to the `breakpoints` SvelteMap (no `toggleBreakpoint` round-trip — the worker already has them) AFTER setting `graph` AND AFTER the UI-clicked-BP replay loop has decided which ids to skip (replay skips any id present in `codeSetBreakpoints`, since toggling there would flip the code-set value OFF). Code wins on overlap: a state with both a stale UI click AND a fresh code-set entry takes the code-set value. The indicator dot in the graph reflects the engine's actual `state.debug` state regardless of which direction set it.
 
 Mid-run scans are deliberately omitted: user code in the worker runs exactly once per build (`new Function(...)` at `machineWorker.ts:285-289`), so there's no realistic path for `state.debug` to change between iters.
 

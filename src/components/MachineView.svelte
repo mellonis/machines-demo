@@ -467,12 +467,29 @@
       // edited code; some states gone), then replay surviving kinds onto the
       // fresh worker. Each toggle flips off→on (fresh States have no debug
       // set), so we issue one `toggleBreakpoint` per stored kind per class.
+      //
+      // machines-demo#78: user code may have programmatically set
+      // `state.debug`. Those entries arrive in `res.codeSetBreakpoints` —
+      // they're ALREADY applied in the fresh worker so we skip the replay
+      // for those ids (replaying would flip them OFF), and we write them
+      // straight into the breakpoints map AFTER the UI-clicked replay so
+      // code wins over a stale UI click on the same state.
+      const codeSetIds = new Set<number>(
+        res.codeSetBreakpoints?.map((e) => bareIdOf(e.stateId, graph)) ?? [],
+      );
       for (const id of [...breakpoints.keys()]) {
         if (!res.graph.nodes[id]) breakpoints.delete(id);
       }
       for (const [id, kinds] of breakpoints) {
+        if (codeSetIds.has(id)) continue;
         if (kinds.before) runner.toggleBreakpoint(id, 'before');
         if (kinds.after) runner.toggleBreakpoint(id, 'after');
+      }
+      if (res.codeSetBreakpoints) {
+        for (const entry of res.codeSetBreakpoints) {
+          const id = bareIdOf(entry.stateId, graph);
+          breakpoints.set(id, { before: entry.before, after: entry.after });
+        }
       }
       return true;
     } catch (err) {
