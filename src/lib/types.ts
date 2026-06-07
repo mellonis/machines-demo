@@ -61,6 +61,17 @@ export type BuiltResponse = {
    * that case, but typing it as nullable keeps the field uniform).
    */
   graph: Graph;
+  /**
+   * Breakpoints set by user code during `userFn` (machines-demo#78). One
+   * entry per canonical bare-state id with at least one of `before` /
+   * `after` set. Bundled in the `built` response (rather than emitted as
+   * separate unsolicited `breakpointToggled` messages) so the main
+   * thread can apply them AFTER setting `graph` AND AFTER the UI-clicked
+   * BP replay loop has decided which ids to skip — see
+   * `MachineView.svelte`'s build success path. Empty / absent when no
+   * code-set BPs exist.
+   */
+  codeSetBreakpoints?: Array<{ stateId: number; before: boolean; after: boolean }>;
 };
 
 /**
@@ -258,6 +269,13 @@ export type BusyResponse = { type: 'busy' };
  * absent breakpoint, `'off'` after toggling a previously-present one. The
  * main thread updates its `breakpointsByStateId` registry on receipt so the
  * indicator dot in the rendered graph reflects the engine's actual state.
+ *
+ * Code-set breakpoints (machines-demo#78 — user code in the worker doing
+ * `state.debug = { before: true }` programmatically) do NOT flow through
+ * this response. They're bundled in `BuiltResponse.codeSetBreakpoints`
+ * and applied directly to the main-thread map after build, avoiding the
+ * `toggleBreakpoint` round-trip (which would double-toggle them OFF via
+ * the UI-clicked-BP replay loop in `MachineView.svelte`'s build handler).
  */
 export type BreakpointToggledResponse = {
   type: 'breakpointToggled';

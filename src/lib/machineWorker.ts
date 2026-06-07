@@ -33,7 +33,7 @@ import {
   type WorkerRequest,
   type WorkerResponse,
 } from './types.ts';
-import { mergeDebugKinds } from './breakpointCoordination.ts';
+import { mergeDebugKinds, scanCanonicalBreakpoints } from './breakpointCoordination.ts';
 
 /* ───── dynamic-eval side: deliberately loose typing ─────
  *
@@ -663,12 +663,29 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
         initialState as turing.State,
         machine!.tapeBlock as unknown as turing.TapeBlock,
       ) as Graph;
+
+      // machines-demo#78: mirror code-set state.debug writes into the UI.
+      // User code in the worker may have set state.debug programmatically
+      // during `userFn`. Scan the state map for non-empty bits and bundle
+      // them in the `built` response (NOT as separate unsolicited
+      // `breakpointToggled` messages — those would arrive on the main
+      // thread before `graph` is set AND would be double-toggled by the
+      // UI-clicked-BP replay loop in MachineView's build handler).
+      const codeSetBPs = scanCanonicalBreakpoints(
+        turing.State.collectStates(
+          initialState as turing.State,
+          machine!.tapeBlock as unknown as turing.TapeBlock,
+        ),
+        currentGraph,
+      );
+
       send({
         type: 'built',
         tapes: snapshotTapes(tapes),
         alphabets: snapshotAlphabets(tapes),
         halted: built.halted,
         graph: currentGraph,
+        codeSetBreakpoints: codeSetBPs.length > 0 ? codeSetBPs : undefined,
       });
       return;
     }

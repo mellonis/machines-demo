@@ -67,8 +67,8 @@ User code and the engine live inside a Web Worker. The main thread holds the UI 
 
                       ↕  postMessage
 
-        requests:   build / step / run / resume / setDebug
-        responses:  built / stepped / ran / paused / error
+        requests:   build / step / run / resume / pause / setDebug / toggleBreakpoint
+        responses:  built / stepped / ran / paused / idle / busy / breakpointToggled / error
 ```
 
 **Crosses the boundary:** `TapeSnapshot[]` (on `built` / `ran` / `error` / `paused`), per-step `Command[]` (movement + written symbol), tape alphabets, plus pause metadata (state name, current symbols, the `pause: {side?, cause}` descriptor) on `paused` — plain data only.
