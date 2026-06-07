@@ -1,6 +1,6 @@
 # Smart editor completions — design
 
-Tracks: [#103](https://github.com/mellonis/machines-demo/issues/103) (umbrella for the smart-completions overhaul). Rolls in [#44](https://github.com/mellonis/machines-demo/issues/44) (the original "member-completion for `movements.*`, `symbolCommands.*`" ask, narrowed to one of five priorities here); #44 closes on merge.
+Tracks: [#103](https://github.com/mellonis/machines-demo/issues/103) (umbrella for the smart-completions overhaul). Rolls in [#44](https://github.com/mellonis/machines-demo/issues/44) (the original "member-completion for `movements.*`, `symbolCommands.*`" ask, narrowed to one of five priorities here; closed as superseded by #103).
 
 ## Problem
 
