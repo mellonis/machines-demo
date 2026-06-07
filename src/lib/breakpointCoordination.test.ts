@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import * as turing from '@turing-machine-js/machine';
 import { mergeDebugKinds, scanCanonicalBreakpoints } from './breakpointCoordination.ts';
 import type { Graph } from '@turing-machine-js/machine';
 
@@ -79,5 +80,23 @@ describe('scanCanonicalBreakpoints (machines-demo#78)', () => {
     const stateMap = new Map();
     const graph: Graph = { initialId: 0, alphabets: [[' ']], nodes: {} } as Graph;
     expect(scanCanonicalBreakpoints(stateMap, graph)).toEqual([]);
+  });
+
+  it('R-scan-before: single state with before bit → one entry', () => {
+    const alphabet = new turing.Alphabet([' ', 'a']);
+    const tapeBlock = turing.TapeBlock.fromAlphabets([alphabet]);
+    const state = new turing.State(
+      {
+        [tapeBlock.symbol([' '])]: { nextState: turing.haltState },
+      },
+      's0',
+    );
+    state.debug = { before: true };
+    const stateMap = turing.State.collectStates(state, tapeBlock);
+    const graph = turing.State.toGraph(state, tapeBlock);
+    const entries = scanCanonicalBreakpoints(stateMap, graph);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toEqual({ stateId: entries[0].stateId, before: true, after: false });
+    expect(entries[0].stateId).toBeGreaterThanOrEqual(0); // non-halt
   });
 });

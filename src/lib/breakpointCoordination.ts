@@ -85,8 +85,17 @@ export type CanonicalBreakpointEntry = {
  * Returns entries with at least one bit set. Empty input → [].
  */
 export function scanCanonicalBreakpoints(
-  _stateMap: Map<number, { state: turing.State }>,
+  stateMap: Map<number, { state: turing.State }>,
   _graph: Graph,
 ): CanonicalBreakpointEntry[] {
-  return [];
+  const entries: CanonicalBreakpointEntry[] = [];
+  for (const [id, { state }] of stateMap) {
+    const debug = state.debug;
+    if (debug === null || typeof debug !== 'object') continue;
+    const before = (debug as { before?: boolean }).before === true;
+    const after = (debug as { after?: boolean }).after === true;
+    if (!before && !after) continue;
+    entries.push({ stateId: id, before, after });
+  }
+  return entries;
 }
