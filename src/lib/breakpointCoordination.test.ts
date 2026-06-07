@@ -99,4 +99,85 @@ describe('scanCanonicalBreakpoints (machines-demo#78)', () => {
     expect(entries[0]).toEqual({ stateId: entries[0].stateId, before: true, after: false });
     expect(entries[0].stateId).toBeGreaterThanOrEqual(0); // non-halt
   });
+
+  it('R-scan-after: single state with after bit → one entry', () => {
+    const alphabet = new turing.Alphabet([' ', 'a']);
+    const tapeBlock = turing.TapeBlock.fromAlphabets([alphabet]);
+    const state = new turing.State(
+      {
+        [tapeBlock.symbol([' '])]: { nextState: turing.haltState },
+      },
+      's0',
+    );
+    state.debug = { after: true };
+    const stateMap = turing.State.collectStates(state, tapeBlock);
+    const graph = turing.State.toGraph(state, tapeBlock);
+    const entries = scanCanonicalBreakpoints(stateMap, graph);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ before: false, after: true });
+  });
+
+  it('R-scan-both: single state with both bits → one entry, both true', () => {
+    const alphabet = new turing.Alphabet([' ', 'a']);
+    const tapeBlock = turing.TapeBlock.fromAlphabets([alphabet]);
+    const state = new turing.State(
+      {
+        [tapeBlock.symbol([' '])]: { nextState: turing.haltState },
+      },
+      's0',
+    );
+    state.debug = { before: true, after: true };
+    const stateMap = turing.State.collectStates(state, tapeBlock);
+    const graph = turing.State.toGraph(state, tapeBlock);
+    const entries = scanCanonicalBreakpoints(stateMap, graph);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ before: true, after: true });
+  });
+
+  it('R-scan-multi: multi-state with mixed bits → entry per state', () => {
+    const alphabet = new turing.Alphabet([' ', 'a', 'b']);
+    const tapeBlock = turing.TapeBlock.fromAlphabets([alphabet]);
+    const s2 = new turing.State(
+      {
+        [tapeBlock.symbol([' '])]: { nextState: turing.haltState },
+      },
+      's2',
+    );
+    const s1 = new turing.State(
+      {
+        [tapeBlock.symbol([' '])]: { nextState: s2 },
+      },
+      's1',
+    );
+    const s0 = new turing.State(
+      {
+        [tapeBlock.symbol([' '])]: { nextState: s1 },
+      },
+      's0',
+    );
+    s0.debug = { before: true };
+    s2.debug = { after: true };
+    const stateMap = turing.State.collectStates(s0, tapeBlock);
+    const graph = turing.State.toGraph(s0, tapeBlock);
+    const entries = scanCanonicalBreakpoints(stateMap, graph);
+    expect(entries).toHaveLength(2);
+    const bits = entries.map((e) => ({ before: e.before, after: e.after })).sort((a, b) =>
+      a.before === b.before ? Number(a.after) - Number(b.after) : Number(a.before) - Number(b.before)
+    );
+    expect(bits).toEqual([{ before: false, after: true }, { before: true, after: false }]);
+  });
+
+  it('R-scan-no-debug: states with debug=null → []', () => {
+    const alphabet = new turing.Alphabet([' ', 'a']);
+    const tapeBlock = turing.TapeBlock.fromAlphabets([alphabet]);
+    const state = new turing.State(
+      {
+        [tapeBlock.symbol([' '])]: { nextState: turing.haltState },
+      },
+      's0',
+    );
+    const stateMap = turing.State.collectStates(state, tapeBlock);
+    const graph = turing.State.toGraph(state, tapeBlock);
+    expect(scanCanonicalBreakpoints(stateMap, graph)).toEqual([]);
+  });
 });
