@@ -35,3 +35,17 @@ describe('contexts/optionsBag (Phase 4 — top-level)', () => {
     expect(r).toBeNull();
   });
 });
+
+describe('contexts/optionsBag (Phase 5 — nested)', () => {
+  it('S-src-options-nested-state-pattern', () => {
+    const src = `new State({ [tb.symbol(['a'])]: { ▮ } })`;
+    const r = completionAt(src, 'turing', optionsBag);
+    expect(labelsOf(r)).toEqual(['command', 'nextState']);
+  });
+
+  it('S-src-options-nested-command', () => {
+    const src = `new State({ [tb.symbol(['a'])]: { command: [{ ▮ }] } })`;
+    const r = completionAt(src, 'turing', optionsBag);
+    expect(labelsOf(r)).toEqual(['movement', 'symbol']);
+  });
+});

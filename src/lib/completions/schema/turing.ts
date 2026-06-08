@@ -11,6 +11,19 @@ export const TURING_SCHEMA: EngineSchema = {
     ifOtherSymbol:   { kind: 'symbol', detail: 'catch-all pattern key' },
     movements:       { kind: 'constants', constantsRef: 'movements', detail: '{ left, right, stay }' },
     symbolCommands:  { kind: 'constants', constantsRef: 'symbolCommands', detail: '{ keep, erase }' },
+
+    DebugSession:    { kind: 'class', classRef: 'DebugSession', detail: 'advanced: interactive debug session' },
+    CallFrame:       { kind: 'class', classRef: 'CallFrame', detail: 'advanced: subroutine call frame' },
+    Command:         { kind: 'class', classRef: 'Command', detail: 'advanced: precomputed command' },
+    Reference:       { kind: 'class', classRef: 'Reference', detail: 'advanced: forward reference helper' },
+    TapeCommand:     { kind: 'class', classRef: 'TapeCommand', detail: 'advanced: per-tape command' },
+
+    toMermaid:       { kind: 'function', params: [{ name: 'graph', type: { kind: 'shape', name: 'Graph' } }], returns: { kind: 'primitive', name: 'string' }, detail: 'advanced: graph -> Mermaid source' },
+    fromMermaid:     { kind: 'function', params: [{ name: 'src', type: { kind: 'primitive', name: 'string' } }], returns: { kind: 'shape', name: 'Graph' }, detail: 'advanced: Mermaid -> graph' },
+    summarize:       { kind: 'function', params: [{ name: 'state', type: { kind: 'class', name: 'State' } }, { name: 'block', type: { kind: 'class', name: 'TapeBlock' } }], returns: { kind: 'shape', name: 'GraphSummary' }, detail: 'advanced: state summary' },
+    summarizeGraph:  { kind: 'function', params: [{ name: 'graph', type: { kind: 'shape', name: 'Graph' } }], returns: { kind: 'shape', name: 'GraphSummary' }, detail: 'advanced: graph summary' },
+    equivalentOn:    { kind: 'function', params: [{ name: 'cases', type: { kind: 'array', of: { kind: 'shape', name: 'EquivalenceCase' } } }], returns: { kind: 'shape', name: 'EquivalenceReport' }, detail: 'advanced: behavioral equivalence' },
+    tapeViewport:    { kind: 'function', params: [{ name: 'snapshot', type: { kind: 'shape', name: 'TapeSnapshot' } }, { name: 'width', type: { kind: 'primitive', name: 'number' } }, { name: 'blank', type: { kind: 'primitive', name: 'string' } }], returns: { kind: 'shape', name: 'TapeSnapshot' }, detail: 'advanced: centered window over a snapshot' },
   },
 
   classes: {
@@ -59,6 +72,12 @@ export const TURING_SCHEMA: EngineSchema = {
       members: [],
       detail: 'machine',
     },
+
+    DebugSession: { members: [], detail: 'interactive debug session' },
+    CallFrame:    { members: [], detail: 'subroutine call frame' },
+    Command:      { members: [], detail: 'precomputed command' },
+    Reference:    { members: [], detail: 'forward reference helper' },
+    TapeCommand:  { members: [], detail: 'per-tape command' },
   },
 
   shapes: {
@@ -97,6 +116,12 @@ export const TURING_SCHEMA: EngineSchema = {
         { name: 'tapeBlock', kind: 'property', type: { kind: 'class', name: 'TapeBlock' }, detail: 'tape-block to operate on' },
       ],
     },
+
+    Graph:            { keys: [] },
+    GraphSummary:     { keys: [] },
+    EquivalenceCase:  { keys: [] },
+    EquivalenceReport:{ keys: [] },
+    TapeSnapshot:     { keys: [] },
   },
 
   constants: {
