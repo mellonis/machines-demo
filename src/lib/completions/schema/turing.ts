@@ -28,10 +28,37 @@ export const TURING_SCHEMA: EngineSchema = {
       ],
       detail: 'transition node',
     },
-    Alphabet:      { ctor: { params: [{ name: 'symbols', type: { kind: 'array', of: { kind: 'primitive', name: 'string' } } }] }, members: [], detail: 'tape alphabet' },
-    Tape:          { ctor: { params: [{ name: 'options', type: { kind: 'shape', name: 'TapeOptions' }, detail: 'tape options' }], optionsShape: 'TapeOptions' }, members: [], detail: 'single tape' },
-    TapeBlock:     { ctor: { params: [{ name: 'options', type: { kind: 'shape', name: 'TapeBlockOptions' }, detail: 'tape-block options' }], optionsShape: 'TapeBlockOptions' }, members: [], detail: 'multi-tape block' },
-    TuringMachine: { ctor: { params: [{ name: 'options', type: { kind: 'shape', name: 'TuringMachineOptions' }, detail: 'machine options' }], optionsShape: 'TuringMachineOptions' }, members: [], detail: 'machine' },
+    Alphabet: {
+      ctor: { params: [{ name: 'symbols', type: { kind: 'array', of: { kind: 'primitive', name: 'string' } } }] },
+      members: [
+        { name: 'symbols',     kind: 'property', type: { kind: 'array', of: { kind: 'primitive', name: 'string' } }, detail: 'symbol list' },
+        { name: 'blankSymbol', kind: 'getter',   type: { kind: 'primitive', name: 'string' }, detail: 'first symbol (blank)' },
+      ],
+      detail: 'tape alphabet',
+    },
+    Tape: {
+      ctor: { params: [{ name: 'options', type: { kind: 'shape', name: 'TapeOptions' }, detail: 'tape options' }], optionsShape: 'TapeOptions' },
+      members: [
+        { name: 'alphabet', kind: 'property', type: { kind: 'class', name: 'Alphabet' }, detail: 'alphabet' },
+        { name: 'symbols',  kind: 'property', type: { kind: 'array', of: { kind: 'primitive', name: 'string' } }, detail: 'symbol list' },
+        { name: 'position', kind: 'property', type: { kind: 'primitive', name: 'number' }, detail: 'head index' },
+        { name: 'viewport', kind: 'getter',   type: { kind: 'array', of: { kind: 'primitive', name: 'string' } }, detail: 'centered window of cells' },
+      ],
+      detail: 'single tape',
+    },
+    TapeBlock: {
+      ctor: { params: [{ name: 'options', type: { kind: 'shape', name: 'TapeBlockOptions' }, detail: 'tape-block options' }], optionsShape: 'TapeBlockOptions' },
+      members: [
+        { name: 'tapes',  kind: 'property', type: { kind: 'array', of: { kind: 'class', name: 'Tape' } }, detail: 'underlying tapes' },
+        { name: 'symbol', kind: 'method',   type: { kind: 'symbol' }, params: [{ name: 'pattern', type: { kind: 'array', of: { kind: 'union', of: [{ kind: 'primitive', name: 'string' }, { kind: 'symbol' }] } } }], detail: 'compute a symbol-pattern key' },
+      ],
+      detail: 'multi-tape block',
+    },
+    TuringMachine: {
+      ctor: { params: [{ name: 'options', type: { kind: 'shape', name: 'TuringMachineOptions' }, detail: 'machine options' }], optionsShape: 'TuringMachineOptions' },
+      members: [],
+      detail: 'machine',
+    },
   },
 
   shapes: {
@@ -41,10 +68,35 @@ export const TURING_SCHEMA: EngineSchema = {
         { name: 'after',  kind: 'property', type: { kind: 'primitive', name: 'boolean' }, detail: 'pause after this state' },
       ],
     },
-    StateSymbolMap: { keys: [] },
-    TapeOptions: { keys: [] },
-    TapeBlockOptions: { keys: [] },
-    TuringMachineOptions: { keys: [] },
+    StateSymbolMap: {
+      keys: [
+        { name: 'command',   kind: 'property', type: { kind: 'array', of: { kind: 'shape', name: 'Command' } }, detail: 'per-tape commands' },
+        { name: 'nextState', kind: 'property', type: { kind: 'class', name: 'State' }, detail: 'next state (default: self)' },
+      ],
+    },
+    Command: {
+      keys: [
+        { name: 'movement', kind: 'property', type: { kind: 'constants', name: 'movements' }, detail: 'head movement' },
+        { name: 'symbol',   kind: 'property', type: { kind: 'primitive', name: 'string' }, optional: true, detail: 'symbol to write (omit = keep)' },
+      ],
+    },
+    TapeOptions: {
+      keys: [
+        { name: 'alphabet',      kind: 'property', type: { kind: 'class', name: 'Alphabet' }, detail: 'tape alphabet' },
+        { name: 'symbols',       kind: 'property', type: { kind: 'array', of: { kind: 'primitive', name: 'string' } }, optional: true, detail: 'initial symbols' },
+        { name: 'viewportWidth', kind: 'property', type: { kind: 'primitive', name: 'number' }, optional: true, detail: 'viewport size (rendering hint)' },
+      ],
+    },
+    TapeBlockOptions: {
+      keys: [
+        { name: 'tapes', kind: 'property', type: { kind: 'array', of: { kind: 'class', name: 'Tape' } }, detail: 'tapes in the block' },
+      ],
+    },
+    TuringMachineOptions: {
+      keys: [
+        { name: 'tapeBlock', kind: 'property', type: { kind: 'class', name: 'TapeBlock' }, detail: 'tape-block to operate on' },
+      ],
+    },
   },
 
   constants: {

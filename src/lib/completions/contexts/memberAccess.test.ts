@@ -30,3 +30,25 @@ describe('contexts/memberAccess (Phase 1)', () => {
     expect(labelsOf(r)).toEqual(['debug', 'tag', 'withOverriddenHaltState']);
   });
 });
+
+describe('contexts/memberAccess (Phase 2 — general)', () => {
+  it('S-src-member-tape', () => {
+    const r = completionAt(`const t = new Tape({ alphabet });\nt.▮`, 'turing', memberAccess);
+    expect(labelsOf(r)).toEqual(['alphabet', 'position', 'symbols', 'viewport']);
+  });
+
+  it('S-src-member-tapeblock', () => {
+    const r = completionAt(`const tb = new TapeBlock({ tapes: [] });\ntb.▮`, 'turing', memberAccess);
+    expect(labelsOf(r)).toEqual(['symbol', 'tapes']);
+  });
+
+  it('S-src-member-alphabet', () => {
+    const r = completionAt(`const a = new Alphabet(["a"]);\na.▮`, 'turing', memberAccess);
+    expect(labelsOf(r)).toEqual(['blankSymbol', 'symbols']);
+  });
+
+  it('S-src-member-postmachine', () => {
+    const r = completionAt(`const m = new PostMachine({});\nm.▮`, 'post', memberAccess);
+    expect(labelsOf(r)).toEqual(expect.arrayContaining(['replaceTapeWith', 'setBreakpoint', 'tape']));
+  });
+});

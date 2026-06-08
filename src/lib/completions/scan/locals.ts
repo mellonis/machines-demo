@@ -174,6 +174,16 @@ function doScan(src: string, root: SyntaxNode, schema: EngineSchema): ScannerRes
             const inferred = namespaceEntryToType(name, schema);
             if (inferred) locals.set(local, inferred);
           }
+        } else if (rhs?.name === 'VariableName') {
+          const rhsName = nodeText(rhs, src);
+          const rhsType = locals.get(rhsName);
+          for (const name of boundNames) {
+            const local = renames.get(name) ?? name;
+            rawLocals.add(local);
+            if (rhsType?.kind === 'class' && rhsType.name === 'TapeBlock' && name === 'symbol') {
+              locals.set(local, { kind: 'function', signatureRef: 'tapeBlock.symbol' });
+            }
+          }
         } else {
           for (const name of boundNames) {
             const local = renames.get(name) ?? name;
@@ -210,14 +220,14 @@ function skipToNextDeclarator(lhs: SyntaxNode): SyntaxNode | null {
   return null;
 }
 
-const _cache = new WeakMap<object, ScannerResult>();
+const _cache = new WeakMap<object, { result: ScannerResult; schema: EngineSchema }>();
 
 export function inferLocalsFor(state: EditorState, schema: EngineSchema): ScannerResult {
   const tree = syntaxTree(state);
   const cached = _cache.get(tree as unknown as object);
-  if (cached) return cached;
+  if (cached && cached.schema === schema) return cached.result;
   const result = scanLocals(state.doc.toString(), tree.topNode, schema);
-  _cache.set(tree as unknown as object, result);
+  _cache.set(tree as unknown as object, { result, schema });
   return result;
 }
 

@@ -73,3 +73,35 @@ describe('scanner — Phase 1 rules', () => {
     expect(r.importsBinding.kind).toBe('absent');
   });
 });
+
+describe('scanner — Phase 2 rules', () => {
+  it('S-scan-newexpr-tape', () => {
+    const r = scan('const t = new Tape({ alphabet });');
+    expect(r.locals.get('t')).toEqual({ kind: 'class', name: 'Tape' });
+  });
+
+  it('S-scan-newexpr-tapeblock', () => {
+    const r = scan('const tb = new TapeBlock({ tapes: [] });');
+    expect(r.locals.get('tb')).toEqual({ kind: 'class', name: 'TapeBlock' });
+  });
+
+  it('S-scan-wohs-return', () => {
+    const r = scan('const w = a.withOverriddenHaltState(b);');
+    expect(r.locals.get('w')).toEqual({ kind: 'class', name: 'State' });
+  });
+
+  it('S-scan-tag-return', () => {
+    const r = scan('const x = s.tag(["k"]);');
+    expect(r.locals.get('x')).toEqual({ kind: 'class', name: 'State' });
+  });
+
+  it('S-scan-static-fromTapes', () => {
+    const r = scan('const tb = TapeBlock.fromTapes([t]);');
+    expect(r.locals.get('tb')).toEqual({ kind: 'class', name: 'TapeBlock' });
+  });
+
+  it('S-scan-destructure-tapeblock-symbol', () => {
+    const r = scan('const tb = new TapeBlock({ tapes: [] });\nconst { symbol } = tb;');
+    expect(r.locals.get('symbol')).toEqual({ kind: 'function', signatureRef: 'tapeBlock.symbol' });
+  });
+});

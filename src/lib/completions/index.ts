@@ -6,6 +6,7 @@ import { localsField } from './scan/locals.ts';
 import { memberAccess } from './contexts/memberAccess.ts';
 import { debugAssignment } from './contexts/debugAssignment.ts';
 import { namespaceIdentifier } from './contexts/namespaceIdentifier.ts';
+import { destructureBag } from './contexts/destructureBag.ts';
 import type { Env } from './contexts/types.ts';
 
 export function completionExtensions(engine: Engine): Extension[] {
@@ -15,6 +16,7 @@ export function completionExtensions(engine: Engine): Extension[] {
     javascriptLanguage.data.of({ autocomplete: memberAccess(env) }),
     javascriptLanguage.data.of({ autocomplete: debugAssignment(env) }),
     javascriptLanguage.data.of({ autocomplete: namespaceIdentifier(env) }),
+    javascriptLanguage.data.of({ autocomplete: destructureBag(env) }),
     javascriptLanguage.data.of({ autocomplete: localCompletionSource }),
   ];
 }

@@ -20,6 +20,7 @@ export type MemberSpec = {
   kind: 'property' | 'method' | 'getter';
   type: TypeRef;
   params?: ParamSpec[];
+  optional?: true;
   detail: string;
 };
 

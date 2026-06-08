@@ -36,7 +36,13 @@ export const POST_SCHEMA: EngineSchema = {
         ],
         optionsShape: 'PostMachineOptions',
       },
-      members: [],
+      members: [
+        { name: 'tape',             kind: 'getter',   type: { kind: 'class', name: 'Tape' }, detail: 'current tape' },
+        { name: 'replaceTapeWith',  kind: 'method',   type: { kind: 'primitive', name: 'unknown' }, params: [{ name: 'tape', type: { kind: 'class', name: 'Tape' } }], detail: 'swap the tape' },
+        { name: 'setBreakpoint',    kind: 'method',   type: { kind: 'primitive', name: 'unknown' }, params: [{ name: 'target', type: { kind: 'primitive', name: 'unknown' } }, { name: 'kind', type: { kind: 'primitive', name: 'unknown' }, optional: true }], detail: 'set a per-instruction breakpoint' },
+        { name: 'clearBreakpoint',  kind: 'method',   type: { kind: 'primitive', name: 'unknown' }, params: [{ name: 'target', type: { kind: 'primitive', name: 'unknown' } }], detail: 'clear a per-instruction breakpoint' },
+        { name: 'stateAt',          kind: 'method',   type: { kind: 'class', name: 'State' }, params: [{ name: 'path', type: { kind: 'primitive', name: 'string' } }], detail: 'lookup a State by path' },
+      ],
       detail: 'Post machine',
     },
     Tape:  { members: [], detail: 'single tape' },
@@ -44,7 +50,12 @@ export const POST_SCHEMA: EngineSchema = {
   },
 
   shapes: {
-    PostMachineOptions: { keys: [] },
+    PostMachineOptions: {
+      keys: [
+        { name: 'blankSymbol', kind: 'property', type: { kind: 'primitive', name: 'string' }, optional: true, detail: 'blank symbol override' },
+        { name: 'markSymbol',  kind: 'property', type: { kind: 'primitive', name: 'string' }, optional: true, detail: 'mark symbol override' },
+      ],
+    },
     PostInstructions: { keys: [] },
   },
 

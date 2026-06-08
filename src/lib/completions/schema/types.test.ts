@@ -75,6 +75,55 @@ describe('POST_SCHEMA (Phase 1)', () => {
   });
 });
 
+describe('TURING_SCHEMA (Phase 2)', () => {
+  it('S-schema-turing-tape-members', () => {
+    const ns = TURING_SCHEMA.classes.Tape.members.map((m) => m.name);
+    expect(ns).toEqual(expect.arrayContaining(['alphabet', 'symbols', 'position', 'viewport']));
+  });
+
+  it('S-schema-turing-tapeblock-members', () => {
+    const ns = TURING_SCHEMA.classes.TapeBlock.members.map((m) => m.name);
+    expect(ns).toEqual(expect.arrayContaining(['tapes', 'symbol']));
+  });
+
+  it('S-schema-turing-alphabet-members', () => {
+    const ns = TURING_SCHEMA.classes.Alphabet.members.map((m) => m.name);
+    expect(ns).toEqual(expect.arrayContaining(['symbols', 'blankSymbol']));
+  });
+
+  it('S-schema-turing-options-shape-tape', () => {
+    const keys = TURING_SCHEMA.shapes.TapeOptions.keys.map((k) => k.name);
+    expect(keys).toEqual(expect.arrayContaining(['alphabet', 'symbols', 'viewportWidth']));
+  });
+
+  it('S-schema-turing-options-shape-tapeblock', () => {
+    const keys = TURING_SCHEMA.shapes.TapeBlockOptions.keys.map((k) => k.name);
+    expect(keys).toEqual(['tapes']);
+  });
+
+  it('S-schema-turing-options-shape-turingmachine', () => {
+    const keys = TURING_SCHEMA.shapes.TuringMachineOptions.keys.map((k) => k.name);
+    expect(keys).toEqual(['tapeBlock']);
+  });
+
+  it('S-schema-turing-state-symbol-map-keys', () => {
+    const keys = TURING_SCHEMA.shapes.StateSymbolMap.keys.map((k) => k.name);
+    expect(keys).toEqual(expect.arrayContaining(['command', 'nextState']));
+  });
+});
+
+describe('POST_SCHEMA (Phase 2)', () => {
+  it('S-schema-post-postmachine-members', () => {
+    const ns = POST_SCHEMA.classes.PostMachine.members.map((m) => m.name);
+    expect(ns).toEqual(expect.arrayContaining(['tape', 'replaceTapeWith', 'setBreakpoint']));
+  });
+
+  it('S-schema-post-options-shape', () => {
+    const keys = POST_SCHEMA.shapes.PostMachineOptions.keys.map((k) => k.name);
+    expect(keys).toEqual(expect.arrayContaining(['blankSymbol', 'markSymbol']));
+  });
+});
+
 describe('getSchema', () => {
   it('S-schema-getSchema-turing', () => {
     expect(getSchema('turing').namespace.State.kind).toBe('class');
