@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { namespaceIdentifier } from './namespaceIdentifier.ts';
 import { completionAt } from '../../testUtils.ts';
 
-const find = (r: { options: ReadonlyArray<{ label: string; boost?: number; detail?: string }> } | null, label: string) =>
+const find = (r: { options: ReadonlyArray<{ label: string; boost?: number; detail?: string; apply?: unknown }> } | null, label: string) =>
   r?.options.find((o) => o.label === label) ?? null;
 
 describe('contexts/namespaceIdentifier (Phase 1 — label-only)', () => {
@@ -22,11 +22,33 @@ describe('contexts/namespaceIdentifier (Phase 1 — label-only)', () => {
     expect(opt!.detail).toMatch(/\(import\)/);
   });
 
-  it('S-src-ns-rename — offered under local alias', () => {
+  it('S-src-ns-rename-by-original-name — typing original surfaces alias-applying entry', () => {
     const r = completionAt(`const { State: TS } = imports;\nconst x = Stat▮`, 'turing', namespaceIdentifier);
-    const ts = find(r, 'TS');
-    expect(ts).toBeTruthy();
-    expect(ts!.detail).toMatch(/State \(as TS\)/);
-    expect(find(r, 'State')).toBeNull();
+    const orig = find(r, 'State');
+    expect(orig).toBeTruthy();
+    expect(orig!.detail).toMatch(/\(as TS\)/);
+    expect(orig!.apply).toBe('TS');
+  });
+
+  it('S-src-ns-rename-by-local-name — typing local name surfaces alias-of entry', () => {
+    const r = completionAt(`const { State: TS } = imports;\nconst x = T▮`, 'turing', namespaceIdentifier);
+    const local = find(r, 'TS');
+    expect(local).toBeTruthy();
+    expect(local!.detail).toMatch(/\(alias of State\)/);
+    expect(local!.apply).toBeUndefined();
+  });
+});
+
+describe('contexts/namespaceIdentifier (Phase 3 — auto-import apply)', () => {
+  it('S-src-ns-apply-callback-present-on-import-variant', () => {
+    const r = completionAt(`const a = Alpha▮`, 'turing', namespaceIdentifier);
+    const opt = r?.options.find((o) => o.label === 'Alphabet');
+    expect(opt?.apply).toBeTypeOf('function');
+  });
+
+  it('S-src-ns-apply-callback-absent-on-already-destructured', () => {
+    const r = completionAt(`const { Alphabet } = imports;\nconst a = Alpha▮`, 'turing', namespaceIdentifier);
+    const opt = r?.options.find((o) => o.label === 'Alphabet');
+    expect(opt?.apply).toBeUndefined();
   });
 });

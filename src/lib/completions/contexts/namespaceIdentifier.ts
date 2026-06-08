@@ -1,8 +1,10 @@
 import { syntaxTree } from '@codemirror/language';
 import type { Completion } from '@codemirror/autocomplete';
+import type { EditorView } from '@codemirror/view';
 import type { CompletionSourceFactory } from './types.ts';
 import { inferLocalsFor } from '../scan/locals.ts';
 import type { NamespaceEntry } from '../schema/types.ts';
+import { applyAutoImport } from '../apply/import.ts';
 
 function nsEntryTypeForLabel(entry: NamespaceEntry): Completion['type'] {
   switch (entry.kind) {
@@ -36,9 +38,16 @@ export const namespaceIdentifier: CompletionSourceFactory = (env) => (ctx) => {
     const renamedTo = renames.get(name);
     if (renamedTo) {
       options.push({
+        label: name,
+        type: nsEntryTypeForLabel(entry),
+        detail: `${entry.detail} (as ${renamedTo})`,
+        boost: 99,
+        apply: renamedTo,
+      });
+      options.push({
         label: renamedTo,
         type: nsEntryTypeForLabel(entry),
-        detail: `${entry.detail} — ${name} (as ${renamedTo})`,
+        detail: `${entry.detail} (alias of ${name})`,
         boost: 99,
       });
       continue;
@@ -56,6 +65,9 @@ export const namespaceIdentifier: CompletionSourceFactory = (env) => (ctx) => {
         type: nsEntryTypeForLabel(entry),
         detail: `${entry.detail} (import)`,
         boost: 80,
+        apply: (view: EditorView, completion, from: number, to: number) => {
+          applyAutoImport(view, completion, from, to, name, env.schema);
+        },
       });
     }
   }
