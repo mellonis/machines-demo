@@ -7,6 +7,21 @@ import type { ScannerResult } from '../scan/types.ts';
 
 type PresentBinding = Extract<ScannerResult['importsBinding'], { kind: 'present' }>;
 
+export function computeDestructureChange(
+  view: EditorView,
+  name: string,
+  schema: EngineSchema,
+): ChangeSpec | null {
+  const { importsBinding } = inferLocalsFor(view.state, schema);
+  if (importsBinding.kind === 'present') {
+    const alreadyBound = importsBinding.boundNames.has(name)
+      || Array.from(importsBinding.renames.values()).includes(name);
+    if (alreadyBound) return null;
+    return buildPresentBlockInsert(view, importsBinding, name);
+  }
+  return buildAbsentBlockInsert(view, name);
+}
+
 export function applyAutoImport(
   view: EditorView,
   _completion: Completion,
@@ -15,21 +30,9 @@ export function applyAutoImport(
   insertedName: string,
   schema: EngineSchema,
 ): void {
-  const { importsBinding } = inferLocalsFor(view.state, schema);
+  const destructureChange = computeDestructureChange(view, insertedName, schema);
   const changes: ChangeSpec[] = [{ from, to, insert: insertedName }];
-
-  if (importsBinding.kind === 'present') {
-    const alreadyBound = importsBinding.boundNames.has(insertedName)
-      || Array.from(importsBinding.renames.values()).includes(insertedName);
-    if (!alreadyBound) {
-      const change = buildPresentBlockInsert(view, importsBinding, insertedName);
-      if (change) changes.unshift(change);
-    }
-  } else {
-    const change = buildAbsentBlockInsert(view, insertedName);
-    if (change) changes.unshift(change);
-  }
-
+  if (destructureChange) changes.unshift(destructureChange);
   view.dispatch({ changes, userEvent: 'input.complete' });
 }
 

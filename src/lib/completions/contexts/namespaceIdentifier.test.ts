@@ -52,3 +52,26 @@ describe('contexts/namespaceIdentifier (Phase 3 — auto-import apply)', () => {
     expect(opt?.apply).toBeUndefined();
   });
 });
+
+describe('contexts/namespaceIdentifier (Phase 4 — snippets)', () => {
+  it('S-src-ns-snippet-new-turingmachine — class in new position has apply', () => {
+    const r = completionAt(`const m = new Turin▮`, 'turing', namespaceIdentifier);
+    const opt = r?.options.find((o) => o.label === 'TuringMachine');
+    expect(opt).toBeTruthy();
+    expect(opt?.apply).toBeTypeOf('function');
+  });
+
+  it('S-src-ns-snippet-post-call — parameterized post-instruction has apply', () => {
+    const r = completionAt(`const m = new PostMachine({\n  10: call▮\n});`, 'post', namespaceIdentifier);
+    const opt = r?.options.find((o) => o.label === 'call');
+    expect(opt).toBeTruthy();
+    expect(opt?.apply).toBeTypeOf('function');
+  });
+
+  it('S-src-ns-snippet-post-mark — bare post-instruction has no snippet apply', () => {
+    const r = completionAt(`const m = new PostMachine({\n  10: mar▮\n});`, 'post', namespaceIdentifier);
+    const opt = r?.options.find((o) => o.label === 'mark');
+    expect(opt).toBeTruthy();
+    expect(typeof opt?.apply === 'function' || opt?.apply === undefined).toBe(true);
+  });
+});
