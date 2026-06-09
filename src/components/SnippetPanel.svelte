@@ -120,10 +120,19 @@
     if (graphReady) applyGraph();
   }
 
+  function clearGraphHighlights(): void {
+    machineGraphRef?.clearHighlights();
+    prevStrongId = null;
+  }
+
   function startTimer(): void {
     clearReplayTimer();
     replayTimerId = window.setInterval(() => {
       if (!player.forward()) {
+        // Playback reached the last frame on the previous tick. Clear the
+        // residual highlight from that frame so the graph returns to neutral
+        // before the Replay control sits idle on it (#108).
+        clearGraphHighlights();
         clearReplayTimer();
         return;
       }
