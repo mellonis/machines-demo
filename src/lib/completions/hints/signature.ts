@@ -92,7 +92,7 @@ function resolveCallee(argList: SyntaxNode, state: EditorState, env: Env): Resol
     const schemaName = env.schema.namespace[typed] ? typed : (originalImportName(typed, env, state) ?? typed);
     const entry = env.schema.namespace[schemaName];
     if (entry?.kind === 'function') return { params: entry.params, header: typed };
-    if (entry?.kind === 'post-instruction' && entry.params) return { params: entry.params, header: typed };
+    if (entry?.kind === 'post-instruction') return { params: entry.params ?? [], header: typed };
 
     // Locally-typed function fallback (destructured method) — unchanged.
     const { locals } = inferLocalsFor(state, env.schema);
@@ -153,10 +153,9 @@ export function computeSignatureInfo(state: EditorState, env: Env): SignatureInf
 
   const resolved = resolveCallee(argList, state, env);
   if (!resolved) return null;
-  if (resolved.params.length === 0) return null;
 
   const activeIndex = activeArgIndex(argList, pos);
-  if (activeIndex >= resolved.params.length) return null;
+  if (resolved.params.length > 0 && activeIndex >= resolved.params.length) return null;
 
   const params = resolved.params.map((p) => ({
     name: p.name,

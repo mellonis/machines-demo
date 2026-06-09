@@ -189,13 +189,18 @@ describe('hints/signature — post instructions', () => {
     expect(r!.activeIndex).toBe(1);
   });
 
-  it('S-sig-post-mark — null (no params)', () => {
+  it('S-sig-post-mark-empty-signature', () => {
+    // Zero-param post-instructions still show a tooltip — symmetry with right/left.
+    // The empty parens confirm "this is the call form, no args expected".
     const src = `
       const { mark } = imports;
       mark(▮)
     `;
     const r = signatureAt(src, 'post');
-    expect(r).toBeNull();
+    expect(r).not.toBeNull();
+    expect(r!.header).toBe('mark');
+    expect(r!.params).toEqual([]);
+    expect(r!.activeIndex).toBe(0);
   });
 
   it('S-sig-post-left-optional-jumpTo', () => {
