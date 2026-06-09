@@ -119,10 +119,15 @@ export const namespaceIdentifier: CompletionSourceFactory = (env) => (ctx) => {
         apply: snippetBody
           ? (view: EditorView, completion: Completion, from: number, to: number) => {
               const destructureChange = computeDestructureChange(view, name, env.schema);
+              let adjustedFrom = from;
+              let adjustedTo = to;
               if (destructureChange) {
-                view.dispatch({ changes: [destructureChange], userEvent: 'input.complete' });
+                const tr = view.state.update({ changes: destructureChange, userEvent: 'input.complete' });
+                view.dispatch(tr);
+                adjustedFrom = tr.changes.mapPos(from);
+                adjustedTo = tr.changes.mapPos(to);
               }
-              snippet(snippetBody)(view, completion, from, to);
+              snippet(snippetBody)(view, completion, adjustedFrom, adjustedTo);
             }
           : (view: EditorView, completion: Completion, from: number, to: number) => {
               applyAutoImport(view, completion, from, to, name, env.schema);
