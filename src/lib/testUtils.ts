@@ -9,6 +9,8 @@ import type { EngineSchema } from './completions/schema/types.ts';
 import { localsField } from './completions/scan/locals.ts';
 import { computeSignatureInfo } from './completions/hints/signature.ts';
 import type { SignatureInfo } from './completions/hints/types.ts';
+import type { Diagnostic } from '@codemirror/lint';
+import { computeArgCountDiagnostics } from './completions/lint/argCount.ts';
 
 /**
  * Test double for the Web Worker that `MachineRunner` posts to.
@@ -107,4 +109,13 @@ export function signatureAt(marked: string, engine: Engine): SignatureInfo | nul
     selection: { anchor: cursorPos },
   });
   return computeSignatureInfo(state, env);
+}
+
+export function lintAll(source: string, engine: Engine): Diagnostic[] {
+  const env: SourceEnv = { engine, schema: getSchema(engine) };
+  const state = EditorState.create({
+    doc: source,
+    extensions: [javascript(), localsField],
+  });
+  return computeArgCountDiagnostics(state, env);
 }
