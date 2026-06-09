@@ -84,7 +84,12 @@
       line-height: 1.5;
     }
 
-    :global(.cm-tooltip .cm-tooltip-sig-help) {
+    /* CodeMirror adds .cm-tooltip to MY div (same element), not a parent — so
+       the selector must be a compound class, not descendant. Previously
+       `.cm-tooltip .cm-tooltip-sig-help` never matched, so `white-space: nowrap`
+       wasn't applied; the text wrapped, and near-top-of-editor placement
+       triggered CM's height-clipping which left line 2 without background. */
+    :global(.cm-tooltip-sig-help) {
       padding: 4px 8px;
       font-family: ui-monospace, 'SF Mono', Consolas, monospace;
       font-size: 12px;
@@ -95,17 +100,17 @@
       border-radius: 4px;
     }
 
-    :global(.cm-tooltip .sig-help .sig-param) {
+    :global(.cm-tooltip-sig-help .sig-param) {
       opacity: 0.7;
     }
 
-    :global(.cm-tooltip .sig-help .sig-active) {
+    :global(.cm-tooltip-sig-help .sig-active) {
       opacity: 1;
       font-weight: 600;
       color: var(--accent, var(--fg));
     }
 
-    :global(.cm-tooltip .sig-help .sig-callee) {
+    :global(.cm-tooltip-sig-help .sig-callee) {
       opacity: 0.9;
     }
   }
