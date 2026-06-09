@@ -49,7 +49,27 @@ src/
     ├── initialBoot.ts          pure helper computing engine-page initial state from URL params + localStorage — 4-tier priority (?example=<id> > ?snippet=<id> > localStorage > first bundled example), with badExampleId/badUrlId for not-found logging
     ├── initialBoot.test.ts     Vitest suite for initialBoot — M-boot-example-query / M-boot-example-unknown / M-boot-priority-example-over-snippet / M-boot-priority-snippet-over-localstorage / M-boot-priority-localstorage-over-default / M-execution-mode-union
     ├── interval.ts             parseInterval + MIN_AUTO_INTERVAL_MS for the RUNNING_AUTO throttle
-    ├── completions.ts          CodeMirror autocomplete: machine namespace + locals
+    ├── completions/            context-aware, schema-driven CodeMirror autocomplete (#103)
+    │   ├── index.ts              completionExtensions(engine) — composes the layers below
+    │   ├── schema/               typed const describing engine + post API surface
+    │   │   ├── types.ts            EngineSchema / NamespaceEntry / ClassSpec / ShapeSpec / TypeRef / ParamSpec / MemberSpec
+    │   │   ├── turing.ts           TURING_SCHEMA (namespace, classes, shapes, constants)
+    │   │   ├── post.ts             POST_SCHEMA (post-instruction flattened kind for mark/erase/call/check/$tag/...)
+    │   │   ├── index.ts            getSchema(engine)
+    │   │   └── engine.test.ts      drift guard against `* as turingNs` / `* as postNs` + TypeRef closure
+    │   ├── scan/                 Lezer walker over the editor buffer
+    │   │   ├── types.ts            InferredType / InferredLocals / ImportsBinding / ScannerResult
+    │   │   ├── locals.ts           scanLocals + inferLocalsFor + localsField (StateField cache, schema-keyed)
+    │   │   └── locals.test.ts      Phase 1 + Phase 2 inference rules (cites S-scan-...)
+    │   ├── contexts/             five per-context CompletionSource factories, composed in priority order
+    │   │   ├── types.ts            Env, CompletionSourceFactory
+    │   │   ├── memberAccess.ts     after `<ident>.` — instance members / namespace classes / constants (movements/symbolCommands)
+    │   │   ├── debugAssignment.ts  `<state>.debug = ▮` RHS + `{ before, after }` keys; haltState boolean-only
+    │   │   ├── optionsBag.ts       inside `new <Class>({ ▮ })` — top-level + nested shape-path walk (State dictionary-ctor entry)
+    │   │   ├── destructureBag.ts   inside `const { ▮ } = imports;` or `const { ▮ } = <local-class>;`
+    │   │   └── namespaceIdentifier.ts  bare word at expression position — ranked by destructure status; snippet expand in `new` callee + post-instruction with params; rename emits two entries (original-name applies the alias)
+    │   └── apply/
+    │       └── import.ts           applyAutoImport + computeDestructureChange — inserts not-yet-destructured names into the top `const { … } = imports;` block; format-aware single/multi-line; rename suppression
     ├── syntaxLinter.ts         Lezer-based syntax-error markers
     ├── persist.ts              localStorage helpers per engine — code, example, snippets (UUID-keyed)
     ├── tapeSnapshot.ts         serialize/parse for tape-block copy+paste snapshots — JSON with `format`/`version` discriminator, categorized ParseError, no DOM/clipboard knowledge
@@ -210,7 +230,7 @@ Save UX (Toolbar.svelte):
 ## Editor
 
 - `svelte-codemirror-editor` (Svelte-5-native wrapper around CodeMirror 6) with `bind:value`.
-- Extensions: `javascript()` lang, `oneDark` theme, our `importsCompletion(engine)` (boost-99 machine identifiers + local-identifier completion source from `@codemirror/lang-javascript`), and a Lezer-based `syntaxLinter` for syntax-error markers before Build.
+- Extensions: `javascript()` lang, `oneDark` theme, our `completionExtensions(engine)` (the smart-completions layer at `src/lib/completions/` — schema-driven, context-aware; surfaces namespace identifiers ranked by destructure status, member access on user-typed locals, `state.debug` RHS shapes, options-bag keys for known constructors, and auto-import into the top `const { … } = imports;` block; see #103 + the spec at `docs/superpowers/specs/2026-06-07-44-smart-completions-design.md`), and a Lezer-based `syntaxLinter` for syntax-error markers before Build.
 - A small reset-to-selected-example button overlays the editor's top-right corner; the log's clear button uses the same shared `IconButton.svelte` (corner-overlay variant) — both are absolutely positioned within their `position: relative` parent (`.editor` / `.log-panel`).
 
 ## Deploy
