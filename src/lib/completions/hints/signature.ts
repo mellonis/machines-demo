@@ -2,7 +2,6 @@ import { syntaxTree } from '@codemirror/language';
 import type { EditorState } from '@codemirror/state';
 import type { SyntaxNode } from '@lezer/common';
 import type { Env } from '../contexts/types.ts';
-import type { ParamSpec } from '../schema/types.ts';
 import type { ResolvedCallee, SignatureInfo } from './types.ts';
 import { formatTypeRef } from './format.ts';
 
@@ -18,6 +17,16 @@ function findEnclosingArgList(state: EditorState, pos: number): SyntaxNode | nul
 
 function text(node: SyntaxNode, state: EditorState): string {
   return state.doc.sliceString(node.from, node.to);
+}
+
+function activeArgIndex(argList: SyntaxNode, pos: number): number {
+  let commas = 0;
+  let child = argList.firstChild;
+  while (child) {
+    if (child.name === ',' && child.to <= pos) commas += 1;
+    child = child.nextSibling;
+  }
+  return commas;
 }
 
 function resolveCallee(argList: SyntaxNode, state: EditorState, env: Env): ResolvedCallee | null {
@@ -51,7 +60,10 @@ export function computeSignatureInfo(state: EditorState, env: Env): SignatureInf
   if (!resolved) return null;
   if (resolved.params.length === 0) return null;
 
-  const params = resolved.params.map<{ name: string; typeStr: string; optional: boolean }>((p: ParamSpec) => ({
+  const activeIndex = activeArgIndex(argList, pos);
+  if (activeIndex >= resolved.params.length) return null;
+
+  const params = resolved.params.map((p) => ({
     name: p.name,
     typeStr: formatTypeRef(p.type),
     optional: p.optional === true,
@@ -60,7 +72,7 @@ export function computeSignatureInfo(state: EditorState, env: Env): SignatureInf
   return {
     header: resolved.header,
     params,
-    activeIndex: 0,
+    activeIndex,
     anchor: argList.from,
   };
 }
