@@ -78,7 +78,7 @@ function lookupMethod(localType: InferredType, methodName: string, env: Env): Me
   return null;
 }
 
-function resolveCallee(argList: SyntaxNode, state: EditorState, env: Env): ResolvedCallee | null {
+export function resolveCallee(argList: SyntaxNode, state: EditorState, env: Env): ResolvedCallee | null {
   const call = argList.parent;
   if (!call) return null;
   if (call.name !== 'CallExpression' && call.name !== 'NewExpression') return null;
