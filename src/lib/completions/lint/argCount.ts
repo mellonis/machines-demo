@@ -17,15 +17,16 @@ function findArgListChild(call: SyntaxNode): SyntaxNode | null {
 }
 
 function actualArgCount(argList: SyntaxNode): number {
-  let commas = 0;
-  let hasExpr = false;
+  // Count expression children — anything that isn't `(`, `)`, or `,`. Trailing
+  // commas (allowed in JS arg lists since ES2017) don't contribute another
+  // arg; counting commas + 1 would inflate `f(a,)` to 2.
+  let count = 0;
   let child = argList.firstChild;
   while (child) {
-    if (child.name === ',') commas += 1;
-    else if (child.name !== '(' && child.name !== ')') hasExpr = true;
+    if (child.name !== '(' && child.name !== ')' && child.name !== ',') count += 1;
     child = child.nextSibling;
   }
-  return hasExpr ? commas + 1 : 0;
+  return count;
 }
 
 function requiredCount(params: ParamSpec[]): number {

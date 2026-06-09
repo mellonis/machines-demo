@@ -237,3 +237,54 @@ describe('lint/argCount — passes silently', () => {
     ]);
   });
 });
+
+describe('lint/argCount — trailing commas (JS-allowed syntactic noise)', () => {
+  it('S-lint-trailing-comma-single-arg-no-warning', () => {
+    // ES2017+ allows trailing commas in call argument lists. The trailing
+    // comma after a single arg should not inflate the count to 2 and trigger
+    // a "takes 1 argument (got 2)" warning.
+    const src = `
+      const { mark } = imports;
+      mark(20,)
+    `;
+    expect(lintAll(src, 'post')).toEqual([]);
+  });
+
+  it('S-lint-trailing-comma-ctor-single-arg', () => {
+    // Reported manually: `new Tape({...},)` (Tape takes a single options arg)
+    // used to emit "new Tape takes 1 argument (got 2)" because the trailing
+    // comma got counted as an additional arg slot.
+    const src = `new Alphabet([' ', '*'],)`;
+    expect(lintAll(src, 'turing')).toEqual([]);
+  });
+
+  it('S-lint-trailing-comma-multi-line-ctor', () => {
+    // The realistic shape — multi-line constructor with a trailing comma
+    // before the close paren on the next line.
+    const src = `
+      const { PostMachine, mark, stop } = imports;
+      new PostMachine(
+        {
+          10: mark(20),
+          20: stop,
+        },
+      )
+    `;
+    // No lint diagnostics for the trailing comma. (mark(20) is valid; stop is
+    // bare reference, not called; the outer ctor has 1 expr arg + trailing
+    // comma → counts as 1, within PostMachine's 1–2 param range.)
+    expect(lintAll(src, 'post')).toEqual([]);
+  });
+
+  it('S-lint-real-extras-still-warned', () => {
+    // Sanity: the fix doesn't suppress LEGITIMATE too-many-args warnings.
+    // Two actual expression args for mark (which takes 1) still warns.
+    const src = `
+      const { mark } = imports;
+      mark(20, 30)
+    `;
+    const diags = lintAll(src, 'post');
+    expect(diags).toHaveLength(1);
+    expect(diags[0].message).toBe('mark takes 1 argument (got 2)');
+  });
+});
