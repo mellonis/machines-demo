@@ -214,7 +214,8 @@ export function signatureHelp(env: Env) {
       const info = computeSignatureInfo(state, env);
       return info ? infoToTooltip(info) : null;
     },
-    update: (_value, tr) => {
+    update: (value, tr) => {
+      if (!tr.docChanged && !tr.selection) return value;
       const info = computeSignatureInfo(tr.state, env);
       return info ? infoToTooltip(info) : null;
     },

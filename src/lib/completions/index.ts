@@ -15,7 +15,7 @@ export function completionExtensions(engine: Engine): Extension[] {
   const env: Env = { engine, schema: getSchema(engine) };
   return [
     localsField,
-    signatureHelp(env),
+    signatureHelp(env), // reads localsField via inferLocalsFor
     javascriptLanguage.data.of({ autocomplete: memberAccess(env) }),
     javascriptLanguage.data.of({ autocomplete: debugAssignment(env) }),
     javascriptLanguage.data.of({ autocomplete: optionsBag(env) }),
