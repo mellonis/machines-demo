@@ -130,3 +130,57 @@ describe('lint/argCount — bare-only instructions called', () => {
     expect(diags[0].message).toBe('halt has no callable form (use bare `stop` instead)');
   });
 });
+
+describe('lint/argCount — constructors and member methods', () => {
+  it('S-lint-new-alphabet-empty', () => {
+    const src = `new Alphabet()`;
+    const diags = lintAll(src, 'turing');
+    expect(diags).toHaveLength(1);
+    expect(diags[0].severity).toBe('error');
+    expect(diags[0].message).toBe('new Alphabet requires 1 argument (got 0)');
+  });
+
+  it('S-lint-new-alphabet-correct', () => {
+    const src = `new Alphabet([' ', '*'])`;
+    expect(lintAll(src, 'turing')).toEqual([]);
+  });
+
+  it('S-lint-new-state-positional-optional-name', () => {
+    // State ctor: (symbolToData, name?). Calling with just the first is valid.
+    const src = `
+      const { State } = imports;
+      new State({})
+    `;
+    expect(lintAll(src, 'turing')).toEqual([]);
+  });
+
+  it('S-lint-new-state-missing-required', () => {
+    const src = `
+      const { State } = imports;
+      new State()
+    `;
+    const diags = lintAll(src, 'turing');
+    expect(diags[0].message).toBe('new State requires 1 argument (got 0)');
+  });
+
+  it('S-lint-state-tag-empty', () => {
+    const src = `
+      const { State } = imports;
+      const s = new State({});
+      s.tag()
+    `;
+    const diags = lintAll(src, 'turing');
+    // 2 calls in this source: new State({}) (valid, 1 arg), s.tag() (invalid, 0 args).
+    expect(diags).toHaveLength(1);
+    expect(diags[0].message).toBe('s.tag requires 1 argument (got 0)');
+  });
+
+  it('S-lint-state-tag-correct', () => {
+    const src = `
+      const { State } = imports;
+      const s = new State({});
+      s.tag(['x'])
+    `;
+    expect(lintAll(src, 'turing')).toEqual([]);
+  });
+});
