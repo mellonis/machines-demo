@@ -204,7 +204,7 @@ describe('hints/signature — post instructions', () => {
       left(▮)
     `;
     const r = signatureAt(src, 'post');
-    expect(r!.params).toEqual([{ name: 'jumpTo', typeStr: 'string | number', optional: true }]);
+    expect(r!.params).toEqual([{ name: 'jumpTo', typeStr: 'number', optional: true }]);
   });
 });
 

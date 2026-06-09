@@ -16,13 +16,13 @@ export const POST_SCHEMA: EngineSchema = {
     noop:          { kind: 'post-instruction', detail: 'no-op' },
     stop:          { kind: 'post-instruction', detail: 'halt (return to caller inside a subroutine)' },
 
-    left:          { kind: 'post-instruction', params: [{ name: 'jumpTo', type: { kind: 'union', of: [{ kind: 'primitive', name: 'string' }, { kind: 'primitive', name: 'number' }] }, optional: true, detail: 'jump-to label' }], detail: 'step left (optionally jump)' },
-    right:         { kind: 'post-instruction', params: [{ name: 'jumpTo', type: { kind: 'union', of: [{ kind: 'primitive', name: 'string' }, { kind: 'primitive', name: 'number' }] }, optional: true, detail: 'jump-to label' }], detail: 'step right (optionally jump)' },
+    left:          { kind: 'post-instruction', params: [{ name: 'jumpTo', type: { kind: 'primitive', name: 'number' }, optional: true, detail: 'instruction index to jump to' }], detail: 'step left (optionally jump)' },
+    right:         { kind: 'post-instruction', params: [{ name: 'jumpTo', type: { kind: 'primitive', name: 'number' }, optional: true, detail: 'instruction index to jump to' }], detail: 'step right (optionally jump)' },
 
     call:          { kind: 'post-instruction', params: [{ name: 'label', type: { kind: 'primitive', name: 'string' } }], detail: 'call subroutine by name' },
     check:         { kind: 'post-instruction', params: [
-                      { name: 'thenLabel', type: { kind: 'union', of: [{ kind: 'primitive', name: 'string' }, { kind: 'primitive', name: 'number' }] } },
-                      { name: 'elseLabel', type: { kind: 'union', of: [{ kind: 'primitive', name: 'string' }, { kind: 'primitive', name: 'number' }] } },
+                      { name: 'thenLabel', type: { kind: 'primitive', name: 'number' } },
+                      { name: 'elseLabel', type: { kind: 'primitive', name: 'number' } },
                     ], detail: 'branch on mark/blank' },
     $tag:          { kind: 'post-instruction', params: [{ name: 'tag', type: { kind: 'primitive', name: 'string' } }], detail: 'tag current instruction (passthrough)' },
   },
