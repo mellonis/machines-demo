@@ -2,7 +2,7 @@
   import CodeMirror from 'svelte-codemirror-editor';
   import { javascript } from '@codemirror/lang-javascript';
   import { oneDark } from '@codemirror/theme-one-dark';
-  import { importsCompletion } from '../lib/completions.ts';
+  import { completionExtensions } from '../lib/completions/index.ts';
   import { syntaxLinter } from '../lib/syntaxLinter.ts';
   import { saveCode } from '../lib/persist.ts';
   import { theme } from '../lib/theme.svelte.ts';
@@ -33,8 +33,8 @@
   // page renders dark.
   const extensions = $derived(
     theme.resolved === 'dark'
-      ? [oneDark, ...importsCompletion(engine), syntaxLinter]
-      : [...importsCompletion(engine), syntaxLinter],
+      ? [oneDark, ...completionExtensions(engine), syntaxLinter]
+      : [...completionExtensions(engine), syntaxLinter],
   );
 </script>
 
