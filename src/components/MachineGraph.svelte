@@ -1185,14 +1185,23 @@
           title="Zoom in (Ctrl/Cmd + scroll up)"
           aria-label="Zoom in"
         >{@html icons.zoomIn}</button>
-        <button
-          type="button"
-          class="action"
-          onclick={aim}
-          disabled={!svg}
-          title="Scroll to current state (or entry if none)"
-          aria-label="Scroll to current state"
-        >{@html icons.target}</button>
+        {#if !readOnly}
+          <!-- "Scroll to current state" reads the `highlight` prop to find
+               the target. Showcase panels (SnippetPanel) drive the
+               highlight imperatively via `getOps` instead of passing the
+               prop, so the button would always fall back to scrolling to
+               idle — misleading given the label. The Replay-time
+               `recenterOnIdle()` call already covers the "back to entry"
+               UX for those panels; the aim affordance is engine-only. -->
+          <button
+            type="button"
+            class="action"
+            onclick={aim}
+            disabled={!svg}
+            title="Scroll to current state (or entry if none)"
+            aria-label="Scroll to current state"
+          >{@html icons.target}</button>
+        {/if}
         {#if onExpand}
           <button
             type="button"
