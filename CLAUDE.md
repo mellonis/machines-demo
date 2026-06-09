@@ -71,8 +71,14 @@ src/
     │   │   ├── optionsBag.ts       inside `new <Class>({ ▮ })` — top-level + nested shape-path walk (State dictionary-ctor entry)
     │   │   ├── destructureBag.ts   inside `const { ▮ } = imports;` or `const { ▮ } = <local-class>;`
     │   │   └── namespaceIdentifier.ts  bare word at expression position — ranked by destructure status; snippet expand in `new` callee + post-instruction with params; rename emits two entries (original-name applies the alias)
-    │   └── apply/
-    │       └── import.ts           applyAutoImport + computeDestructureChange — inserts not-yet-destructured names into the top `const { … } = imports;` block; format-aware single/multi-line; rename suppression
+    │   ├── apply/
+    │   │   └── import.ts           applyAutoImport + computeDestructureChange — inserts not-yet-destructured names into the top `const { … } = imports;` block; format-aware single/multi-line; rename suppression
+    │   └── hints/                signature-help / parameter hints (#105) — StateField → showTooltip
+    │       ├── types.ts            SignatureInfo / ParamRender / ResolvedCallee
+    │       ├── format.ts           formatTypeRef(TypeRef): string — schema TypeRef → human-readable
+    │       ├── signature.ts        computeSignatureInfo(state, env) (Lezer walk + callee resolution + comma-count active arg) + signatureHelp(env) StateField wiring
+    │       ├── format.test.ts      Vitest specs for formatTypeRef (cites S-fmt-...)
+    │       └── signature.test.ts   Vitest specs for computeSignatureInfo across namespace functions / member methods / constructors / post-instructions / renamed imports (cites S-sig-...)
     ├── syntaxLinter.ts         Lezer-based syntax-error markers
     ├── persist.ts              localStorage helpers per engine — code, example, snippets (UUID-keyed)
     ├── tapeSnapshot.ts         serialize/parse for tape-block copy+paste snapshots — JSON with `format`/`version` discriminator, categorized ParseError, no DOM/clipboard knowledge
@@ -234,7 +240,7 @@ Save UX (Toolbar.svelte):
 ## Editor
 
 - `svelte-codemirror-editor` (Svelte-5-native wrapper around CodeMirror 6) with `bind:value`.
-- Extensions: `javascript()` lang, `oneDark` theme, our `completionExtensions(engine)` (the smart-completions layer at `src/lib/completions/` — schema-driven, context-aware; surfaces namespace identifiers ranked by destructure status, member access on user-typed locals, `state.debug` RHS shapes, options-bag keys for known constructors, and auto-import into the top `const { … } = imports;` block; see #103 + the spec at `docs/superpowers/specs/2026-06-07-44-smart-completions-design.md`), and a Lezer-based `syntaxLinter` for syntax-error markers before Build.
+- Extensions: `javascript()` lang, `oneDark` theme, our `completionExtensions(engine)` (the smart-completions layer at `src/lib/completions/` — schema-driven, context-aware; surfaces namespace identifiers ranked by destructure status, member access on user-typed locals, `state.debug` RHS shapes, options-bag keys for known constructors, and auto-import into the top `const { … } = imports;` block; see #103 + the spec at `docs/superpowers/specs/2026-06-07-44-smart-completions-design.md`), plus the signature-help layer at `src/lib/completions/hints/` (#105) — a `StateField<Tooltip | null>` walks the Lezer tree from the cursor up to the enclosing `ArgList`, resolves the parent `CallExpression`/`NewExpression`'s callee against the schema (namespace functions, post-instructions, member methods via `inferLocalsFor`, or constructors — with reverse-rename resolution against `importsBinding.renames`), counts commas before the cursor for the active-arg index, and renders a single-line tooltip via the `showTooltip` facet (header reflects what the user typed, no tooltip past the last declared parameter, zero-param signatures suppressed). Also a Lezer-based `syntaxLinter` for syntax-error markers before Build.
 - A small reset-to-selected-example button overlays the editor's top-right corner; the log's clear button uses the same shared `IconButton.svelte` (corner-overlay variant) — both are absolutely positioned within their `position: relative` parent (`.editor` / `.log-panel`).
 
 ## Deploy
