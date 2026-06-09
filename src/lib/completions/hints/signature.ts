@@ -4,6 +4,9 @@ import type { SyntaxNode } from '@lezer/common';
 import type { Env } from '../contexts/types.ts';
 import type { ResolvedCallee, SignatureInfo } from './types.ts';
 import { formatTypeRef } from './format.ts';
+import { inferLocalsFor } from '../scan/locals.ts';
+import type { InferredType } from '../scan/types.ts';
+import type { MemberSpec } from '../schema/types.ts';
 
 function findEnclosingArgList(state: EditorState, pos: number): SyntaxNode | null {
   const tree = syntaxTree(state);
@@ -29,23 +32,89 @@ function activeArgIndex(argList: SyntaxNode, pos: number): number {
   return commas;
 }
 
+// Maps the signatureRef string back to its (class, member) pair via the schema.
+// Currently only `TapeBlock.symbol` is emitted; the resolver is written to handle
+// any "<receiver>.<member>" where <receiver> matches a namespace entry.
+function resolveSignatureRef(signatureRef: string, env: Env): MemberSpec | null {
+  const dot = signatureRef.indexOf('.');
+  if (dot < 0) return null;
+  const receiverName = signatureRef.slice(0, dot);
+  const methodName = signatureRef.slice(dot + 1);
+  const ns = env.schema.namespace[receiverName];
+  if (!ns) return null;
+  let className: string | null = null;
+  if (ns.kind === 'class') className = ns.classRef;
+  else if (ns.kind === 'singleton' && ns.type.kind === 'class') className = ns.type.name;
+  if (!className) return null;
+  const cls = env.schema.classes[className];
+  if (!cls) return null;
+  return cls.members.find((m) => m.name === methodName) ?? null;
+}
+
+function lookupMethod(localType: InferredType, methodName: string, env: Env): MemberSpec | null {
+  if (localType.kind === 'class') {
+    const cls = env.schema.classes[localType.name];
+    if (!cls) return null;
+    return cls.members.find((m) => m.name === methodName && m.kind === 'method') ?? null;
+  }
+  if (localType.kind === 'function') {
+    // The local is itself a destructured method (e.g. `const { symbol } = tb`).
+    // The methodName here would be something invoked ON that function — out of scope.
+    return null;
+  }
+  return null;
+}
+
 function resolveCallee(argList: SyntaxNode, state: EditorState, env: Env): ResolvedCallee | null {
   const call = argList.parent;
   if (!call) return null;
   if (call.name !== 'CallExpression' && call.name !== 'NewExpression') return null;
 
   const callee = call.firstChild;
-  if (!callee) return null;
-  if (callee === argList) return null;
+  if (!callee || callee === argList) return null;
 
+  // CallExpression with bare VariableName: namespace function or a typed local function.
   if (call.name === 'CallExpression' && callee.name === 'VariableName') {
     const name = text(callee, state);
     const entry = env.schema.namespace[name];
-    if (!entry) return null;
-    if (entry.kind === 'function') {
+    if (entry?.kind === 'function') {
       return { params: entry.params, header: name };
     }
+    // Locally-typed function (e.g. destructured `{ symbol } = tb`)
+    const { locals } = inferLocalsFor(state, env.schema);
+    const local = locals.get(name);
+    if (local?.kind === 'function') {
+      const member = resolveSignatureRef(local.signatureRef, env);
+      if (member?.params) return { params: member.params, header: name };
+    }
     return null;
+  }
+
+  // CallExpression with MemberExpression callee: receiver.method(...)
+  if (call.name === 'CallExpression' && callee.name === 'MemberExpression') {
+    const receiver = callee.firstChild;
+    const dot = receiver?.nextSibling;
+    const method = callee.lastChild;
+    if (!receiver || receiver.name !== 'VariableName' || !method || method.name !== 'PropertyName') return null;
+    if (!dot || dot.name !== '.') return null;
+
+    const receiverName = text(receiver, state);
+    const methodName = text(method, state);
+    const { locals } = inferLocalsFor(state, env.schema);
+
+    let localType: InferredType | null = locals.get(receiverName) ?? null;
+    if (!localType) {
+      // Fall back to namespace (e.g. `haltState.<...>` if the user typed it bare).
+      const ns = env.schema.namespace[receiverName];
+      if (ns?.kind === 'class') localType = { kind: 'class', name: ns.classRef };
+      else if (ns?.kind === 'singleton' && ns.type.kind === 'class') localType = { kind: 'class', name: ns.type.name };
+    }
+    if (!localType) return null;
+
+    const member = lookupMethod(localType, methodName, env);
+    if (!member?.params) return null;
+
+    return { params: member.params, header: `${receiverName}.${methodName}` };
   }
 
   return null;

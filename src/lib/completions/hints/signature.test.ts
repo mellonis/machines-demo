@@ -57,3 +57,79 @@ describe('hints/signature — active argument', () => {
     expect(r!.activeIndex).toBe(1);
   });
 });
+
+describe('hints/signature — member methods', () => {
+  it('S-sig-member-state-tag', () => {
+    const src = `
+      const { State } = imports;
+      const s = new State({});
+      s.tag(▮)
+    `;
+    const r = signatureAt(src, 'turing');
+    expect(r).not.toBeNull();
+    expect(r!.header).toBe('s.tag');
+    expect(r!.params).toEqual([{ name: 'tags', typeStr: 'string[]', optional: false }]);
+    expect(r!.activeIndex).toBe(0);
+  });
+
+  it('S-sig-member-state-wohs', () => {
+    const src = `
+      const { State } = imports;
+      const s = new State({});
+      s.withOverriddenHaltState(▮)
+    `;
+    const r = signatureAt(src, 'turing');
+    expect(r!.header).toBe('s.withOverriddenHaltState');
+    expect(r!.params).toEqual([{ name: 'continuation', typeStr: 'State', optional: false }]);
+  });
+
+  it('S-sig-member-tapeblock-symbol', () => {
+    const src = `
+      const { TapeBlock } = imports;
+      const tb = new TapeBlock({ tapes: [] });
+      tb.symbol(▮)
+    `;
+    const r = signatureAt(src, 'turing');
+    expect(r!.header).toBe('tb.symbol');
+    expect(r!.params).toEqual([{ name: 'pattern', typeStr: '(string | symbol)[]', optional: false }]);
+  });
+
+  it('S-sig-member-postmachine-stateAt', () => {
+    const src = `
+      const { PostMachine } = imports;
+      const pm = new PostMachine({});
+      pm.stateAt(▮)
+    `;
+    const r = signatureAt(src, 'post');
+    expect(r!.header).toBe('pm.stateAt');
+    expect(r!.params).toEqual([{ name: 'path', typeStr: 'string', optional: false }]);
+  });
+
+  it('S-sig-member-destructured-tapeblock-symbol', () => {
+    // Uses the existing scan/locals.ts signatureRef:'TapeBlock.symbol' path.
+    const src = `
+      const { TapeBlock } = imports;
+      const tb = new TapeBlock({ tapes: [] });
+      const { symbol } = tb;
+      symbol(▮)
+    `;
+    const r = signatureAt(src, 'turing');
+    expect(r!.header).toBe('symbol');
+    expect(r!.params).toEqual([{ name: 'pattern', typeStr: '(string | symbol)[]', optional: false }]);
+  });
+
+  it('S-sig-member-on-unknown-local — null', () => {
+    const r = signatureAt(`somethingUntyped.tag(▮)`, 'turing');
+    expect(r).toBeNull();
+  });
+
+  it('S-sig-member-method-not-in-schema — null', () => {
+    const src = `
+      const { State } = imports;
+      const s = new State({});
+      s.totallyMadeUp(▮)
+    `;
+    const r = signatureAt(src, 'turing');
+    expect(r).toBeNull();
+  });
+});
