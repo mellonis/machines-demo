@@ -70,7 +70,10 @@ describe('POST_SCHEMA (Phase 1)', () => {
     expect(POST_SCHEMA.namespace.call.kind).toBe('post-instruction');
     const callEntry = POST_SCHEMA.namespace.call;
     if (callEntry.kind === 'post-instruction') {
-      expect(callEntry.params).toEqual([{ name: 'label', type: { kind: 'primitive', name: 'string' } }]);
+      expect(callEntry.params).toEqual([
+        { name: 'subRoutineName', type: { kind: 'primitive', name: 'string' } },
+        { name: 'jumpTo', type: { kind: 'primitive', name: 'number' }, optional: true, detail: 'instruction index to jump to after returning' },
+      ]);
     }
   });
 });

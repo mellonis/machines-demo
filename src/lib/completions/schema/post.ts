@@ -11,15 +11,18 @@ export const POST_SCHEMA: EngineSchema = {
     blankSymbol:   { kind: 'singleton', type: { kind: 'primitive', name: 'string' }, detail: "default blank symbol (' ')" },
     markSymbol:    { kind: 'singleton', type: { kind: 'primitive', name: 'string' }, detail: "default mark symbol ('*')" },
 
-    mark:          { kind: 'post-instruction', detail: 'mark current cell' },
-    erase:         { kind: 'post-instruction', detail: 'erase current cell' },
-    noop:          { kind: 'post-instruction', detail: 'no-op' },
-    stop:          { kind: 'post-instruction', detail: 'halt (return to caller inside a subroutine)' },
+    mark:          { kind: 'post-instruction', params: [{ name: 'jumpTo', type: { kind: 'primitive', name: 'number' }, detail: 'instruction index to jump to' }], detail: 'mark current cell (bare or with jump index)' },
+    erase:         { kind: 'post-instruction', params: [{ name: 'jumpTo', type: { kind: 'primitive', name: 'number' }, detail: 'instruction index to jump to' }], detail: 'erase current cell (bare or with jump index)' },
+    noop:          { kind: 'post-instruction', params: [{ name: 'jumpTo', type: { kind: 'primitive', name: 'number' }, detail: 'instruction index to jump to' }], detail: 'no-op (bare or unconditional jump)' },
+    stop:          { kind: 'post-instruction', detail: 'halt (bare-only — has no indexed form)' },
 
-    left:          { kind: 'post-instruction', params: [{ name: 'jumpTo', type: { kind: 'primitive', name: 'number' }, optional: true, detail: 'instruction index to jump to' }], detail: 'step left (optionally jump)' },
-    right:         { kind: 'post-instruction', params: [{ name: 'jumpTo', type: { kind: 'primitive', name: 'number' }, optional: true, detail: 'instruction index to jump to' }], detail: 'step right (optionally jump)' },
+    left:          { kind: 'post-instruction', params: [{ name: 'jumpTo', type: { kind: 'primitive', name: 'number' }, detail: 'instruction index to jump to' }], detail: 'step left (bare or with jump index)' },
+    right:         { kind: 'post-instruction', params: [{ name: 'jumpTo', type: { kind: 'primitive', name: 'number' }, detail: 'instruction index to jump to' }], detail: 'step right (bare or with jump index)' },
 
-    call:          { kind: 'post-instruction', params: [{ name: 'label', type: { kind: 'primitive', name: 'string' } }], detail: 'call subroutine by name' },
+    call:          { kind: 'post-instruction', params: [
+                      { name: 'subRoutineName', type: { kind: 'primitive', name: 'string' } },
+                      { name: 'jumpTo', type: { kind: 'primitive', name: 'number' }, optional: true, detail: 'instruction index to jump to after returning' },
+                    ], detail: 'call subroutine by name (with optional return jump)' },
     check:         { kind: 'post-instruction', params: [
                       { name: 'thenLabel', type: { kind: 'primitive', name: 'number' } },
                       { name: 'elseLabel', type: { kind: 'primitive', name: 'number' } },

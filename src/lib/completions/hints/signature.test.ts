@@ -176,7 +176,10 @@ describe('hints/signature — post instructions', () => {
     const r = signatureAt(src, 'post');
     expect(r).not.toBeNull();
     expect(r!.header).toBe('call');
-    expect(r!.params).toEqual([{ name: 'label', typeStr: 'string', optional: false }]);
+    expect(r!.params).toEqual([
+      { name: 'subRoutineName', typeStr: 'string', optional: false },
+      { name: 'jumpTo', typeStr: 'number', optional: true },
+    ]);
   });
 
   it('S-sig-post-check-second-arg', () => {
@@ -189,9 +192,9 @@ describe('hints/signature — post instructions', () => {
     expect(r!.activeIndex).toBe(1);
   });
 
-  it('S-sig-post-mark-empty-signature', () => {
-    // Zero-param post-instructions still show a tooltip — symmetry with right/left.
-    // The empty parens confirm "this is the call form, no args expected".
+  it('S-sig-post-mark-required-jumpTo', () => {
+    // mark(ix) is the indexed call form; per the README the index is required
+    // when calling. (Bare `mark` is also valid but has no `(`.)
     const src = `
       const { mark } = imports;
       mark(▮)
@@ -199,17 +202,38 @@ describe('hints/signature — post instructions', () => {
     const r = signatureAt(src, 'post');
     expect(r).not.toBeNull();
     expect(r!.header).toBe('mark');
-    expect(r!.params).toEqual([]);
+    expect(r!.params).toEqual([{ name: 'jumpTo', typeStr: 'number', optional: false }]);
     expect(r!.activeIndex).toBe(0);
   });
 
-  it('S-sig-post-left-optional-jumpTo', () => {
+  it('S-sig-post-left-required-jumpTo', () => {
     const src = `
       const { left } = imports;
       left(▮)
     `;
     const r = signatureAt(src, 'post');
-    expect(r!.params).toEqual([{ name: 'jumpTo', typeStr: 'number', optional: true }]);
+    expect(r!.params).toEqual([{ name: 'jumpTo', typeStr: 'number', optional: false }]);
+  });
+
+  it('S-sig-post-stop-no-tooltip', () => {
+    // stop is bare-only — stop(...) throws at construction. Don't show a tooltip
+    // when the user types stop(.
+    const src = `
+      const { stop } = imports;
+      stop(▮)
+    `;
+    const r = signatureAt(src, 'post');
+    expect(r).toBeNull();
+  });
+
+  it('S-sig-post-call-second-optional-arg', () => {
+    const src = `
+      const { call } = imports;
+      call('sub', ▮)
+    `;
+    const r = signatureAt(src, 'post');
+    expect(r!.params[1]).toEqual({ name: 'jumpTo', typeStr: 'number', optional: true });
+    expect(r!.activeIndex).toBe(1);
   });
 });
 
@@ -243,6 +267,9 @@ describe('hints/signature — renamed imports', () => {
     `;
     const r = signatureAt(src, 'post');
     expect(r!.header).toBe('callSub');
-    expect(r!.params).toEqual([{ name: 'label', typeStr: 'string', optional: false }]);
+    expect(r!.params).toEqual([
+      { name: 'subRoutineName', typeStr: 'string', optional: false },
+      { name: 'jumpTo', typeStr: 'number', optional: true },
+    ]);
   });
 });
