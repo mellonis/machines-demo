@@ -9,11 +9,13 @@ import { namespaceIdentifier } from './contexts/namespaceIdentifier.ts';
 import { optionsBag } from './contexts/optionsBag.ts';
 import { destructureBag } from './contexts/destructureBag.ts';
 import type { Env } from './contexts/types.ts';
+import { signatureHelp } from './hints/signature.ts';
 
 export function completionExtensions(engine: Engine): Extension[] {
   const env: Env = { engine, schema: getSchema(engine) };
   return [
     localsField,
+    signatureHelp(env),
     javascriptLanguage.data.of({ autocomplete: memberAccess(env) }),
     javascriptLanguage.data.of({ autocomplete: debugAssignment(env) }),
     javascriptLanguage.data.of({ autocomplete: optionsBag(env) }),

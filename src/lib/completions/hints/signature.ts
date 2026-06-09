@@ -1,5 +1,7 @@
 import { syntaxTree } from '@codemirror/language';
+import { StateField } from '@codemirror/state';
 import type { EditorState } from '@codemirror/state';
+import { showTooltip, type Tooltip } from '@codemirror/view';
 import type { SyntaxNode } from '@lezer/common';
 import type { Env } from '../contexts/types.ts';
 import type { ResolvedCallee, SignatureInfo } from './types.ts';
@@ -168,4 +170,55 @@ export function computeSignatureInfo(state: EditorState, env: Env): SignatureInf
     activeIndex,
     anchor: argList.from,
   };
+}
+
+function renderTooltipDom(info: SignatureInfo): HTMLElement {
+  const dom = document.createElement('div');
+  dom.className = 'cm-tooltip-sig-help sig-help';
+  const head = document.createElement('span');
+  head.className = 'sig-callee';
+  head.textContent = `${info.header}(`;
+  dom.appendChild(head);
+
+  info.params.forEach((p, i) => {
+    if (i > 0) {
+      const sep = document.createElement('span');
+      sep.textContent = ', ';
+      dom.appendChild(sep);
+    }
+    const span = document.createElement('span');
+    span.className = i === info.activeIndex ? 'sig-param sig-active' : 'sig-param';
+    span.textContent = `${p.name}${p.optional ? '?' : ''}: ${p.typeStr}`;
+    dom.appendChild(span);
+  });
+
+  const tail = document.createElement('span');
+  tail.className = 'sig-callee';
+  tail.textContent = ')';
+  dom.appendChild(tail);
+  return dom;
+}
+
+function infoToTooltip(info: SignatureInfo): Tooltip {
+  return {
+    pos: info.anchor,
+    above: true,
+    arrow: false,
+    create: () => ({ dom: renderTooltipDom(info) }),
+  };
+}
+
+export function signatureHelp(env: Env) {
+  const field = StateField.define<Tooltip | null>({
+    create: (state) => {
+      const info = computeSignatureInfo(state, env);
+      return info ? infoToTooltip(info) : null;
+    },
+    update: (_value, tr) => {
+      const info = computeSignatureInfo(tr.state, env);
+      return info ? infoToTooltip(info) : null;
+    },
+    provide: (f) => showTooltip.from(f),
+  });
+  return field;
 }
