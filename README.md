@@ -6,7 +6,7 @@ Interactive in-browser playground for **Turing** and **Post** machines.
 
 **Live demo:** [demo.machines.mellonis.ru](https://demo.machines.mellonis.ru)
 
-Two tabs (Turing, Post) where you write JavaScript that builds a machine — using the published [`@turing-machine-js/machine`](https://www.npmjs.com/package/@turing-machine-js/machine), [`@post-machine-js/machine`](https://www.npmjs.com/package/@post-machine-js/machine), and [`@turing-machine-js/visuals`](https://www.npmjs.com/package/@turing-machine-js/visuals) (highlight + graph-indexing surface) libraries — and watch it execute on an animated tape. Auto-running demo on first load, manual control of the tape head via a movement/symbol/Apply panel, single-step and paused-auto-step execution, a log of every command applied, and clipboard copy/paste of the tape-block state for sharing or restoring snapshots.
+A landing page (`/`) introduces both engines through a column of showcase panels — each panel auto-plays a prerecorded run of one small program, with the state graph, tape, and a step-by-step execution-trace table laid out beside human-readable lesson notes that describe what the program is doing. From there, two engine tabs (`/turing`, `/post`) drop you into an editor where you write JavaScript that builds a machine — using the published [`@turing-machine-js/machine`](https://www.npmjs.com/package/@turing-machine-js/machine), [`@post-machine-js/machine`](https://www.npmjs.com/package/@post-machine-js/machine), and [`@turing-machine-js/visuals`](https://www.npmjs.com/package/@turing-machine-js/visuals) (highlight + graph-indexing surface) libraries — and watch it execute on an animated tape. Manual control of the tape head via a movement/symbol/Apply panel, single-step and paused-auto-step execution, a log of every command applied, and clipboard copy/paste of the tape-block state for sharing or restoring snapshots.
 
 ## Running locally
 
@@ -84,6 +84,9 @@ src/
 ├── app.css                     # global tokens + base styles
 ├── components/
 │   ├── MachineView.svelte      # per-engine orchestrator (one $state, derived disabled flags)
+│   ├── Landing.svelte          # `/` route — engine switcher + showcase grid; owns the single IntersectionObserver and dispatches `active: boolean` so only one snippet plays at a time
+│   ├── SnippetPanel.svelte     # showcase tile — two-column layout (player + lesson notes); 4-state playback machine driven by `active`
+│   ├── ExecutionTraceTable.svelte  # 6-column read-only execution trace inside the player column
 │   ├── TapesStack.svelte       # multi-tape stack with shared head-thread
 │   ├── Tape.svelte             # virtualized belt with prep-shift slide trick
 │   ├── ControlPanel.svelte     # L/S/R + alphabet chips + Apply
@@ -115,13 +118,16 @@ src/
     ├── persist.ts              # localStorage helpers per engine
     ├── tapeSnapshot.ts         # serialize/parse tape-block snapshots for copy+paste
     ├── tapeSnapshot.test.ts    # Vitest suite for tapeSnapshot
-    ├── defaultCode.ts          # starter Turing / Post snippets
+    ├── defaultCode.ts          # starter Turing / Post snippets — Example.lessonNotes carries the showcase prose
     ├── format.ts               # LogEntry assemblers (commandsEntry / tapesEntry); per-step string rendering from @turing-machine-js/visuals
+    ├── lessonMarkdown.ts       # tiny markdown subset (paragraphs / bullets / inline code) for SnippetPanel lesson prose
     ├── icons.ts                # Tabler icon namespace
     └── theme.svelte.ts         # theme (light / dark) state + matchMedia watcher
 
 e2e/
-└── cold-start.spec.ts            # Playwright E2E — 4 cold-start scenarios
+├── cold-start.spec.ts            # Playwright E2E — cold-start scenarios for engine pages
+├── completions.spec.ts           # Playwright E2E — smart completions roundtrip
+└── landing.spec.ts               # Playwright E2E — landing page panels + engine switch + deep-link to editor
 
 playwright.config.ts              # Chromium project; webServer = vite preview
 ```

@@ -242,6 +242,11 @@
 
   main {
     flex: 1;
+    /* min-height:0 lets Landing's internal overflow-y:auto actually scroll
+       its content instead of pushing main beyond its flex allotment — the
+       flex-item min-height:auto default would otherwise let tall snippet
+       grids spill into the body's scroll. */
+    min-height: 0;
     overflow: hidden;
     display: flex;
 

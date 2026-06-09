@@ -37,46 +37,47 @@ function stubSnippet(overrides: Partial<SnippetWithMeta> = {}): SnippetWithMeta 
     engine: 'turing',
     id: 'showcase-1',
     description: 'A test snippet',
-    graph: { initialId: 0, alphabets: [[' ', 'a', 'b']], nodes: {} } as never,
+    graph: {
+      initialId: 1,
+      alphabets: [[' ', 'a', 'b']],
+      nodes: {
+        0: { id: 0, name: 'halt', transitions: [], isWrapper: false, isHaltMarker: false, tags: [] },
+        1: { id: 1, name: 'S', transitions: [], isWrapper: false, isHaltMarker: false, tags: [] },
+      },
+    } as never,
     alphabets: [[' ', 'a', 'b']],
     frames: [
       { step: 0, tape: [{ symbols: ['a', 'b'], position: 0 }], highlight: null },
-      { step: 1, tape: [{ symbols: ['b', 'b'], position: 1 }], highlight: null },
-      { step: 2, tape: [{ symbols: ['b', 'a'], position: 1 }], highlight: null },
+      {
+        step: 1,
+        tape: [{ symbols: ['b', 'b'], position: 1 }],
+        commands: [{ movement: 'R', read: 'a', write: 'b' }],
+        highlight: { fromId: 1, toId: 1, strong: 'from', paused: false },
+      },
+      {
+        step: 2,
+        tape: [{ symbols: ['b', 'a'], position: 1 }],
+        commands: [{ movement: 'L', read: 'b', write: 'a' }],
+        highlight: { fromId: 1, toId: 0, strong: 'from', paused: false },
+      },
     ],
     ...overrides,
   };
 }
 
-// IntersectionObserver test double: stores the callback on the constructed
-// instance so a test can `instance.fire(true)` to simulate scroll-into-view.
-class FakeIntersectionObserver {
-  static instances: FakeIntersectionObserver[] = [];
-  callback: IntersectionObserverCallback;
-  observed: Element[] = [];
-  disconnected = false;
-  constructor(cb: IntersectionObserverCallback) {
-    this.callback = cb;
-    FakeIntersectionObserver.instances.push(this);
-  }
-  observe(el: Element) { this.observed.push(el); }
-  disconnect() { this.disconnected = true; }
-  unobserve() {}
-  takeRecords() { return []; }
-  root = null;
-  rootMargin = '';
-  thresholds: number[] = [];
-  fire(isIntersecting: boolean) {
-    this.callback(
-      [{ isIntersecting } as IntersectionObserverEntry],
-      this as unknown as IntersectionObserver,
-    );
-  }
+// `aria-current="step"` is set on the trace row whose `data-step` matches the
+// current `frameIndex`. Frame 0 has no row (no transition fired yet); frames
+// 1..N each get a row. Helper returns the highlighted row's `data-step` value,
+// or null when no row is current.
+function currentStep(): number | null {
+  const row = document.querySelector<HTMLTableRowElement>(
+    '[data-testid="trace-row"][aria-current="step"]',
+  );
+  if (!row) return null;
+  return Number(row.dataset.step);
 }
 
 beforeEach(() => {
-  FakeIntersectionObserver.instances = [];
-  vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
   // Default to motion ON; individual tests can override matchMedia.
   vi.stubGlobal('matchMedia', (query: string) => ({
     matches: false,
@@ -100,68 +101,121 @@ afterEach(() => {
 describe('SnippetPanel', () => {
   it('S-snippet-panel-renders-caption: renders the snippet description', () => {
     render(SnippetPanel, { snippet: stubSnippet() });
-    expect(screen.getByText('A test snippet')).toBeInTheDocument();
+    // Caption renders in <h2> AND in the lesson-notes placeholder — scope to
+    // the heading so the assertion picks the right element.
+    expect(
+      screen.getByRole('heading', { name: 'A test snippet' }),
+    ).toBeInTheDocument();
   });
 
   it('S-snippet-panel-renders-caption: falls back to id when description is absent', () => {
     render(SnippetPanel, {
       snippet: stubSnippet({ description: undefined, id: 'fallback-id' }),
     });
-    expect(screen.getByText('fallback-id')).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: 'fallback-id' }),
+    ).toBeInTheDocument();
   });
 
-  it('S-snippet-panel-static-on-mount: sits on frame 0 until IO fires', () => {
+  it('S-snippet-panel-static-on-mount: sits on frame 0 when inactive', () => {
     render(SnippetPanel, { snippet: stubSnippet() });
-    expect(screen.getByTestId('snippet-frame-index').textContent).toBe('0');
+    // Default active=false → no row carries aria-current.
+    expect(currentStep()).toBe(null);
   });
 
-  it('S-snippet-panel-autoplay-on-intersect: advances frames after intersect', () => {
-    render(SnippetPanel, { snippet: stubSnippet({ intervalMs: 100 }) });
-    expect(FakeIntersectionObserver.instances).toHaveLength(1);
-    const io = FakeIntersectionObserver.instances[0];
-    io.fire(true);
-    expect(io.disconnected).toBe(true);
-    // Advance interval — should step to frame 1.
+  it('S-snippet-panel-active-plays: advances frames once active is set', () => {
+    render(SnippetPanel, {
+      snippet: stubSnippet({ intervalMs: 100 }),
+      active: true,
+    });
+    // The active-toggle $effect resets the player and schedules the timer.
     vi.advanceTimersByTime(100);
     flushSync();
-    expect(screen.getByTestId('snippet-frame-index').textContent).toBe('1');
+    expect(currentStep()).toBe(1);
     vi.advanceTimersByTime(100);
     flushSync();
-    expect(screen.getByTestId('snippet-frame-index').textContent).toBe('2');
+    expect(currentStep()).toBe(2);
   });
 
-  it('S-snippet-panel-freeze-at-halt: timer stops at the last frame and Replay appears', () => {
-    render(SnippetPanel, { snippet: stubSnippet({ intervalMs: 50 }) });
-    FakeIntersectionObserver.instances[0].fire(true);
-    // 3 frames: index 0 → 1 → 2 (done). 2 ticks reach done.
+  it('S-snippet-panel-freeze-at-halt: timer stops at the last frame, highlight clears, Replay appears', () => {
+    render(SnippetPanel, {
+      snippet: stubSnippet({ intervalMs: 50 }),
+      active: true,
+    });
+    // 3 frames: index 0 → 1 → 2 (done). 2 ticks reach the last frame.
     vi.advanceTimersByTime(50);
     vi.advanceTimersByTime(50);
     flushSync();
-    expect(screen.getByTestId('snippet-frame-index').textContent).toBe('2');
-    // Extra ticks must not advance past the last frame.
-    vi.advanceTimersByTime(500);
+    expect(currentStep()).toBe(2);
+    // One more tick: player.forward() returns false → highlight clears (#108 parity).
+    vi.advanceTimersByTime(50);
     flushSync();
-    expect(screen.getByTestId('snippet-frame-index').textContent).toBe('2');
-    // Replay button appears when done.
+    expect(currentStep()).toBe(null);
+    // Replay button appears.
     expect(screen.getByRole('button', { name: /Replay/i })).toBeInTheDocument();
   });
 
   it('S-snippet-panel-replay-resets: Replay jumps back to frame 0 and replays', async () => {
-    render(SnippetPanel, { snippet: stubSnippet({ intervalMs: 50 }) });
-    FakeIntersectionObserver.instances[0].fire(true);
+    render(SnippetPanel, {
+      snippet: stubSnippet({ intervalMs: 50 }),
+      active: true,
+    });
     vi.advanceTimersByTime(50);
     vi.advanceTimersByTime(50);
     flushSync();
-    expect(screen.getByTestId('snippet-frame-index').textContent).toBe('2');
+    expect(currentStep()).toBe(2);
     await fireEvent.click(screen.getByRole('button', { name: /Replay/i }));
     flushSync();
-    expect(screen.getByTestId('snippet-frame-index').textContent).toBe('0');
+    expect(currentStep()).toBe(null);
     vi.advanceTimersByTime(50);
     flushSync();
-    expect(screen.getByTestId('snippet-frame-index').textContent).toBe('1');
+    expect(currentStep()).toBe(1);
   });
 
-  it('S-snippet-panel-reduced-motion: jumps to the final frame on mount, no IO', () => {
+  it('S-snippet-panel-inactive-pauses: inactive mid-playback preserves the current row', async () => {
+    const snippet = stubSnippet({ intervalMs: 50 });
+    const { rerender } = render(SnippetPanel, { snippet, active: true });
+    vi.advanceTimersByTime(50);
+    flushSync();
+    expect(currentStep()).toBe(1);
+    // Pause: highlight stays at frame 1, timer stops, no further advance.
+    await rerender({ snippet, active: false });
+    flushSync();
+    expect(currentStep()).toBe(1);
+    vi.advanceTimersByTime(500);
+    flushSync();
+    expect(currentStep()).toBe(1);
+    // Resume: ticks pick up from where we paused — next tick lands on 2.
+    await rerender({ snippet, active: true });
+    flushSync();
+    vi.advanceTimersByTime(50);
+    flushSync();
+    expect(currentStep()).toBe(2);
+  });
+
+  it('S-snippet-panel-done-no-autoreplay: a finished snippet does not auto-replay on re-activation', async () => {
+    const snippet = stubSnippet({ intervalMs: 50 });
+    const { rerender } = render(SnippetPanel, { snippet, active: true });
+    // Run to completion: 2 advances reach the last frame, a 3rd triggers
+    // the natural-end cleanup that flips state to 'done'.
+    vi.advanceTimersByTime(50);
+    vi.advanceTimersByTime(50);
+    vi.advanceTimersByTime(50);
+    flushSync();
+    expect(currentStep()).toBe(null);
+    expect(screen.getByRole('button', { name: /Replay/i })).toBeInTheDocument();
+    // Scroll away and back — no auto-replay, no highlight.
+    await rerender({ snippet, active: false });
+    flushSync();
+    await rerender({ snippet, active: true });
+    flushSync();
+    vi.advanceTimersByTime(500);
+    flushSync();
+    expect(currentStep()).toBe(null);
+    expect(screen.getByRole('button', { name: /Replay/i })).toBeInTheDocument();
+  });
+
+  it('S-snippet-panel-reduced-motion: jumps to the final frame on mount, ignores active', () => {
     vi.stubGlobal('matchMedia', (query: string) => ({
       matches: query.includes('reduce'),
       media: query,
@@ -172,10 +226,10 @@ describe('SnippetPanel', () => {
       removeListener: vi.fn(),
       dispatchEvent: vi.fn(),
     }));
-    render(SnippetPanel, { snippet: stubSnippet() });
-    expect(screen.getByTestId('snippet-frame-index').textContent).toBe('2');
-    // No IntersectionObserver should have been created under reduced motion.
-    expect(FakeIntersectionObserver.instances).toHaveLength(0);
+    // Even with active=false, reduced motion pins to the final frame —
+    // matches the graph's static final-frame snapshot.
+    render(SnippetPanel, { snippet: stubSnippet(), active: false });
+    expect(currentStep()).toBe(2);
     // Play button shown (instead of Replay) under reduced motion.
     expect(screen.getByRole('button', { name: /Play/i })).toBeInTheDocument();
   });

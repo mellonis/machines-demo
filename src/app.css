@@ -203,6 +203,12 @@ body {
 body {
   display: flex;
   flex-direction: column;
+  /* Body never scrolls — internal containers (`.landing` on desktop,
+     `<main>` on narrow viewports) own all scroll, so the body / page
+     itself stays pinned at 100vh. Without this, Safari's rubber-band
+     overscroll exposes empty space below the footer when content is
+     short. */
+  overflow: hidden;
 }
 
 #app {

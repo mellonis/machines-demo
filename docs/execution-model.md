@@ -44,6 +44,10 @@ stateDiagram-v2
     note right of HALTED : Error, timeout, truncation, or cold-start build error from any non-resting state lands HALTED.
 ```
 
+### 1.1 Scope: engine pages only
+
+This document describes the **engine pages** (`/turing`, `/post`) — `MachineView.svelte` driving a real `DebugSession` over a live machine in a worker. The landing page (`/`) renders showcase **`SnippetPanel`** tiles instead: those play back prerecorded `Snippet` artifacts produced at build time by `recordSnippet` (via the `src/vite-plugins/snippets.ts` Vite plugin). No worker, no `DebugSession`, no breakpoints — just a `SnippetPlayer` reading frames from an in-memory artifact, driven by its own playback state machine (`idle` / `playing` / `paused` / `done`) and orchestrated by Landing's IntersectionObserver. See `Landing.svelte` and `SnippetPanel.svelte` for the playback model; it's orthogonal to everything below.
+
 ## 2. Mode reference
 
 Three lines per mode: what it means, how it's entered, how it's exited. UI / log detail belongs in §6 Action matrix and §8 walk-throughs.
