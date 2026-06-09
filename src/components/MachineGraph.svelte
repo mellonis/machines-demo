@@ -16,7 +16,7 @@
   import { theme } from '../lib/theme.svelte.ts';
   import { icons } from '../lib/icons.ts';
   import { summariseGraph } from '../lib/graphSummary.ts';
-  import { computeCenterScroll } from '../lib/scrollCenter.ts';
+  import { computeCenterScroll, computeFitZoom } from '../lib/scrollCenter.ts';
 
   type Props = {
     graph: Graph | null;
@@ -794,20 +794,50 @@
     });
   });
 
-  // After each new render: reset zoom to 1, then scroll the `idle`
-  // entry node into view so the user lands on the diagram's start
-  // (LR: leftmost; TD: top). Without the zoom reset, a previously
-  // zoomed view of one machine could carry into the next build.
-  // Awaits `tick()` so both the cache-build effect (svg → nodeCache)
-  // and the layout flush (zoom: 1 → resized .svg-host) have applied
-  // before we measure for centering.
+  // After each new render: pick a zoom that keeps ≥60% of the SVG's area
+  // visible inside the body, then center the `idle` entry node so the user
+  // lands on the diagram's start (machines-demo#110).
+  //
+  // Why both passes share an effect:
+  //   - The zoom adjustment changes `.svg-host`'s laid-out width / height,
+  //     which moves every node's bounding rect — centering before the
+  //     zoom settles would aim at stale coordinates.
+  //   - Resetting to 1 first gives `getBoundingClientRect` a known scale
+  //     to read the SVG's intrinsic viewBox dimensions against the body's
+  //     padding-deducted content box.
+  //
+  // Sequence: zoom = 1 → await tick (cache-build + layout) → measure +
+  // computeFitZoom → set zoom if smaller than 1 → await tick → center.
+  // The same idle-centered initial view applies to engine pages and
+  // readOnly showcase panels — earlier the showcase opened on the SVG's
+  // content centroid (which on callable-subtree graphs landed between the
+  // main flow and the subgraph, looking empty).
   $effect(() => {
     void svg;
     if (!svg || !svgHostEl) return;
     zoom = 1;
-    void tick().then(() => {
+    void tick().then(async () => {
       const body = svgHostEl?.closest<HTMLElement>('.body');
-      if (!body) return;
+      const svgEl = svgHostEl?.querySelector('svg');
+      if (!body || !svgEl) return;
+      // viewBox is the intrinsic SVG size at zoom = 1; body's clientWidth /
+      // clientHeight reflect the scroll-area box. Padding is excluded so
+      // the fit math compares "visible area" against "true SVG area".
+      const vb = svgEl.viewBox.baseVal;
+      const cs = window.getComputedStyle(body);
+      const padH = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+      const padV = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+      const fitZoom = computeFitZoom(
+        vb.width,
+        vb.height,
+        Math.max(0, body.clientWidth - padH),
+        Math.max(0, body.clientHeight - padV),
+      );
+      const clamped = clampZoom(fitZoom);
+      if (clamped !== zoom) {
+        zoom = clamped;
+        await tick();
+      }
       const idle = nodeCache.get('idle');
       if (idle) {
         centerInScroller(body, idle, 'auto');
@@ -832,22 +862,6 @@
       if (!body) { canPan = false; return; }
       canPan = body.scrollWidth > body.clientWidth + 1
         || body.scrollHeight > body.clientHeight + 1;
-    });
-  });
-
-  // Showcase context (readOnly) opens centered. Engine pages keep the
-  // default (0, 0) origin so the entry node is visible at first paint —
-  // there the user is about to step / run and orientation matters more
-  // than centroid. Triggered on SVG change only (not zoom), so the
-  // initial frame lands centered without fighting subsequent applies.
-  $effect(() => {
-    void svg;
-    if (!readOnly || !svg || !svgHostEl) return;
-    void tick().then(() => {
-      const body = svgHostEl?.closest<HTMLElement>('.body');
-      if (!body) return;
-      body.scrollLeft = (body.scrollWidth - body.clientWidth) / 2;
-      body.scrollTop = (body.scrollHeight - body.clientHeight) / 2;
     });
   });
 
@@ -893,6 +907,24 @@
     root.querySelectorAll('.mg-frame-active').forEach((el) => {
       el.classList.remove('mg-frame-active');
     });
+  }
+
+  /**
+   * Imperative API: scroll the synthetic `idle` entry node to the center of
+   * the body viewport (machines-demo#110). Called by `SnippetPanel.onReplay`
+   * so a Replay-clicked panel rewinds the scroll position to the same view
+   * the user got on first mount, instead of resuming from wherever the last
+   * frame's highlight had pushed the viewport. No-op when the SVG / cache
+   * isn't ready or `idle` was somehow stripped. Honors
+   * `prefers-reduced-motion` via `preferredScrollBehavior`.
+   */
+  export function recenterOnIdle(): void {
+    if (!svgHostEl) return;
+    const body = svgHostEl.closest<HTMLElement>('.body');
+    if (!body) return;
+    const idle = nodeCache.get('idle');
+    if (!idle) return;
+    centerInScroller(body, idle, preferredScrollBehavior());
   }
 
   /**

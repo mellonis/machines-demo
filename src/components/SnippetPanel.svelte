@@ -141,6 +141,12 @@
   }
 
   function onReplay(): void {
+    // Recenter on the idle node BEFORE applying frame 0 so the viewport
+    // rewinds to the same anchor the user got on first mount, instead of
+    // staying parked at wherever the last halt-iter highlight had pushed
+    // it (machines-demo#110). applyFrame() then clears the residual
+    // highlight; the timer starts after.
+    machineGraphRef?.recenterOnIdle();
     player.reset();
     prevStrongId = null;
     applyFrame();

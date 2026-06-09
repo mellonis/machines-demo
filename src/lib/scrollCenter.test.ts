@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeCenterScroll, type Rect } from './scrollCenter.ts';
+import { computeCenterScroll, computeFitZoom, type Rect } from './scrollCenter.ts';
 
 // Container is a 400×360 box pinned at viewport (0,0) — matches MachineGraph's
 // fixed-height `.body` shape closely enough for the math to read like the
@@ -101,5 +101,55 @@ describe('computeCenterScroll', () => {
     // El is in the top-left corner of the container's viewport.
     expect(result?.left).toBeCloseTo(60 + 30 - 250);
     expect(result?.top).toBeCloseTo(110 + 15 - 280);
+  });
+});
+
+describe('computeFitZoom', () => {
+  it('Z-fit-already-fits: SVG smaller than body keeps zoom at 1', () => {
+    expect(computeFitZoom(200, 150, 400, 360)).toBe(1);
+  });
+
+  it('Z-fit-exact: SVG that exactly matches body still keeps zoom 1', () => {
+    expect(computeFitZoom(400, 360, 400, 360)).toBe(1);
+  });
+
+  it('Z-fit-default-60-both-axes: big graph scales so ≥60% area visible', () => {
+    // 800×500 SVG in 400×360 body — both axes overflow at z=1.
+    const z = computeFitZoom(800, 500, 400, 360);
+    expect(z).toBeLessThan(1);
+    expect(z).toBeGreaterThan(0);
+    // At the returned z, visibleRatio = (400/(800z)) * (360/(500z)) =
+    // 144000 / (400000 * z²); for ratio ≥ 0.6, z ≤ sqrt(0.6) ≈ 0.7746.
+    expect(z).toBeLessThanOrEqual(Math.sqrt(0.6) + 1e-3);
+    expect(z).toBeGreaterThan(Math.sqrt(0.6) - 1e-3);
+  });
+
+  it('Z-fit-mixed-overflow: SVG wide but short still scaled to hit ≥60%', () => {
+    // 1200×100 SVG in 400×360 body — only width overflows at z=1.
+    // At z=1: visibleRatio = (400/1200) * 1 = 0.333 — needs scaling.
+    const z = computeFitZoom(1200, 100, 400, 360);
+    expect(z).toBeLessThan(1);
+    // At target z, visibleRatio = (400/(1200z)) * min(1, 360/(100z))
+    //   - If z < 3.6, vertical fits → ratio = 400/(1200z) = 1/(3z)
+    //   - Solve 1/(3z) = 0.6 → z = 1/1.8 ≈ 0.555
+    expect(z).toBeCloseTo(1 / 1.8, 4);
+  });
+
+  it('Z-fit-custom-ratio: lower target lets zoom stay higher', () => {
+    // Same big SVG, target 30% instead of 60%.
+    const z60 = computeFitZoom(800, 500, 400, 360, 0.6);
+    const z30 = computeFitZoom(800, 500, 400, 360, 0.3);
+    expect(z30).toBeGreaterThan(z60);
+  });
+
+  it('Z-fit-degenerate-zero: zero / negative inputs short-circuit to 1', () => {
+    expect(computeFitZoom(0, 500, 400, 360)).toBe(1);
+    expect(computeFitZoom(800, 0, 400, 360)).toBe(1);
+    expect(computeFitZoom(800, 500, 0, 360)).toBe(1);
+    expect(computeFitZoom(800, 500, 400, 0)).toBe(1);
+  });
+
+  it('Z-fit-degenerate-zero-ratio: a 0% target also short-circuits to 1', () => {
+    expect(computeFitZoom(800, 500, 400, 360, 0)).toBe(1);
   });
 });

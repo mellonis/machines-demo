@@ -1,14 +1,18 @@
-// Pure scroll-math helper for the machine-graph "follow the highlight"
-// behaviour (machines-demo#110). Computes where to scroll a container so a
-// target element sits at the visible center, but only when the element has
-// drifted outside a "comfort zone" inset of the container's viewport. Lets
-// the previous "fully off-screen by 16px" policy go — a target sitting at
-// the edge band counts as needing recentering.
+// Pure viewport-math helpers for the machine-graph panel (machines-demo#110).
+//
+// - `computeCenterScroll` decides where to scroll a container so a target
+//   element sits at the visible center, but only when the element has
+//   drifted outside a "comfort zone" inset of the container's viewport.
+//   Replaces the prior "fully off-screen by 16px" policy.
+// - `computeFitZoom` picks the largest zoom ≤ 1 such that at least
+//   `minVisibleAreaRatio` of the SVG's area fits inside the body. Used as
+//   the initial zoom on each (re)render so big graphs (callable-subtree,
+//   Brainfuck UTM) don't open as a sliver of the diagram.
 //
 // Lives next to other pure boot-time helpers (initialBoot.ts) so the math
 // can be unit-tested without happy-dom layout (`getBoundingClientRect` in
 // happy-dom returns zeros — no real layout engine — so the component-level
-// scrollIntoView path is not directly testable there).
+// scroll / zoom paths are not directly testable there).
 
 export type Rect = {
   top: number;
@@ -68,4 +72,44 @@ export function computeCenterScroll(
     target.left = scroll.left + (elCenterX - containerCenterX);
   }
   return target;
+}
+
+/**
+ * Pick the largest zoom ≤ 1 such that at least `minVisibleAreaRatio` of the
+ * SVG's intrinsic area fits inside the body's content box (machines-demo#110).
+ * Returns `1` when the SVG already fits comfortably at full size.
+ *
+ * The visible-area ratio is a strictly decreasing function of zoom — larger
+ * zoom shows a smaller fraction of the SVG — so a 30-step binary search
+ * converges to ~1e-9 precision. Closed-form would need a piecewise case
+ * analysis around the "one axis fits while the other overflows" transition;
+ * the search keeps the math obvious.
+ *
+ * Caller is responsible for clamping the result to `ZOOM_MIN` — when even
+ * the minimum zoom doesn't reach the target ratio, we accept "less than the
+ * target visible" rather than zoom out further.
+ */
+export function computeFitZoom(
+  svgWidth: number,
+  svgHeight: number,
+  bodyWidth: number,
+  bodyHeight: number,
+  minVisibleAreaRatio = 0.6,
+): number {
+  if (svgWidth <= 0 || svgHeight <= 0 || bodyWidth <= 0 || bodyHeight <= 0) return 1;
+  if (minVisibleAreaRatio <= 0) return 1;
+  const visibleRatio = (z: number): number => {
+    const sw = svgWidth * z;
+    const sh = svgHeight * z;
+    return Math.min(1, bodyWidth / sw) * Math.min(1, bodyHeight / sh);
+  };
+  if (visibleRatio(1) >= minVisibleAreaRatio) return 1;
+  let lo = 1e-6;
+  let hi = 1;
+  for (let i = 0; i < 30; i++) {
+    const mid = (lo + hi) / 2;
+    if (visibleRatio(mid) >= minVisibleAreaRatio) lo = mid;
+    else hi = mid;
+  }
+  return lo;
 }
