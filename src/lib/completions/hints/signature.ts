@@ -32,6 +32,17 @@ function activeArgIndex(argList: SyntaxNode, pos: number): number {
   return commas;
 }
 
+// Reverse-lookup: given a local alias, find the original export name in importsBinding.renames.
+// Returns null when the alias was not imported via a rename (direct destructure or not imported).
+function originalImportName(alias: string, env: Env, state: EditorState): string | null {
+  const { importsBinding } = inferLocalsFor(state, env.schema);
+  if (importsBinding.kind !== 'present') return null;
+  for (const [original, local] of importsBinding.renames) {
+    if (local === alias) return original;
+  }
+  return null;
+}
+
 // Maps the signatureRef string back to its (class, member) pair via the schema.
 // Currently only `TapeBlock.symbol` is emitted; the resolver is written to handle
 // any "<receiver>.<member>" where <receiver> matches a namespace entry.
@@ -75,20 +86,18 @@ function resolveCallee(argList: SyntaxNode, state: EditorState, env: Env): Resol
 
   // CallExpression with bare VariableName: namespace function or a typed local function.
   if (call.name === 'CallExpression' && callee.name === 'VariableName') {
-    const name = text(callee, state);
-    const entry = env.schema.namespace[name];
-    if (entry?.kind === 'function') {
-      return { params: entry.params, header: name };
-    }
-    if (entry?.kind === 'post-instruction' && entry.params) {
-      return { params: entry.params, header: name };
-    }
-    // Locally-typed function (e.g. destructured `{ symbol } = tb`)
+    const typed = text(callee, state);
+    const schemaName = env.schema.namespace[typed] ? typed : (originalImportName(typed, env, state) ?? typed);
+    const entry = env.schema.namespace[schemaName];
+    if (entry?.kind === 'function') return { params: entry.params, header: typed };
+    if (entry?.kind === 'post-instruction' && entry.params) return { params: entry.params, header: typed };
+
+    // Locally-typed function fallback (destructured method) — unchanged.
     const { locals } = inferLocalsFor(state, env.schema);
-    const local = locals.get(name);
+    const local = locals.get(typed);
     if (local?.kind === 'function') {
       const member = resolveSignatureRef(local.signatureRef, env);
-      if (member?.params) return { params: member.params, header: name };
+      if (member?.params) return { params: member.params, header: typed };
     }
     return null;
   }
@@ -125,10 +134,11 @@ function resolveCallee(argList: SyntaxNode, state: EditorState, env: Env): Resol
     // `callee` is the `new` keyword node; the class name is the next sibling.
     const classNode = callee.name === 'VariableName' ? callee : callee.nextSibling;
     if (!classNode || classNode.name !== 'VariableName') return null;
-    const className = text(classNode, state);
-    const cls = env.schema.classes[className];
+    const typed = text(classNode, state);
+    const schemaName = env.schema.classes[typed] ? typed : (originalImportName(typed, env, state) ?? typed);
+    const cls = env.schema.classes[schemaName];
     if (!cls?.ctor) return null;
-    return { params: cls.ctor.params, header: `new ${className}` };
+    return { params: cls.ctor.params, header: `new ${typed}` };
   }
 
   return null;

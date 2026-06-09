@@ -207,3 +207,37 @@ describe('hints/signature — post instructions', () => {
     expect(r!.params).toEqual([{ name: 'jumpTo', typeStr: 'string | number', optional: true }]);
   });
 });
+
+describe('hints/signature — renamed imports', () => {
+  it('S-sig-rename-namespace-function', () => {
+    const src = `
+      const { toMermaid: tm } = imports;
+      tm(▮)
+    `;
+    const r = signatureAt(src, 'turing');
+    expect(r).not.toBeNull();
+    // Header reflects what the user typed (the local alias), not the original name.
+    expect(r!.header).toBe('tm');
+    expect(r!.params).toEqual([{ name: 'graph', typeStr: 'Graph', optional: false }]);
+  });
+
+  it('S-sig-rename-class-ctor', () => {
+    const src = `
+      const { Alphabet: A } = imports;
+      new A(▮)
+    `;
+    const r = signatureAt(src, 'turing');
+    expect(r!.header).toBe('new A');
+    expect(r!.params).toEqual([{ name: 'symbols', typeStr: 'string[]', optional: false }]);
+  });
+
+  it('S-sig-rename-post-instruction', () => {
+    const src = `
+      const { call: callSub } = imports;
+      callSub(▮)
+    `;
+    const r = signatureAt(src, 'post');
+    expect(r!.header).toBe('callSub');
+    expect(r!.params).toEqual([{ name: 'label', typeStr: 'string', optional: false }]);
+  });
+});
