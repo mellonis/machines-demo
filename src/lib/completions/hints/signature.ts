@@ -117,6 +117,17 @@ function resolveCallee(argList: SyntaxNode, state: EditorState, env: Env): Resol
     return { params: member.params, header: `${receiverName}.${methodName}` };
   }
 
+  if (call.name === 'NewExpression') {
+    // NewExpression children: `new` keyword, VariableName (the class), ArgList.
+    // `callee` is the `new` keyword node; the class name is the next sibling.
+    const classNode = callee.name === 'VariableName' ? callee : callee.nextSibling;
+    if (!classNode || classNode.name !== 'VariableName') return null;
+    const className = text(classNode, state);
+    const cls = env.schema.classes[className];
+    if (!cls?.ctor) return null;
+    return { params: cls.ctor.params, header: `new ${className}` };
+  }
+
   return null;
 }
 

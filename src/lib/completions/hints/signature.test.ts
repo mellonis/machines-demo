@@ -133,3 +133,36 @@ describe('hints/signature — member methods', () => {
     expect(r).toBeNull();
   });
 });
+
+describe('hints/signature — constructors', () => {
+  it('S-sig-new-alphabet', () => {
+    const r = signatureAt(`new Alphabet(▮)`, 'turing');
+    expect(r).not.toBeNull();
+    expect(r!.header).toBe('new Alphabet');
+    expect(r!.params).toEqual([{ name: 'symbols', typeStr: 'string[]', optional: false }]);
+    expect(r!.activeIndex).toBe(0);
+  });
+
+  it('S-sig-new-state-positional', () => {
+    // State ctor: (symbolToData, name?)
+    const r = signatureAt(`new State(▮)`, 'turing');
+    expect(r!.params.map((p) => p.name)).toEqual(['symbolToData', 'name']);
+    expect(r!.params.map((p) => p.optional)).toEqual([false, true]);
+  });
+
+  it('S-sig-new-state-second-arg', () => {
+    const r = signatureAt(`new State({}, ▮)`, 'turing');
+    expect(r!.activeIndex).toBe(1);
+  });
+
+  it('S-sig-new-postmachine', () => {
+    const r = signatureAt(`new PostMachine(▮)`, 'post');
+    expect(r!.params.map((p) => p.name)).toEqual(['instructions', 'options']);
+    expect(r!.params[1].optional).toBe(true);
+  });
+
+  it('S-sig-new-unknown-class — null', () => {
+    const r = signatureAt(`new NoSuchClass(▮)`, 'turing');
+    expect(r).toBeNull();
+  });
+});
