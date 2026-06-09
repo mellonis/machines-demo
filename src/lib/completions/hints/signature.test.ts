@@ -166,3 +166,44 @@ describe('hints/signature — constructors', () => {
     expect(r).toBeNull();
   });
 });
+
+describe('hints/signature — post instructions', () => {
+  it('S-sig-post-call', () => {
+    const src = `
+      const { call } = imports;
+      call(▮)
+    `;
+    const r = signatureAt(src, 'post');
+    expect(r).not.toBeNull();
+    expect(r!.header).toBe('call');
+    expect(r!.params).toEqual([{ name: 'label', typeStr: 'string', optional: false }]);
+  });
+
+  it('S-sig-post-check-second-arg', () => {
+    const src = `
+      const { check } = imports;
+      check('then', ▮)
+    `;
+    const r = signatureAt(src, 'post');
+    expect(r!.params.map((p) => p.name)).toEqual(['thenLabel', 'elseLabel']);
+    expect(r!.activeIndex).toBe(1);
+  });
+
+  it('S-sig-post-mark — null (no params)', () => {
+    const src = `
+      const { mark } = imports;
+      mark(▮)
+    `;
+    const r = signatureAt(src, 'post');
+    expect(r).toBeNull();
+  });
+
+  it('S-sig-post-left-optional-jumpTo', () => {
+    const src = `
+      const { left } = imports;
+      left(▮)
+    `;
+    const r = signatureAt(src, 'post');
+    expect(r!.params).toEqual([{ name: 'jumpTo', typeStr: 'string | number', optional: true }]);
+  });
+});

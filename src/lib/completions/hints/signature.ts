@@ -80,6 +80,9 @@ function resolveCallee(argList: SyntaxNode, state: EditorState, env: Env): Resol
     if (entry?.kind === 'function') {
       return { params: entry.params, header: name };
     }
+    if (entry?.kind === 'post-instruction' && entry.params) {
+      return { params: entry.params, header: name };
+    }
     // Locally-typed function (e.g. destructured `{ symbol } = tb`)
     const { locals } = inferLocalsFor(state, env.schema);
     const local = locals.get(name);
