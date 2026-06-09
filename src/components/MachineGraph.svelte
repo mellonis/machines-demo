@@ -16,6 +16,7 @@
   import { theme } from '../lib/theme.svelte.ts';
   import { icons } from '../lib/icons.ts';
   import { summariseGraph } from '../lib/graphSummary.ts';
+  import { computeCenterScroll } from '../lib/scrollCenter.ts';
 
   type Props = {
     graph: Graph | null;
@@ -541,35 +542,36 @@
     });
   }
 
-  // Scroll an element into the scrollable ancestor's visible box if it's
-  // currently fully outside on either axis (margin: 16px). Centers per
-  // axis only if that axis was the one out-of-view, so a horizontally-
-  // out-of-view element doesn't have its vertical scroll yanked too.
-  // Used by the highlight op so paused / stepped nodes are revealed
-  // without disturbing the user's scroll when they're already visible.
-  function scrollIntoViewIfNeeded(scroller: HTMLElement, el: Element, behavior: ScrollBehavior = 'smooth'): void {
-    const containerRect = scroller.getBoundingClientRect();
-    const elRect = el.getBoundingClientRect();
-    const margin = 16;
-    const outsideV =
-      elRect.bottom < containerRect.top + margin
-      || elRect.top > containerRect.bottom - margin;
-    const outsideH =
-      elRect.right < containerRect.left + margin
-      || elRect.left > containerRect.right - margin;
-    if (!outsideV && !outsideH) return;
-    const opts: ScrollToOptions = { behavior };
-    if (outsideV) {
-      const elCenterY = elRect.top + elRect.height / 2;
-      const containerCenterY = containerRect.top + containerRect.height / 2;
-      opts.top = scroller.scrollTop + (elCenterY - containerCenterY);
-    }
-    if (outsideH) {
-      const elCenterX = elRect.left + elRect.width / 2;
-      const containerCenterX = containerRect.left + containerRect.width / 2;
-      opts.left = scroller.scrollLeft + (elCenterX - containerCenterX);
-    }
-    scroller.scrollTo(opts);
+  // Center an element inside the scrollable ancestor when it isn't sitting
+  // comfortably inside the viewport (machines-demo#110). "Comfortable" means
+  // fully inside the inner 80% of the body (10% inset on each side); a node
+  // that drifts into the edge band or off-screen gets pulled back to the
+  // center on that axis. Per-axis check is independent — a node fine
+  // vertically but slipping past the right edge gets a horizontal-only
+  // recenter, leaving the user's vertical scroll alone. Pure math lives in
+  // `lib/scrollCenter.ts`; this is the DOM-touching wrapper.
+  //
+  // Previous policy (`scrollIntoViewIfNeeded`) only fired when the node was
+  // FULLY outside the body — a node sitting at the edge with a sliver still
+  // visible never triggered, so showcase snippet playback "looked frozen"
+  // for big graphs (#110).
+  function centerIfNeeded(scroller: HTMLElement, el: Element, behavior: ScrollBehavior = 'smooth'): void {
+    const target = computeCenterScroll(
+      scroller.getBoundingClientRect(),
+      { left: scroller.scrollLeft, top: scroller.scrollTop },
+      el.getBoundingClientRect(),
+    );
+    if (target === null) return;
+    scroller.scrollTo({ ...target, behavior });
+  }
+
+  // Resolve the scroll behavior honoring `prefers-reduced-motion`. Users who
+  // opt out of animation get an instant jump instead of a sliding viewport,
+  // matching the rest of the demo (SnippetPanel's playback already gates on
+  // the same media query).
+  function preferredScrollBehavior(): ScrollBehavior {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return 'smooth';
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth';
   }
 
   // Replace mermaid's `width="100%"` + inline `max-width: <intrinsic>px`
@@ -947,7 +949,7 @@
         void tick().then(() => {
           const scrollContainer = svgHostEl?.closest<HTMLElement>('.body');
           if (!scrollContainer) return;
-          scrollIntoViewIfNeeded(scrollContainer, el, 'smooth');
+          centerIfNeeded(scrollContainer, el, preferredScrollBehavior());
         });
       },
     };
@@ -1066,16 +1068,18 @@
       scrollIntoView(id) {
         const el = nodeCache.get(id);
         if (!el) return;
-        // Delegates to `scrollIntoViewIfNeeded` (defined above), which
-        // handles both axes — the panel is now horizontally scrollable
-        // too for graphs wider than the viewport (e.g. Brainfuck UTM).
-        // Manual offset math (vs Element.scrollIntoView) preserves the
-        // existing margin threshold + smooth-scroll behavior and avoids
-        // any browser quirks around scrolling SVG-contained elements.
+        // Delegates to `centerIfNeeded` (defined above) so a paused state
+        // sitting in the edge band gets pulled back to the center
+        // (machines-demo#110) — the previous "fully outside" policy left
+        // partially-visible nodes alone, which read as a frozen viewport
+        // on long subroutine chains. Manual offset math (vs
+        // `Element.scrollIntoView`) avoids browser quirks around scrolling
+        // SVG-contained elements and respects `prefers-reduced-motion` via
+        // `preferredScrollBehavior`.
         void tick().then(() => {
           const scrollContainer = svgHostEl?.closest<HTMLElement>('.body');
           if (!scrollContainer) return;
-          scrollIntoViewIfNeeded(scrollContainer, el, 'smooth');
+          centerIfNeeded(scrollContainer, el, preferredScrollBehavior());
         });
       },
     });
