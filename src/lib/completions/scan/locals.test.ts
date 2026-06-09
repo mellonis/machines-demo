@@ -102,6 +102,6 @@ describe('scanner — Phase 2 rules', () => {
 
   it('S-scan-destructure-tapeblock-symbol', () => {
     const r = scan('const tb = new TapeBlock({ tapes: [] });\nconst { symbol } = tb;');
-    expect(r.locals.get('symbol')).toEqual({ kind: 'function', signatureRef: 'tapeBlock.symbol' });
+    expect(r.locals.get('symbol')).toEqual({ kind: 'function', signatureRef: 'TapeBlock.symbol' });
   });
 });
