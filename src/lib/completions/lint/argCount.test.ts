@@ -94,3 +94,39 @@ describe('lint/argCount — too many args', () => {
     expect(lintAll(src, 'post')).toEqual([]);
   });
 });
+
+describe('lint/argCount — bare-only instructions called', () => {
+  it('S-lint-stop-with-parens', () => {
+    const src = `
+      const { stop } = imports;
+      stop()
+    `;
+    const diags = lintAll(src, 'post');
+    expect(diags).toHaveLength(1);
+    expect(diags[0].severity).toBe('error');
+    expect(diags[0].message).toBe('stop has no callable form (use bare `stop` instead)');
+  });
+
+  it('S-lint-stop-with-arg-still-flagged', () => {
+    // Even with an arg, stop(...) is still invalid syntax. One diagnostic,
+    // the bare-only error (not arg-count, since there's no callable form to count against).
+    const src = `
+      const { stop } = imports;
+      stop(20)
+    `;
+    const diags = lintAll(src, 'post');
+    expect(diags).toHaveLength(1);
+    expect(diags[0].message).toBe('stop has no callable form (use bare `stop` instead)');
+  });
+
+  it('S-lint-stop-renamed-still-flagged', () => {
+    const src = `
+      const { stop: halt } = imports;
+      halt()
+    `;
+    const diags = lintAll(src, 'post');
+    expect(diags).toHaveLength(1);
+    // Message uses the user-typed alias so the diagnostic points at what's on screen.
+    expect(diags[0].message).toBe('halt has no callable form (use bare `stop` instead)');
+  });
+});
