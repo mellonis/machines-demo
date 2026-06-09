@@ -1,6 +1,6 @@
 import { syntaxTree } from '@codemirror/language';
 import { StateField } from '@codemirror/state';
-import type { EditorState } from '@codemirror/state';
+import type { EditorState, Extension } from '@codemirror/state';
 import { showTooltip, type Tooltip } from '@codemirror/view';
 import type { SyntaxNode } from '@lezer/common';
 import type { Env } from '../contexts/types.ts';
@@ -199,27 +199,40 @@ function renderTooltipDom(info: SignatureInfo): HTMLElement {
   return dom;
 }
 
-function infoToTooltip(info: SignatureInfo): Tooltip {
+function infoToTooltip(info: SignatureInfo, field: StateField<SignatureInfo | null>): Tooltip {
   return {
     pos: info.anchor,
     above: true,
     arrow: false,
-    create: () => ({ dom: renderTooltipDom(info) }),
+    create: () => {
+      const dom = renderTooltipDom(info);
+      return {
+        dom,
+        update: (viewUpdate) => {
+          const fresh = viewUpdate.state.field(field);
+          if (!fresh) return;
+          const replacement = renderTooltipDom(fresh);
+          dom.replaceChildren(...replacement.childNodes);
+          dom.className = replacement.className;
+        },
+      };
+    },
   };
 }
 
-export function signatureHelp(env: Env) {
-  const field = StateField.define<Tooltip | null>({
-    create: (state) => {
-      const info = computeSignatureInfo(state, env);
-      return info ? infoToTooltip(info) : null;
-    },
+export function signatureHelp(env: Env): Extension {
+  const field = StateField.define<SignatureInfo | null>({
+    create: (state) => computeSignatureInfo(state, env),
     update: (value, tr) => {
       if (!tr.docChanged && !tr.selection) return value;
-      const info = computeSignatureInfo(tr.state, env);
-      return info ? infoToTooltip(info) : null;
+      return computeSignatureInfo(tr.state, env);
     },
-    provide: (f) => showTooltip.from(f),
   });
-  return field;
+  return [
+    field,
+    showTooltip.compute([field], (state) => {
+      const info = state.field(field);
+      return info ? infoToTooltip(info, field) : null;
+    }),
+  ];
 }
