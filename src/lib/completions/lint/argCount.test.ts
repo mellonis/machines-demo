@@ -184,3 +184,56 @@ describe('lint/argCount — constructors and member methods', () => {
     expect(lintAll(src, 'turing')).toEqual([]);
   });
 });
+
+describe('lint/argCount — passes silently', () => {
+  it('S-lint-unknown-callee', () => {
+    const src = `userDefined()`;
+    expect(lintAll(src, 'post')).toEqual([]);
+  });
+
+  it('S-lint-non-literal-arg-still-counts', () => {
+    // mark(someVar) is one arg — meets required count.
+    const src = `
+      const { mark } = imports;
+      const target = 20;
+      mark(target)
+    `;
+    expect(lintAll(src, 'post')).toEqual([]);
+  });
+
+  it('S-lint-nested-call-counted-independently', () => {
+    // Inner call(): missing arg → error. Outer mark(...): 1 arg (the call expression) → ok.
+    const src = `
+      const { mark, call } = imports;
+      mark(call())
+    `;
+    const diags = lintAll(src, 'post');
+    expect(diags).toHaveLength(1);
+    expect(diags[0].message).toBe('call requires 1 argument (got 0)');
+  });
+
+  it('S-lint-chained-member-access', () => {
+    // a.b.c() — resolveCallee returns null for chained member access. No diagnostic.
+    const src = `
+      const x = { a: { b: () => 1 } };
+      x.a.b()
+    `;
+    expect(lintAll(src, 'post')).toEqual([]);
+  });
+
+  it('S-lint-multiple-calls-all-checked', () => {
+    const src = `
+      const { mark, check, stop } = imports;
+      mark()
+      check()
+      stop()
+    `;
+    const diags = lintAll(src, 'post');
+    expect(diags).toHaveLength(3);
+    expect(diags.map((d) => d.message)).toEqual([
+      'mark requires 1 argument (got 0)',
+      'check requires 2 arguments (got 0)',
+      'stop has no callable form (use bare `stop` instead)',
+    ]);
+  });
+});
