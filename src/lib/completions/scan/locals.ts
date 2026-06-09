@@ -181,7 +181,7 @@ function doScan(src: string, root: SyntaxNode, schema: EngineSchema): ScannerRes
             const local = renames.get(name) ?? name;
             rawLocals.add(local);
             if (rhsType?.kind === 'class' && rhsType.name === 'TapeBlock' && name === 'symbol') {
-              locals.set(local, { kind: 'function', signatureRef: 'tapeBlock.symbol' });
+              locals.set(local, { kind: 'function', signatureRef: 'TapeBlock.symbol' });
             }
           }
         } else {

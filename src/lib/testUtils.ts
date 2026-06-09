@@ -7,6 +7,8 @@ import type { Engine } from './types.ts';
 import { getSchema } from './completions/schema/index.ts';
 import type { EngineSchema } from './completions/schema/types.ts';
 import { localsField } from './completions/scan/locals.ts';
+import { computeSignatureInfo } from './completions/hints/signature.ts';
+import type { SignatureInfo } from './completions/hints/types.ts';
 
 /**
  * Test double for the Web Worker that `MachineRunner` posts to.
@@ -92,4 +94,17 @@ export function completionAt(marked: string, engine: Engine, makeSource: SourceF
   });
   const ctx = new CompletionContext(state, cursorPos, true);
   return makeSource(env)(ctx);
+}
+
+export function signatureAt(marked: string, engine: Engine): SignatureInfo | null {
+  const cursorPos = marked.indexOf('▮');
+  if (cursorPos === -1) throw new Error('signatureAt: source must contain ▮');
+  const doc = marked.slice(0, cursorPos) + marked.slice(cursorPos + 1);
+  const env: SourceEnv = { engine, schema: getSchema(engine) };
+  const state = EditorState.create({
+    doc,
+    extensions: [javascript(), localsField],
+    selection: { anchor: cursorPos },
+  });
+  return computeSignatureInfo(state, env);
 }

@@ -80,5 +80,30 @@
       font-family: ui-monospace, 'SF Mono', Consolas, monospace;
       line-height: 1.5;
     }
+
+    :global(.cm-tooltip .cm-tooltip-sig-help) {
+      padding: 4px 8px;
+      font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+      font-size: 12px;
+      white-space: nowrap;
+      color: var(--fg);
+      background: var(--bg);
+      border: 1px solid var(--cell-border);
+      border-radius: 4px;
+    }
+
+    :global(.cm-tooltip .sig-help .sig-param) {
+      opacity: 0.7;
+    }
+
+    :global(.cm-tooltip .sig-help .sig-active) {
+      opacity: 1;
+      font-weight: 600;
+      color: var(--accent, var(--fg));
+    }
+
+    :global(.cm-tooltip .sig-help .sig-callee) {
+      opacity: 0.9;
+    }
   }
 </style>
