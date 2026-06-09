@@ -33,12 +33,14 @@
     stepsApplied?: number;
     collapsed: boolean;
     onToggleCollapsed: () => void;
-    /** When true, all user-facing interactive surfaces are disabled: the
-     *  collapse toggle, zoom/aim/expand header buttons, pan+wheel gestures,
-     *  and the breakpoint context menu on graph nodes. The imperative render
-     *  pipeline (highlight, applyIndicator, scroll-into-view) is unaffected.
-     *  Default `false` preserves the full interactive behaviour for
-     *  `MachineView`. */
+    /** When true, the demo-shaped affordances disappear: the collapse
+     *  chevron is hidden (showcase panels always stay open), and the
+     *  breakpoint right-click context menu is suppressed (no debugger
+     *  flow in a prerecorded panel). Zoom / aim / pan / wheel-zoom stay
+     *  available — the user still wants to look around big showcase
+     *  graphs (machines-demo#110). The imperative render pipeline is
+     *  unaffected. Default `false` preserves the full interactive
+     *  behaviour for `MachineView`. */
     readOnly?: boolean;
     /** When true, the panel detaches into a fixed-position 80vw×80vh
      *  overlay (single-instance: same mermaid render, no DOM move).
@@ -242,7 +244,6 @@
   let panStartScrollTop = 0;
 
   function onBodyPointerDown(e: PointerEvent): void {
-    if (readOnly) return;
     if (e.button !== 0) return; // left mouse only; right is reserved for the BP context menu
     if (!canPan) return; // nothing to scroll → ignore drag (cursor reflects this too)
     if (panActive) return;
@@ -293,7 +294,6 @@
   // content under the pointer stays put (clamping at ZOOM_MIN /
   // ZOOM_MAX absorbs any single-event overshoot).
   function onBodyWheel(e: WheelEvent): void {
-    if (readOnly) return;
     if (!(e.ctrlKey || e.metaKey)) return;
     e.preventDefault();
     const factor = Math.exp(-e.deltaY * 0.012);
@@ -1159,7 +1159,7 @@
         <span class="title">Machine graph</span>
       </button>
     {/if}
-    {#if !collapsed && !readOnly}
+    {#if !collapsed}
       <div class="header-actions">
         <button
           type="button"
@@ -1248,10 +1248,10 @@
     <div
       class="body"
       class:panning={panActive}
-      class:can-pan={!readOnly && canPan}
+      class:can-pan={canPan}
       data-testid="machine-graph-body"
-      role={readOnly ? 'img' : 'application'}
-      aria-label={readOnly ? 'Machine graph' : 'Machine graph viewport (drag to pan, Ctrl+scroll to zoom)'}
+      role="application"
+      aria-label="Machine graph viewport (drag to pan, Ctrl+scroll to zoom)"
       onpointerdown={onBodyPointerDown}
       onpointermove={onBodyPointerMove}
       onpointerup={onBodyPointerUp}
