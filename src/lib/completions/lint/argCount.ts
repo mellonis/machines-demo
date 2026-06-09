@@ -59,6 +59,15 @@ export function computeArgCountDiagnostics(state: EditorState, env: Env): Diagno
           message: `${resolved.header} requires ${required} ${pluralArg(required)} (got ${actual})`,
         });
       }
+
+      if (actual > resolved.params.length) {
+        diagnostics.push({
+          from: call.from,
+          to: call.to,
+          severity: 'warning',
+          message: `${resolved.header} takes ${resolved.params.length} ${pluralArg(resolved.params.length)} (got ${actual})`,
+        });
+      }
     },
   });
 
