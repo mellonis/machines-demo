@@ -141,6 +141,12 @@
   }
 
   function onReplay(): void {
+    // Recenter on the idle node BEFORE applying frame 0 so the viewport
+    // rewinds to the same anchor the user got on first mount, instead of
+    // staying parked at wherever the last halt-iter highlight had pushed
+    // it (machines-demo#110). applyFrame() then clears the residual
+    // highlight; the timer starts after.
+    machineGraphRef?.recenterOnIdle();
     player.reset();
     prevStrongId = null;
     applyFrame();
@@ -299,14 +305,21 @@
     background: color-mix(in srgb, var(--cell-bg) 80%, var(--fg));
   }
 
+  /* Sibling-to-Replay button styling (machines-demo#110): the link sits
+     next to the .replay <button> when playback is done, so the underline-
+     link look read as mismatched. Keep it an <a> for keyboard / right-click
+     / open-in-new-tab semantics — just match the button's surface. */
   .open-in-editor {
+    padding: 6px 14px;
+    background: var(--cell-bg);
     color: var(--fg);
-    text-decoration: underline;
-    text-decoration-color: color-mix(in srgb, var(--fg) 40%, transparent);
-    font-size: 0.875rem;
+    border: 1px solid var(--cell-border);
+    border-radius: 6px;
+    font: inherit;
+    text-decoration: none;
   }
 
   .open-in-editor:hover {
-    text-decoration-color: var(--fg);
+    background: color-mix(in srgb, var(--cell-bg) 80%, var(--fg));
   }
 </style>

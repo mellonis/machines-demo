@@ -16,6 +16,7 @@
   import { theme } from '../lib/theme.svelte.ts';
   import { icons } from '../lib/icons.ts';
   import { summariseGraph } from '../lib/graphSummary.ts';
+  import { computeCenterScroll, computeFitZoom } from '../lib/scrollCenter.ts';
 
   type Props = {
     graph: Graph | null;
@@ -32,12 +33,14 @@
     stepsApplied?: number;
     collapsed: boolean;
     onToggleCollapsed: () => void;
-    /** When true, all user-facing interactive surfaces are disabled: the
-     *  collapse toggle, zoom/aim/expand header buttons, pan+wheel gestures,
-     *  and the breakpoint context menu on graph nodes. The imperative render
-     *  pipeline (highlight, applyIndicator, scroll-into-view) is unaffected.
-     *  Default `false` preserves the full interactive behaviour for
-     *  `MachineView`. */
+    /** When true, the demo-shaped affordances disappear: the collapse
+     *  chevron is hidden (showcase panels always stay open), and the
+     *  breakpoint right-click context menu is suppressed (no debugger
+     *  flow in a prerecorded panel). Zoom / aim / pan / wheel-zoom stay
+     *  available — the user still wants to look around big showcase
+     *  graphs (machines-demo#110). The imperative render pipeline is
+     *  unaffected. Default `false` preserves the full interactive
+     *  behaviour for `MachineView`. */
     readOnly?: boolean;
     /** When true, the panel detaches into a fixed-position 80vw×80vh
      *  overlay (single-instance: same mermaid render, no DOM move).
@@ -241,7 +244,6 @@
   let panStartScrollTop = 0;
 
   function onBodyPointerDown(e: PointerEvent): void {
-    if (readOnly) return;
     if (e.button !== 0) return; // left mouse only; right is reserved for the BP context menu
     if (!canPan) return; // nothing to scroll → ignore drag (cursor reflects this too)
     if (panActive) return;
@@ -292,7 +294,6 @@
   // content under the pointer stays put (clamping at ZOOM_MIN /
   // ZOOM_MAX absorbs any single-event overshoot).
   function onBodyWheel(e: WheelEvent): void {
-    if (readOnly) return;
     if (!(e.ctrlKey || e.metaKey)) return;
     e.preventDefault();
     const factor = Math.exp(-e.deltaY * 0.012);
@@ -541,35 +542,36 @@
     });
   }
 
-  // Scroll an element into the scrollable ancestor's visible box if it's
-  // currently fully outside on either axis (margin: 16px). Centers per
-  // axis only if that axis was the one out-of-view, so a horizontally-
-  // out-of-view element doesn't have its vertical scroll yanked too.
-  // Used by the highlight op so paused / stepped nodes are revealed
-  // without disturbing the user's scroll when they're already visible.
-  function scrollIntoViewIfNeeded(scroller: HTMLElement, el: Element, behavior: ScrollBehavior = 'smooth'): void {
-    const containerRect = scroller.getBoundingClientRect();
-    const elRect = el.getBoundingClientRect();
-    const margin = 16;
-    const outsideV =
-      elRect.bottom < containerRect.top + margin
-      || elRect.top > containerRect.bottom - margin;
-    const outsideH =
-      elRect.right < containerRect.left + margin
-      || elRect.left > containerRect.right - margin;
-    if (!outsideV && !outsideH) return;
-    const opts: ScrollToOptions = { behavior };
-    if (outsideV) {
-      const elCenterY = elRect.top + elRect.height / 2;
-      const containerCenterY = containerRect.top + containerRect.height / 2;
-      opts.top = scroller.scrollTop + (elCenterY - containerCenterY);
-    }
-    if (outsideH) {
-      const elCenterX = elRect.left + elRect.width / 2;
-      const containerCenterX = containerRect.left + containerRect.width / 2;
-      opts.left = scroller.scrollLeft + (elCenterX - containerCenterX);
-    }
-    scroller.scrollTo(opts);
+  // Center an element inside the scrollable ancestor when it isn't sitting
+  // comfortably inside the viewport (machines-demo#110). "Comfortable" means
+  // fully inside the inner 80% of the body (10% inset on each side); a node
+  // that drifts into the edge band or off-screen gets pulled back to the
+  // center on that axis. Per-axis check is independent — a node fine
+  // vertically but slipping past the right edge gets a horizontal-only
+  // recenter, leaving the user's vertical scroll alone. Pure math lives in
+  // `lib/scrollCenter.ts`; this is the DOM-touching wrapper.
+  //
+  // Previous policy (`scrollIntoViewIfNeeded`) only fired when the node was
+  // FULLY outside the body — a node sitting at the edge with a sliver still
+  // visible never triggered, so showcase snippet playback "looked frozen"
+  // for big graphs (#110).
+  function centerIfNeeded(scroller: HTMLElement, el: Element, behavior: ScrollBehavior = 'smooth'): void {
+    const target = computeCenterScroll(
+      scroller.getBoundingClientRect(),
+      { left: scroller.scrollLeft, top: scroller.scrollTop },
+      el.getBoundingClientRect(),
+    );
+    if (target === null) return;
+    scroller.scrollTo({ ...target, behavior });
+  }
+
+  // Resolve the scroll behavior honoring `prefers-reduced-motion`. Users who
+  // opt out of animation get an instant jump instead of a sliding viewport,
+  // matching the rest of the demo (SnippetPanel's playback already gates on
+  // the same media query).
+  function preferredScrollBehavior(): ScrollBehavior {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return 'smooth';
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth';
   }
 
   // Replace mermaid's `width="100%"` + inline `max-width: <intrinsic>px`
@@ -792,20 +794,50 @@
     });
   });
 
-  // After each new render: reset zoom to 1, then scroll the `idle`
-  // entry node into view so the user lands on the diagram's start
-  // (LR: leftmost; TD: top). Without the zoom reset, a previously
-  // zoomed view of one machine could carry into the next build.
-  // Awaits `tick()` so both the cache-build effect (svg → nodeCache)
-  // and the layout flush (zoom: 1 → resized .svg-host) have applied
-  // before we measure for centering.
+  // After each new render: pick a zoom that keeps ≥60% of the SVG's area
+  // visible inside the body, then center the `idle` entry node so the user
+  // lands on the diagram's start (machines-demo#110).
+  //
+  // Why both passes share an effect:
+  //   - The zoom adjustment changes `.svg-host`'s laid-out width / height,
+  //     which moves every node's bounding rect — centering before the
+  //     zoom settles would aim at stale coordinates.
+  //   - Resetting to 1 first gives `getBoundingClientRect` a known scale
+  //     to read the SVG's intrinsic viewBox dimensions against the body's
+  //     padding-deducted content box.
+  //
+  // Sequence: zoom = 1 → await tick (cache-build + layout) → measure +
+  // computeFitZoom → set zoom if smaller than 1 → await tick → center.
+  // The same idle-centered initial view applies to engine pages and
+  // readOnly showcase panels — earlier the showcase opened on the SVG's
+  // content centroid (which on callable-subtree graphs landed between the
+  // main flow and the subgraph, looking empty).
   $effect(() => {
     void svg;
     if (!svg || !svgHostEl) return;
     zoom = 1;
-    void tick().then(() => {
+    void tick().then(async () => {
       const body = svgHostEl?.closest<HTMLElement>('.body');
-      if (!body) return;
+      const svgEl = svgHostEl?.querySelector('svg');
+      if (!body || !svgEl) return;
+      // viewBox is the intrinsic SVG size at zoom = 1; body's clientWidth /
+      // clientHeight reflect the scroll-area box. Padding is excluded so
+      // the fit math compares "visible area" against "true SVG area".
+      const vb = svgEl.viewBox.baseVal;
+      const cs = window.getComputedStyle(body);
+      const padH = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+      const padV = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+      const fitZoom = computeFitZoom(
+        vb.width,
+        vb.height,
+        Math.max(0, body.clientWidth - padH),
+        Math.max(0, body.clientHeight - padV),
+      );
+      const clamped = clampZoom(fitZoom);
+      if (clamped !== zoom) {
+        zoom = clamped;
+        await tick();
+      }
       const idle = nodeCache.get('idle');
       if (idle) {
         centerInScroller(body, idle, 'auto');
@@ -830,22 +862,6 @@
       if (!body) { canPan = false; return; }
       canPan = body.scrollWidth > body.clientWidth + 1
         || body.scrollHeight > body.clientHeight + 1;
-    });
-  });
-
-  // Showcase context (readOnly) opens centered. Engine pages keep the
-  // default (0, 0) origin so the entry node is visible at first paint —
-  // there the user is about to step / run and orientation matters more
-  // than centroid. Triggered on SVG change only (not zoom), so the
-  // initial frame lands centered without fighting subsequent applies.
-  $effect(() => {
-    void svg;
-    if (!readOnly || !svg || !svgHostEl) return;
-    void tick().then(() => {
-      const body = svgHostEl?.closest<HTMLElement>('.body');
-      if (!body) return;
-      body.scrollLeft = (body.scrollWidth - body.clientWidth) / 2;
-      body.scrollTop = (body.scrollHeight - body.clientHeight) / 2;
     });
   });
 
@@ -891,6 +907,24 @@
     root.querySelectorAll('.mg-frame-active').forEach((el) => {
       el.classList.remove('mg-frame-active');
     });
+  }
+
+  /**
+   * Imperative API: scroll the synthetic `idle` entry node to the center of
+   * the body viewport (machines-demo#110). Called by `SnippetPanel.onReplay`
+   * so a Replay-clicked panel rewinds the scroll position to the same view
+   * the user got on first mount, instead of resuming from wherever the last
+   * frame's highlight had pushed the viewport. No-op when the SVG / cache
+   * isn't ready or `idle` was somehow stripped. Honors
+   * `prefers-reduced-motion` via `preferredScrollBehavior`.
+   */
+  export function recenterOnIdle(): void {
+    if (!svgHostEl) return;
+    const body = svgHostEl.closest<HTMLElement>('.body');
+    if (!body) return;
+    const idle = nodeCache.get('idle');
+    if (!idle) return;
+    centerInScroller(body, idle, preferredScrollBehavior());
   }
 
   /**
@@ -947,7 +981,7 @@
         void tick().then(() => {
           const scrollContainer = svgHostEl?.closest<HTMLElement>('.body');
           if (!scrollContainer) return;
-          scrollIntoViewIfNeeded(scrollContainer, el, 'smooth');
+          centerIfNeeded(scrollContainer, el, preferredScrollBehavior());
         });
       },
     };
@@ -1066,16 +1100,18 @@
       scrollIntoView(id) {
         const el = nodeCache.get(id);
         if (!el) return;
-        // Delegates to `scrollIntoViewIfNeeded` (defined above), which
-        // handles both axes — the panel is now horizontally scrollable
-        // too for graphs wider than the viewport (e.g. Brainfuck UTM).
-        // Manual offset math (vs Element.scrollIntoView) preserves the
-        // existing margin threshold + smooth-scroll behavior and avoids
-        // any browser quirks around scrolling SVG-contained elements.
+        // Delegates to `centerIfNeeded` (defined above) so a paused state
+        // sitting in the edge band gets pulled back to the center
+        // (machines-demo#110) — the previous "fully outside" policy left
+        // partially-visible nodes alone, which read as a frozen viewport
+        // on long subroutine chains. Manual offset math (vs
+        // `Element.scrollIntoView`) avoids browser quirks around scrolling
+        // SVG-contained elements and respects `prefers-reduced-motion` via
+        // `preferredScrollBehavior`.
         void tick().then(() => {
           const scrollContainer = svgHostEl?.closest<HTMLElement>('.body');
           if (!scrollContainer) return;
-          scrollIntoViewIfNeeded(scrollContainer, el, 'smooth');
+          centerIfNeeded(scrollContainer, el, preferredScrollBehavior());
         });
       },
     });
@@ -1123,7 +1159,7 @@
         <span class="title">Machine graph</span>
       </button>
     {/if}
-    {#if !collapsed && !readOnly}
+    {#if !collapsed}
       <div class="header-actions">
         <button
           type="button"
@@ -1149,14 +1185,23 @@
           title="Zoom in (Ctrl/Cmd + scroll up)"
           aria-label="Zoom in"
         >{@html icons.zoomIn}</button>
-        <button
-          type="button"
-          class="action"
-          onclick={aim}
-          disabled={!svg}
-          title="Scroll to current state (or entry if none)"
-          aria-label="Scroll to current state"
-        >{@html icons.target}</button>
+        {#if !readOnly}
+          <!-- "Scroll to current state" reads the `highlight` prop to find
+               the target. Showcase panels (SnippetPanel) drive the
+               highlight imperatively via `getOps` instead of passing the
+               prop, so the button would always fall back to scrolling to
+               idle — misleading given the label. The Replay-time
+               `recenterOnIdle()` call already covers the "back to entry"
+               UX for those panels; the aim affordance is engine-only. -->
+          <button
+            type="button"
+            class="action"
+            onclick={aim}
+            disabled={!svg}
+            title="Scroll to current state (or entry if none)"
+            aria-label="Scroll to current state"
+          >{@html icons.target}</button>
+        {/if}
         {#if onExpand}
           <button
             type="button"
@@ -1212,10 +1257,10 @@
     <div
       class="body"
       class:panning={panActive}
-      class:can-pan={!readOnly && canPan}
+      class:can-pan={canPan}
       data-testid="machine-graph-body"
-      role={readOnly ? 'img' : 'application'}
-      aria-label={readOnly ? 'Machine graph' : 'Machine graph viewport (drag to pan, Ctrl+scroll to zoom)'}
+      role="application"
+      aria-label="Machine graph viewport (drag to pan, Ctrl+scroll to zoom)"
       onpointerdown={onBodyPointerDown}
       onpointermove={onBodyPointerMove}
       onpointerup={onBodyPointerUp}
