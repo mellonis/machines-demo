@@ -106,7 +106,11 @@ src/
     ├── logStore.test.ts        # Vitest suite for LogStore
     ├── initialBoot.ts          # pure helper — engine-page boot priority (?example > ?snippet > localStorage > default)
     ├── initialBoot.test.ts     # Vitest suite for initialBoot
-    ├── completions.ts          # CodeMirror autocomplete from machine namespace
+    ├── completions/            # context-aware, schema-driven CodeMirror autocomplete
+    │   ├── schema/               # typed const describing engine + post API surface
+    │   ├── scan/                 # Lezer walker — infers user-local types + tracks imports destructure
+    │   ├── contexts/             # 5 CompletionSource factories (memberAccess, debugAssignment, optionsBag, destructureBag, namespaceIdentifier)
+    │   └── apply/                # auto-import — inserts undestructured names into the top `const {…} = imports;` block
     ├── syntaxLinter.ts         # Lezer-based syntax-error markers
     ├── persist.ts              # localStorage helpers per engine
     ├── tapeSnapshot.ts         # serialize/parse tape-block snapshots for copy+paste
