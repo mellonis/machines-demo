@@ -26,6 +26,9 @@ src/
 ├── app.css                  global tokens + base styles
 ├── components/
 │   ├── MachineView.svelte   per-engine orchestrator (state + handlers)
+│   ├── Landing.svelte       `/` route — engine switcher + snippet-grid; owns the single IntersectionObserver across all panels and dispatches an `active: boolean` to the most-visible SnippetPanel (one snippet plays at a time)
+│   ├── SnippetPanel.svelte  showcase tile — two-column layout (player + lesson notes; stacks under 768px); 4-state playback machine (`idle | playing | paused | done`) driven by the `active` prop; `done` is sticky (no auto-replay on re-activation, Replay only). Reduced-motion pins to final frame on mount, IO orchestration is skipped.
+│   ├── ExecutionTraceTable.svelte  read-only 6-column trace (Step | State | Head reads | Write | Move | Goto); sticky thead inside `max-height` scroll, `aria-current="step"` + accent row, manual `scrollTop` math (no `Element.scrollIntoView`, which would yank the page)
 │   ├── TapesStack.svelte    multi-tape stack with shared head-thread
 │   ├── Tape.svelte          single horizontal belt (renders a turing.Tape)
 │   ├── ControlPanel.svelte  L/S/R + alphabet chips + Apply
@@ -74,8 +77,9 @@ src/
     ├── persist.ts              localStorage helpers per engine — code, example, snippets (UUID-keyed)
     ├── tapeSnapshot.ts         serialize/parse for tape-block copy+paste snapshots — JSON with `format`/`version` discriminator, categorized ParseError, no DOM/clipboard knowledge
     ├── tapeSnapshot.test.ts    Vitest suite for tapeSnapshot — roundtrip / parse-not-json / wrong-format / unsupported-version / wrong-shape-* / length-mismatch (cites R-snapshot-...)
-    ├── defaultCode.ts          starter Turing / Post snippets
+    ├── defaultCode.ts          starter Turing / Post snippets — `Example` type carries optional `lessonNotes` (markdown subset) authored per showcase for the SnippetPanel right column
     ├── format.ts               LogEntry assemblers: commandsEntry / tapesEntry / CommandsApplication; per-step string rendering (`formatStepNotation`, `formatTape`) is consumed from `@turing-machine-js/visuals`
+    ├── lessonMarkdown.ts       tiny markdown renderer for `Example.lessonNotes` — HTML-escapes input, then handles paragraphs (blank-line split), bullet lists (`- ` prefix), and inline `` `code` ``. Build-time author content only; injected via `{@html}` in `SnippetPanel.svelte` (same policy as the SVG-icon `{@html}` use).
     ├── icons.ts                Tabler icon namespace (?raw imports)
     └── theme.svelte.ts         theme (light / dark) state + matchMedia watcher (Svelte 5 .svelte.ts module)
 

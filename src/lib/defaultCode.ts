@@ -8,6 +8,10 @@ export type Example = {
   // as the panel caption; intervalMs overrides the playback default (800ms).
   showcase?: boolean;
   description?: string;
+  // Rich learning-oriented prose shown beside the player in showcase panels.
+  // Supports a tight markdown subset: paragraphs (blank-line separated),
+  // bullet lists (lines starting with `- `), inline code (backticks).
+  lessonNotes?: string;
   intervalMs?: number;
 };
 
@@ -310,6 +314,15 @@ const TURING_EXAMPLES: readonly Example[] = [
     code: TURING_REPLACE_B,
     showcase: true,
     description: "Replace each 'b' with '*'; halt at blank.",
+    lessonNotes: `A single-pass rewrite. The head walks rightward across the tape; every \`b\` it sees becomes \`*\`, everything else is left alone. The first blank cell stops the program.
+
+One state \`S\` does all the work. Its outgoing arcs are:
+
+- on \`b\` — write \`*\`, move right, stay in \`S\`.
+- on any other letter — keep the symbol, move right, stay in \`S\`.
+- on blank — halt.
+
+On the graph this reads as a single self-loop carrying the rewrite cases and one halt-bound arc. There is no branching — just a streaming pass.`,
   },
   {
     id: 'toggle-bits',
@@ -317,6 +330,15 @@ const TURING_EXAMPLES: readonly Example[] = [
     code: TURING_TOGGLE_BITS,
     showcase: true,
     description: 'Flip each bit (0↔1); halt at blank.',
+    lessonNotes: `A binary NOT pass. Every \`0\` becomes \`1\` and every \`1\` becomes \`0\` until the head meets a blank.
+
+The single state \`S\` has three arcs:
+
+- on \`0\` — write \`1\`, move right, stay in \`S\`.
+- on \`1\` — write \`0\`, move right, stay in \`S\`.
+- on blank — halt.
+
+Same shape as \`replace-b\` but with the rewrite split across two literal cases instead of one. Watch the tape cells flash as each bit toggles — the head never reads back, so every cell is touched exactly once.`,
   },
   {
     id: 'callable-subtree',
@@ -324,6 +346,16 @@ const TURING_EXAMPLES: readonly Example[] = [
     code: TURING_CALLABLE_SUBTREE,
     showcase: true,
     description: 'Subroutine: walk to blank, then mark; the subgraph frame highlights during the call.',
+    lessonNotes: `A composed program: the main flow calls a reusable subroutine and then continues. The subroutine \`walkToBlank\` self-loops on letters until it meets a blank; the continuation \`writeMarker\` stamps \`*\` and halts for real.
+
+The call is set up with \`State.withOverriddenHaltState\`. Halting INSIDE the subroutine is reinterpreted as "return to the wrapper's continuation" — the engine never actually halts on the first blank, it pops out to \`writeMarker\`, which marks and then halts at the top level.
+
+What to look for on the graph:
+
+- The dashed cluster around \`walkToBlank\` IS the callable subtree. Its border lights up while execution is inside the subroutine.
+- The composite \`walkToBlank(writeMarker)\` node is the wrapper — the entry handle for the call. It lights up alongside the bare on the call-entry iter.
+- The bold \`call\` arrow (wrapper → bare) is the call edge.
+- The dotted \`return\` arrow leaves the cluster back out to \`writeMarker\` — that's the path the engine takes when the bare halts inside the subroutine.`,
   },
   { id: 'copy-two-tapes', title: 'Copy tape (multi-tape)', code: TURING_COPY_TWO_TAPES },
 ];
@@ -335,6 +367,11 @@ const POST_EXAMPLES: readonly Example[] = [
     code: POST_MARK_AND_STEP,
     showcase: true,
     description: 'Mark, step right, repeat — pure sequential, no branches.',
+    lessonNotes: `A straight-line Post program with no branching: \`mark\`, step right, \`mark\`, step right, \`mark\`. Three rewrites and the program halts.
+
+Each numbered instruction in the program becomes a node on the graph; transitions are unconditional \`goto next\`. There are no \`check\` instructions, so no decisions — the entire flow is one chain from start to halt.
+
+Compared to the Turing examples, the Post-instruction → state-graph mapping is laid bare here: one instruction, one node, one outgoing arc.`,
   },
   {
     id: 'walk-mark',
@@ -342,6 +379,14 @@ const POST_EXAMPLES: readonly Example[] = [
     code: POST_WALK_MARK,
     showcase: true,
     description: 'Skip past marks; mark the first blank cell.',
+    lessonNotes: `A scanning loop. The head walks rightward past any \`*\` already on the tape, then drops a \`*\` on the first blank cell it finds and halts.
+
+The structure is one \`check\` (branch on "is this cell marked?") plus two short paths:
+
+- marked → \`right\`, then jump back to the check — keep scanning.
+- blank → \`mark\`, then halt — done.
+
+On the graph, the cycle is the scanning loop; the halt-bound branch is the "found a blank" exit. This is the smallest Post program that exhibits a real loop.`,
   },
   {
     id: 'call-subroutine',
@@ -349,6 +394,17 @@ const POST_EXAMPLES: readonly Example[] = [
     code: POST_CALL_SUBROUTINE,
     showcase: true,
     description: 'Subroutine: walk to a blank and mark it; called twice from main.',
+    lessonNotes: `A Post program that defines a reusable subroutine and CALLS it twice. The subroutine body is the same scanning loop as \`walk-mark\` above.
+
+The main program is just two \`call\` instructions in sequence; the subroutine walks rightward over any existing marks and stamps \`*\` on the first blank, then trails into a halt. Each \`call\` from main:
+
+- enters the subroutine (engine pushes the return address onto its call stack).
+- runs the subroutine to its trailing halt.
+- pops the call stack — execution returns to the instruction AFTER the call in main.
+
+Between the two calls, the head sits on the cell just marked by the first call, so the second call resumes scanning rightward from there.
+
+On the graph, the dashed cluster bundles the subroutine instructions — that's the callable subtree. Two separate \`call\` sites in main produce two separate wrapper-entries into the cluster, but the body inside is shared.`,
   },
 ];
 

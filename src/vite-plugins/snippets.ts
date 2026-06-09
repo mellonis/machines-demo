@@ -4,6 +4,8 @@ import * as turing from '@turing-machine-js/machine';
 import * as post from '@post-machine-js/machine';
 import type { Example } from '../lib/defaultCode.ts';
 
+const RAW_STATE_STEPS_LIMIT = 1000;
+
 type Engine = 'turing' | 'post';
 
 type Options = {
@@ -95,20 +97,54 @@ export function createSnippetsPlugin(opts: Options = {}): Plugin {
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               (t: any) => [...t.alphabet.symbols] as string[],
             );
+            // `recordSnippet` derives each frame's `highlight.fromId` via
+            // `bareIdOf`, which canonicalizes wrapper states (CallFrame) to
+            // their bare's id — so the raw `m.state.id` for wrapper-entry
+            // iters is lost. SnippetPanel needs the raw value to construct
+            // stepped-shaped before-pause highlights at render time (so the
+            // wrapper node + `call` edge light up during the call iter, like
+            // they do in live stepped execution).
+            //
+            // Capture the raw ids by wrapping `machine.runStepByStep` BEFORE
+            // calling `recordSnippet`, so we ride the SAME iteration and
+            // share the same `State` id assignments as the `graph` built
+            // above. A second eval would mint fresh State ids that don't
+            // line up with `graph.nodes`.
+            const rawStateIds: number[] = [];
+            const rawNextStateIds: number[] = [];
+            const haltSentinel =
+              engine === 'post' ? post.haltState : turing.haltState;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const originalRunStepByStep = (machine as any).runStepByStep.bind(machine);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (machine as any).runStepByStep = function* (args: unknown) {
+              for (const m of originalRunStepByStep(args)) {
+                rawStateIds.push(m.state.id);
+                rawNextStateIds.push(
+                  m.nextState === haltSentinel ? 0 : m.nextState.id,
+                );
+                yield m;
+              }
+            };
+
             const snippet = recordSnippet({
               machine,
               initialState,
               graph,
               alphabets,
               name: example.title,
-              maxSteps: 1000,
+              maxSteps: RAW_STATE_STEPS_LIMIT,
             });
+
             out[engine].push({
               ...snippet,
               engine,
               id: example.id,
               description: example.description,
+              lessonNotes: example.lessonNotes,
               intervalMs: example.intervalMs,
+              rawStateIds,
+              rawNextStateIds,
             });
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);

@@ -42,6 +42,7 @@ A swap between any two adjacent tiers should be visually obvious without squinti
 | Highlight: to node | `--graph-highlight-soft-fill` + `--graph-highlight` stroke | Successor of just-fired |
 | Highlight: strong (m.state) | `--graph-highlight-strong-fill` + thicker `--graph-highlight` stroke + glow | "You are here" |
 | Highlight: edge (just-fired) | `--graph-highlight` | Thicker stroke than default |
+| Snippet trace: current row bg | `--graph-highlight-soft-fill` | `ExecutionTraceTable.svelte` reuses the same accent so the live-graph "you are here" feel carries over to the trace table sitting beside it — tune both surfaces together when revisiting this token. |
 
 ## Proposed values
 
