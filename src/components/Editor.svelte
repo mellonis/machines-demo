@@ -3,6 +3,9 @@
   import { javascript } from '@codemirror/lang-javascript';
   import { oneDark } from '@codemirror/theme-one-dark';
   import { completionExtensions } from '../lib/completions/index.ts';
+  import { argCountLinter } from '../lib/completions/lint/argCount.ts';
+  import { getSchema } from '../lib/completions/schema/index.ts';
+  import type { Env } from '../lib/completions/contexts/types.ts';
   import { syntaxLinter } from '../lib/syntaxLinter.ts';
   import { saveCode } from '../lib/persist.ts';
   import { theme } from '../lib/theme.svelte.ts';
@@ -31,11 +34,11 @@
   // Use `resolved`, not `current`: `current` may be 'system', and a 'system'
   // choice on a dark OS would otherwise drop oneDark while the rest of the
   // page renders dark.
-  const extensions = $derived(
-    theme.resolved === 'dark'
-      ? [oneDark, ...completionExtensions(engine), syntaxLinter]
-      : [...completionExtensions(engine), syntaxLinter],
-  );
+  const extensions = $derived.by(() => {
+    const env: Env = { engine, schema: getSchema(engine) };
+    const base = [...completionExtensions(engine), syntaxLinter, argCountLinter(env)];
+    return theme.resolved === 'dark' ? [oneDark, ...base] : base;
+  });
 </script>
 
 <div class="editor">
@@ -81,7 +84,12 @@
       line-height: 1.5;
     }
 
-    :global(.cm-tooltip .cm-tooltip-sig-help) {
+    /* CodeMirror adds .cm-tooltip to MY div (same element), not a parent — so
+       the selector must be a compound class, not descendant. Previously
+       `.cm-tooltip .cm-tooltip-sig-help` never matched, so `white-space: nowrap`
+       wasn't applied; the text wrapped, and near-top-of-editor placement
+       triggered CM's height-clipping which left line 2 without background. */
+    :global(.cm-tooltip-sig-help) {
       padding: 4px 8px;
       font-family: ui-monospace, 'SF Mono', Consolas, monospace;
       font-size: 12px;
@@ -92,17 +100,17 @@
       border-radius: 4px;
     }
 
-    :global(.cm-tooltip .sig-help .sig-param) {
+    :global(.cm-tooltip-sig-help .sig-param) {
       opacity: 0.7;
     }
 
-    :global(.cm-tooltip .sig-help .sig-active) {
+    :global(.cm-tooltip-sig-help .sig-active) {
       opacity: 1;
       font-weight: 600;
       color: var(--accent, var(--fg));
     }
 
-    :global(.cm-tooltip .sig-help .sig-callee) {
+    :global(.cm-tooltip-sig-help .sig-callee) {
       opacity: 0.9;
     }
   }
