@@ -118,6 +118,24 @@ function parseNumberLiteral(node: SyntaxNode, state: EditorState): number | null
   return Number.isFinite(n) ? n : null;
 }
 
+function parseStringLiteral(node: SyntaxNode, state: EditorState): string | null {
+  if (node.name !== 'String') return null;
+  const raw = text(node, state);
+  if (raw.length < 2) return null;
+  const quote = raw[0];
+  if ((quote === `'` || quote === `"` || quote === '`') && raw.endsWith(quote)) {
+    return raw.slice(1, -1);
+  }
+  return null;
+}
+
+function lookupSubroutine(chain: ScopeChain, name: string): boolean {
+  for (const scope of chain) {
+    if (scope.subroutines.has(name)) return true;
+  }
+  return false;
+}
+
 function findPostMachineConstructors(state: EditorState, env: Env): SyntaxNode[] {
   const tree = syntaxTree(state);
   const found: SyntaxNode[] = [];
@@ -159,9 +177,42 @@ function validateCall(
 ): void {
   const schemaName = calleeSchemaName(call, state, env);
   if (!schemaName) return;
-  if (!INDEXED_INSTRUCTIONS.has(schemaName)) return;
   const local = chain[0];
   const args = argChildren(call);
+
+  if (schemaName === 'call') {
+    // First arg: subroutine name. Resolve by walking the scope chain
+    // local-to-root; first match wins.
+    const nameArg = args[0];
+    if (nameArg) {
+      const name = parseStringLiteral(nameArg, state);
+      if (name !== null && !lookupSubroutine(chain, name)) {
+        diagnostics.push({
+          from: call.from,
+          to: call.to,
+          severity: 'error',
+          message: `unknown subroutine: '${name}'`,
+        });
+        return;
+      }
+    }
+    // Second arg (optional): instruction index in the CALLER's local scope.
+    const ixArg = args[1];
+    if (ixArg) {
+      const n = parseNumberLiteral(ixArg, state);
+      if (n !== null && !local.indices.has(n)) {
+        diagnostics.push({
+          from: call.from,
+          to: call.to,
+          severity: 'error',
+          message: `unknown instruction index: ${n}`,
+        });
+      }
+    }
+    return;
+  }
+
+  if (!INDEXED_INSTRUCTIONS.has(schemaName)) return;
   for (const arg of args) {
     const n = parseNumberLiteral(arg, state);
     if (n === null) continue; // non-literal — skip

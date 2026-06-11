@@ -151,3 +151,59 @@ describe('lint/crossRef — top-level index validation', () => {
     expect(diags[0].message).toBe('unknown instruction index: 99');
   });
 });
+
+describe('lint/crossRef — call subroutine validation', () => {
+  it('S-cref-call-unknown-subroutine', () => {
+    const src = `
+      const { PostMachine, call, stop } = imports;
+      new PostMachine({
+        10: call('typo'),
+        20: stop,
+        rightToBlank: { 1: stop },
+      })
+    `;
+    const diags = crossRefAll(src, 'post');
+    expect(diags).toHaveLength(1);
+    expect(diags[0].severity).toBe('error');
+    expect(diags[0].message).toBe(`unknown subroutine: 'typo'`);
+  });
+
+  it('S-cref-call-known-subroutine', () => {
+    const src = `
+      const { PostMachine, call, stop } = imports;
+      new PostMachine({
+        10: call('rightToBlank'),
+        20: stop,
+        rightToBlank: { 1: stop },
+      })
+    `;
+    expect(crossRefAll(src, 'post')).toEqual([]);
+  });
+
+  it('S-cref-call-second-arg-validates-caller-local-index', () => {
+    // call('rightToBlank', 99) at top level — 99 not in top-level indices → error
+    const src = `
+      const { PostMachine, call, stop } = imports;
+      new PostMachine({
+        10: call('rightToBlank', 99),
+        20: stop,
+        rightToBlank: { 1: stop },
+      })
+    `;
+    const diags = crossRefAll(src, 'post');
+    expect(diags).toHaveLength(1);
+    expect(diags[0].message).toBe('unknown instruction index: 99');
+  });
+
+  it('S-cref-call-non-literal-name-skipped', () => {
+    const src = `
+      const { PostMachine, call, stop } = imports;
+      const name = 'rightToBlank';
+      new PostMachine({
+        10: call(name),
+        20: stop,
+      })
+    `;
+    expect(crossRefAll(src, 'post')).toEqual([]);
+  });
+});
