@@ -11,6 +11,7 @@ import { computeSignatureInfo } from './completions/hints/signature.ts';
 import type { SignatureInfo } from './completions/hints/types.ts';
 import type { Diagnostic } from '@codemirror/lint';
 import { computeArgCountDiagnostics } from './completions/lint/argCount.ts';
+import { computeCrossRefDiagnostics } from './completions/lint/crossRef.ts';
 
 /**
  * Test double for the Web Worker that `MachineRunner` posts to.
@@ -118,4 +119,13 @@ export function lintAll(source: string, engine: Engine): Diagnostic[] {
     extensions: [javascript(), localsField],
   });
   return computeArgCountDiagnostics(state, env);
+}
+
+export function crossRefAll(source: string, engine: Engine): Diagnostic[] {
+  const env: SourceEnv = { engine, schema: getSchema(engine) };
+  const state = EditorState.create({
+    doc: source,
+    extensions: [javascript(), localsField],
+  });
+  return computeCrossRefDiagnostics(state, env);
 }
