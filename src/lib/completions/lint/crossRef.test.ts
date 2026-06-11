@@ -4,6 +4,7 @@ import { syntaxTree } from '@codemirror/language';
 import { EditorState } from '@codemirror/state';
 import { javascript } from '@codemirror/lang-javascript';
 import type { SyntaxNode } from '@lezer/common';
+import { crossRefAll } from '../../testUtils.ts';
 
 // Locate the first ObjectExpression in a small JS snippet.
 function firstObjectExpression(source: string): { node: SyntaxNode; state: EditorState } {
@@ -74,5 +75,79 @@ describe('lint/crossRef/collectScope', () => {
     const scope = collectScope(node, state);
     expect(scope.indices.size).toBe(0);
     expect(scope.subroutines.size).toBe(0);
+  });
+});
+
+describe('lint/crossRef — top-level index validation', () => {
+  it('S-cref-mark-unknown-index', () => {
+    const src = `
+      const { PostMachine, mark, stop } = imports;
+      new PostMachine({
+        10: mark(99),
+        20: stop,
+      })
+    `;
+    const diags = crossRefAll(src, 'post');
+    expect(diags).toHaveLength(1);
+    expect(diags[0].severity).toBe('error');
+    expect(diags[0].message).toBe('unknown instruction index: 99');
+  });
+
+  it('S-cref-mark-known-index', () => {
+    const src = `
+      const { PostMachine, mark, stop } = imports;
+      new PostMachine({
+        10: mark(20),
+        20: stop,
+      })
+    `;
+    expect(crossRefAll(src, 'post')).toEqual([]);
+  });
+
+  it('S-cref-check-both-branches-validated', () => {
+    const src = `
+      const { PostMachine, check, mark, stop } = imports;
+      new PostMachine({
+        10: check(20, 99),
+        20: mark(30),
+        30: stop,
+      })
+    `;
+    const diags = crossRefAll(src, 'post');
+    expect(diags).toHaveLength(1);
+    expect(diags[0].message).toBe('unknown instruction index: 99');
+  });
+
+  it('S-cref-non-literal-arg-skipped', () => {
+    const src = `
+      const { PostMachine, mark, stop } = imports;
+      const target = 20;
+      new PostMachine({
+        10: mark(target),
+        20: stop,
+      })
+    `;
+    expect(crossRefAll(src, 'post')).toEqual([]);
+  });
+
+  it('S-cref-no-postmachine-no-diagnostics', () => {
+    const src = `
+      const { mark } = imports;
+      mark(99)
+    `;
+    expect(crossRefAll(src, 'post')).toEqual([]);
+  });
+
+  it('S-cref-renamed-instruction-still-validated', () => {
+    const src = `
+      const { PostMachine, mark: writeOne, stop } = imports;
+      new PostMachine({
+        10: writeOne(99),
+        20: stop,
+      })
+    `;
+    const diags = crossRefAll(src, 'post');
+    expect(diags).toHaveLength(1);
+    expect(diags[0].message).toBe('unknown instruction index: 99');
   });
 });
