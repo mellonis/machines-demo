@@ -207,3 +207,145 @@ describe('lint/crossRef — call subroutine validation', () => {
     expect(crossRefAll(src, 'post')).toEqual([]);
   });
 });
+
+describe('lint/crossRef — subroutine-local scope', () => {
+  it('S-cref-subroutine-local-index-valid', () => {
+    const src = `
+      const { PostMachine, call, check, right, stop } = imports;
+      new PostMachine({
+        10: call('rightToBlank'),
+        20: stop,
+        rightToBlank: {
+          1: right,
+          2: check(3, 1),
+          3: stop,
+        },
+      })
+    `;
+    expect(crossRefAll(src, 'post')).toEqual([]);
+  });
+
+  it('S-cref-subroutine-index-not-in-top-level-not-flagged', () => {
+    // The '2' referenced from inside rightToBlank refers to rightToBlank's '2',
+    // NOT top-level '20'. Even though '2' is not a top-level index, this is OK.
+    const src = `
+      const { PostMachine, call, mark, stop } = imports;
+      new PostMachine({
+        10: call('rightToBlank'),
+        20: stop,
+        rightToBlank: {
+          1: mark(2),
+          2: stop,
+        },
+      })
+    `;
+    expect(crossRefAll(src, 'post')).toEqual([]);
+  });
+
+  it('S-cref-subroutine-unknown-local-index', () => {
+    const src = `
+      const { PostMachine, call, mark, stop } = imports;
+      new PostMachine({
+        10: call('rightToBlank'),
+        20: stop,
+        rightToBlank: {
+          1: mark(99),
+          2: stop,
+        },
+      })
+    `;
+    const diags = crossRefAll(src, 'post');
+    expect(diags).toHaveLength(1);
+    expect(diags[0].message).toBe('unknown instruction index: 99');
+  });
+
+  it('S-cref-call-from-subroutine-references-top-level-subroutines', () => {
+    // call('subB') from inside subA — subB is at top level, found by walking the chain.
+    const src = `
+      const { PostMachine, call, stop } = imports;
+      new PostMachine({
+        10: call('subA'),
+        20: stop,
+        subA: {
+          1: call('subB'),
+          2: stop,
+        },
+        subB: {
+          1: stop,
+        },
+      })
+    `;
+    expect(crossRefAll(src, 'post')).toEqual([]);
+  });
+
+  it('S-cref-call-second-arg-uses-caller-local-scope', () => {
+    // call('subA', 2) from inside subA: after returning, jump to subA's
+    // index 2 (subA-local). 2 IS a valid subA index → no error, even though
+    // 2 is NOT a top-level index.
+    const src = `
+      const { PostMachine, call, stop } = imports;
+      new PostMachine({
+        10: call('subA'),
+        20: stop,
+        subA: {
+          1: call('subA', 2),
+          2: stop,
+        },
+      })
+    `;
+    expect(crossRefAll(src, 'post')).toEqual([]);
+  });
+
+  it('S-cref-call-second-arg-unknown-in-caller-local-scope', () => {
+    // call('subA', 99) from inside subA: 99 isn't in subA (or anywhere) → error.
+    const src = `
+      const { PostMachine, call, stop } = imports;
+      new PostMachine({
+        10: call('subA'),
+        20: stop,
+        subA: {
+          1: call('subA', 99),
+          2: stop,
+        },
+      })
+    `;
+    const diags = crossRefAll(src, 'post');
+    expect(diags).toHaveLength(1);
+    expect(diags[0].message).toBe('unknown instruction index: 99');
+  });
+
+  it('S-cref-call-nested-subroutine-resolved', () => {
+    // outer contains nested 'inner'. call('inner') from inside outer
+    // resolves via chain walk (local scope wins before root).
+    const src = `
+      const { PostMachine, call, stop } = imports;
+      new PostMachine({
+        10: call('outer'),
+        20: stop,
+        outer: {
+          1: call('inner'),
+          inner: { 1: stop },
+        },
+      })
+    `;
+    expect(crossRefAll(src, 'post')).toEqual([]);
+  });
+
+  it('S-cref-call-unknown-name-from-nested-scope', () => {
+    // call('typo') from inside outer — not in local or any upper scope.
+    const src = `
+      const { PostMachine, call, stop } = imports;
+      new PostMachine({
+        10: call('outer'),
+        20: stop,
+        outer: {
+          1: call('typo'),
+          2: stop,
+        },
+      })
+    `;
+    const diags = crossRefAll(src, 'post');
+    expect(diags).toHaveLength(1);
+    expect(diags[0].message).toBe(`unknown subroutine: 'typo'`);
+  });
+});

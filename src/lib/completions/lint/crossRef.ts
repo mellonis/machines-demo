@@ -235,14 +235,31 @@ function walkObjectExpression(
   env: Env,
   diagnostics: Diagnostic[],
 ): void {
+  const local = chain[0];
   let prop = objExpr.firstChild;
   while (prop) {
     if (prop.name === 'Property') {
+      const k = prop.firstChild;
       const v = prop.lastChild;
-      if (v && v.name === 'CallExpression') {
-        validateCall(v, chain, state, env, diagnostics);
+      if (k && v) {
+        const asNum = parseNumericKey(k, state);
+        if (asNum !== null) {
+          // Numeric-keyed instruction. Validate the call here.
+          if (v.name === 'CallExpression') {
+            validateCall(v, chain, state, env, diagnostics);
+          }
+          // (Array group handling lands in Task 6.)
+        } else {
+          // String-keyed subroutine — recurse with its ScopeNode prepended.
+          const asStr = parseStringKey(k, state);
+          if (asStr !== null && v.name === 'ObjectExpression') {
+            const subScope = local.subroutines.get(asStr);
+            if (subScope) {
+              walkObjectExpression(v, [subScope, ...chain], state, env, diagnostics);
+            }
+          }
+        }
       }
-      // (ArrayExpression handling lands in Task 6; subroutine recursion in Task 5.)
     }
     prop = prop.nextSibling;
   }
