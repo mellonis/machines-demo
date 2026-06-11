@@ -28,36 +28,51 @@ describe('lint/crossRef/collectScope', () => {
   it('S-cref-scope-numeric-keys-only', () => {
     const { node, state } = firstObjectExpression(`({ 10: x, 20: y, 30: z })`);
     const scope = collectScope(node, state);
-    expect([...scope.topLevel].sort((a, b) => a - b)).toEqual([10, 20, 30]);
+    expect([...scope.indices].sort((a, b) => a - b)).toEqual([10, 20, 30]);
     expect(scope.subroutines.size).toBe(0);
   });
 
   it('S-cref-scope-string-keys-collected-as-subroutines', () => {
     const { node, state } = firstObjectExpression(`({ rightToBlank: { 1: x, 2: y, 3: z }, 10: a })`);
     const scope = collectScope(node, state);
-    expect([...scope.topLevel].sort((a, b) => a - b)).toEqual([10]);
+    expect([...scope.indices].sort((a, b) => a - b)).toEqual([10]);
     expect([...scope.subroutines.keys()]).toEqual(['rightToBlank']);
-    const subKeys = scope.subroutines.get('rightToBlank')!;
-    expect([...subKeys].sort((a, b) => a - b)).toEqual([1, 2, 3]);
+    const sub = scope.subroutines.get('rightToBlank')!;
+    expect([...sub.indices].sort((a, b) => a - b)).toEqual([1, 2, 3]);
+    expect(sub.subroutines.size).toBe(0);
   });
 
   it('S-cref-scope-quoted-string-keys-handled', () => {
     const { node, state } = firstObjectExpression(`({ 'subA': { 1: a }, 'subB': { 2: b }, 10: c })`);
     const scope = collectScope(node, state);
     expect([...scope.subroutines.keys()].sort()).toEqual(['subA', 'subB']);
-    expect([...scope.topLevel]).toEqual([10]);
+    expect([...scope.indices]).toEqual([10]);
   });
 
   it('S-cref-scope-array-group-values-still-contribute-index', () => {
     const { node, state } = firstObjectExpression(`({ 1: [a, b], 2: c })`);
     const scope = collectScope(node, state);
-    expect([...scope.topLevel].sort((a, b) => a - b)).toEqual([1, 2]);
+    expect([...scope.indices].sort((a, b) => a - b)).toEqual([1, 2]);
+  });
+
+  it('S-cref-scope-nested-subroutines', () => {
+    // outer's body contains 'inner' subroutine — subroutines nest.
+    const { node, state } = firstObjectExpression(`({ 10: x, outer: { 1: x, inner: { 1: y, 2: z } } })`);
+    const scope = collectScope(node, state);
+    expect([...scope.indices]).toEqual([10]);
+    expect([...scope.subroutines.keys()]).toEqual(['outer']);
+    const outer = scope.subroutines.get('outer')!;
+    expect([...outer.indices]).toEqual([1]);
+    expect([...outer.subroutines.keys()]).toEqual(['inner']);
+    const inner = outer.subroutines.get('inner')!;
+    expect([...inner.indices].sort((a, b) => a - b)).toEqual([1, 2]);
+    expect(inner.subroutines.size).toBe(0);
   });
 
   it('S-cref-scope-empty', () => {
     const { node, state } = firstObjectExpression(`({})`);
     const scope = collectScope(node, state);
-    expect(scope.topLevel.size).toBe(0);
+    expect(scope.indices.size).toBe(0);
     expect(scope.subroutines.size).toBe(0);
   });
 });

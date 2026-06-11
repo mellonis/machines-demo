@@ -4,12 +4,12 @@ import type { EditorState, Extension } from '@codemirror/state';
 import type { SyntaxNode } from '@lezer/common';
 import type { Env } from '../contexts/types.ts';
 
-export type LocalScope = ReadonlySet<number>;
-
-export type Scope = {
-  topLevel: LocalScope;
-  subroutines: ReadonlyMap<string, LocalScope>;
+export type ScopeNode = {
+  indices: ReadonlySet<number>;
+  subroutines: ReadonlyMap<string, ScopeNode>;
 };
+
+export type ScopeChain = ReadonlyArray<ScopeNode>;
 
 function text(node: SyntaxNode, state: EditorState): string {
   return state.doc.sliceString(node.from, node.to);
@@ -40,25 +40,14 @@ function parseStringKey(keyNode: SyntaxNode, state: EditorState): string | null 
   return null;
 }
 
-function indicesOf(objExpr: SyntaxNode, state: EditorState): Set<number> {
+/**
+ * Recursively builds a ScopeNode from an ObjectExpression. Subroutines may
+ * nest — a subroutine body can itself contain string-keyed subroutines, and
+ * `call(name)` later resolves names by walking the scope chain local-to-root.
+ */
+export function collectScope(objExpr: SyntaxNode, state: EditorState): ScopeNode {
   const indices = new Set<number>();
-  let prop = objExpr.firstChild;
-  while (prop) {
-    if (prop.name === 'Property') {
-      const k = prop.firstChild;
-      if (k) {
-        const asNum = parseNumericKey(k, state);
-        if (asNum !== null) indices.add(asNum);
-      }
-    }
-    prop = prop.nextSibling;
-  }
-  return indices;
-}
-
-export function collectScope(objExpr: SyntaxNode, state: EditorState): Scope {
-  const topLevel = new Set<number>();
-  const subroutines = new Map<string, Set<number>>();
+  const subroutines = new Map<string, ScopeNode>();
 
   let prop = objExpr.firstChild;
   while (prop) {
@@ -67,15 +56,15 @@ export function collectScope(objExpr: SyntaxNode, state: EditorState): Scope {
       if (k) {
         const asNum = parseNumericKey(k, state);
         if (asNum !== null) {
-          topLevel.add(asNum);
+          indices.add(asNum);
         } else {
           const asStr = parseStringKey(k, state);
           if (asStr !== null) {
             const v = prop.lastChild;
             if (v && v.name === 'ObjectExpression') {
-              subroutines.set(asStr, indicesOf(v, state));
+              subroutines.set(asStr, collectScope(v, state));
             } else {
-              subroutines.set(asStr, new Set());
+              subroutines.set(asStr, { indices: new Set(), subroutines: new Map() });
             }
           }
         }
@@ -84,7 +73,7 @@ export function collectScope(objExpr: SyntaxNode, state: EditorState): Scope {
     prop = prop.nextSibling;
   }
 
-  return { topLevel, subroutines };
+  return { indices, subroutines };
 }
 
 export function computeCrossRefDiagnostics(state: EditorState, env: Env): Diagnostic[] {
