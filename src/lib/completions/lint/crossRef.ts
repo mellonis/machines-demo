@@ -228,6 +228,33 @@ function validateCall(
   }
 }
 
+function walkArrayGroup(
+  arr: SyntaxNode,
+  state: EditorState,
+  env: Env,
+  diagnostics: Diagnostic[],
+): void {
+  let child = arr.firstChild;
+  while (child) {
+    if (child.name === 'CallExpression') {
+      // Only flag if the callee is a known post-instruction the user might
+      // call (mark/erase/noop/left/right/check/call). User-defined calls in
+      // array groups are unusual but not necessarily wrong from the linter's
+      // perspective.
+      const schemaName = calleeSchemaName(child, state, env);
+      if (schemaName && (INDEXED_INSTRUCTIONS.has(schemaName) || schemaName === 'call')) {
+        diagnostics.push({
+          from: child.from,
+          to: child.to,
+          severity: 'error',
+          message: 'indexed form not allowed inside grouped instructions',
+        });
+      }
+    }
+    child = child.nextSibling;
+  }
+}
+
 function walkObjectExpression(
   objExpr: SyntaxNode,
   chain: ScopeChain,
@@ -244,11 +271,11 @@ function walkObjectExpression(
       if (k && v) {
         const asNum = parseNumericKey(k, state);
         if (asNum !== null) {
-          // Numeric-keyed instruction. Validate the call here.
           if (v.name === 'CallExpression') {
             validateCall(v, chain, state, env, diagnostics);
+          } else if (v.name === 'ArrayExpression') {
+            walkArrayGroup(v, state, env, diagnostics);
           }
-          // (Array group handling lands in Task 6.)
         } else {
           // String-keyed subroutine — recurse with its ScopeNode prepended.
           const asStr = parseStringKey(k, state);

@@ -349,3 +349,46 @@ describe('lint/crossRef — subroutine-local scope', () => {
     expect(diags[0].message).toBe(`unknown subroutine: 'typo'`);
   });
 });
+
+describe('lint/crossRef — indexed form inside array group', () => {
+  it('S-cref-indexed-in-array-group', () => {
+    const src = `
+      const { PostMachine, mark, right, stop } = imports;
+      new PostMachine({
+        1: [mark(2), right],
+        2: stop,
+      })
+    `;
+    const diags = crossRefAll(src, 'post');
+    expect(diags).toHaveLength(1);
+    expect(diags[0].severity).toBe('error');
+    expect(diags[0].message).toBe('indexed form not allowed inside grouped instructions');
+  });
+
+  it('S-cref-bare-refs-in-array-group-ok', () => {
+    const src = `
+      const { PostMachine, mark, right, stop } = imports;
+      new PostMachine({
+        1: [mark, right, mark],
+        2: stop,
+      })
+    `;
+    expect(crossRefAll(src, 'post')).toEqual([]);
+  });
+
+  it('S-cref-multiple-indexed-in-array-group', () => {
+    const src = `
+      const { PostMachine, mark, right, stop } = imports;
+      new PostMachine({
+        1: [mark(2), right(5)],
+        2: stop,
+      })
+    `;
+    const diags = crossRefAll(src, 'post');
+    expect(diags).toHaveLength(2);
+    expect(diags.map((d) => d.message)).toEqual([
+      'indexed form not allowed inside grouped instructions',
+      'indexed form not allowed inside grouped instructions',
+    ]);
+  });
+});
