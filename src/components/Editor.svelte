@@ -5,6 +5,7 @@
   import { completionExtensions } from '../lib/completions/index.ts';
   import { argCountLinter } from '../lib/completions/lint/argCount.ts';
   import { crossRefLinter } from '../lib/completions/lint/crossRef.ts';
+  import { unboundLinter } from '../lib/completions/lint/unbound.ts';
   import { getSchema } from '../lib/completions/schema/index.ts';
   import type { Env } from '../lib/completions/contexts/types.ts';
   import { syntaxLinter } from '../lib/syntaxLinter.ts';
@@ -37,7 +38,7 @@
   // page renders dark.
   const extensions = $derived.by(() => {
     const env: Env = { engine, schema: getSchema(engine) };
-    const base = [...completionExtensions(engine), syntaxLinter, argCountLinter(env), crossRefLinter(env)];
+    const base = [...completionExtensions(engine), syntaxLinter, argCountLinter(env), crossRefLinter(env), unboundLinter(env)];
     return theme.resolved === 'dark' ? [oneDark, ...base] : base;
   });
 </script>
