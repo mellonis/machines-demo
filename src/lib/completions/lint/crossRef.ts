@@ -282,6 +282,14 @@ function walkObjectExpression(
           if (asStr !== null && v.name === 'ObjectExpression') {
             const subScope = local.subroutines.get(asStr);
             if (subScope) {
+              if (subScope.indices.size === 0 && subScope.subroutines.size === 0) {
+                diagnostics.push({
+                  from: prop.from,
+                  to: prop.to,
+                  severity: 'error',
+                  message: `empty subroutine: '${asStr}' has no instructions`,
+                });
+              }
               walkObjectExpression(v, [subScope, ...chain], state, env, diagnostics);
             }
           }

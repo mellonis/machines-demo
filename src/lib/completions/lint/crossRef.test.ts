@@ -392,3 +392,49 @@ describe('lint/crossRef — indexed form inside array group', () => {
     ]);
   });
 });
+
+describe('lint/crossRef — empty subroutine', () => {
+  it('S-cref-empty-subroutine-flagged', () => {
+    const src = `
+      const { PostMachine, call, stop } = imports;
+      new PostMachine({
+        10: call('sss'),
+        20: stop,
+        sss: {},
+      })
+    `;
+    const diags = crossRefAll(src, 'post');
+    expect(diags).toHaveLength(1);
+    expect(diags[0].severity).toBe('error');
+    expect(diags[0].message).toBe(`empty subroutine: 'sss' has no instructions`);
+  });
+
+  it('S-cref-non-empty-subroutine-ok', () => {
+    const src = `
+      const { PostMachine, call, stop } = imports;
+      new PostMachine({
+        10: call('sss'),
+        20: stop,
+        sss: { 1: stop },
+      })
+    `;
+    expect(crossRefAll(src, 'post')).toEqual([]);
+  });
+
+  it('S-cref-empty-nested-subroutine-flagged', () => {
+    const src = `
+      const { PostMachine, call, stop } = imports;
+      new PostMachine({
+        10: call('outer'),
+        20: stop,
+        outer: {
+          1: stop,
+          inner: {},
+        },
+      })
+    `;
+    const diags = crossRefAll(src, 'post');
+    expect(diags).toHaveLength(1);
+    expect(diags[0].message).toBe(`empty subroutine: 'inner' has no instructions`);
+  });
+});
