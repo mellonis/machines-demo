@@ -12,6 +12,7 @@ import type { SignatureInfo } from './completions/hints/types.ts';
 import type { Diagnostic } from '@codemirror/lint';
 import { computeArgCountDiagnostics } from './completions/lint/argCount.ts';
 import { computeCrossRefDiagnostics } from './completions/lint/crossRef.ts';
+import { computeUnboundDiagnostics } from './completions/lint/unbound.ts';
 
 /**
  * Test double for the Web Worker that `MachineRunner` posts to.
@@ -128,4 +129,13 @@ export function crossRefAll(source: string, engine: Engine): Diagnostic[] {
     extensions: [javascript(), localsField],
   });
   return computeCrossRefDiagnostics(state, env);
+}
+
+export function unboundAll(source: string, engine: Engine): Diagnostic[] {
+  const env: SourceEnv = { engine, schema: getSchema(engine) };
+  const state = EditorState.create({
+    doc: source,
+    extensions: [javascript(), localsField],
+  });
+  return computeUnboundDiagnostics(state, env);
 }
