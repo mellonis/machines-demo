@@ -28,3 +28,22 @@ export class DiagnosticsCounter {
     this.info = info;
   }
 }
+
+import { ViewPlugin, type ViewUpdate } from '@codemirror/view';
+import type { Extension } from '@codemirror/state';
+
+/**
+ * Wires a DiagnosticsCounter to the editor view — recomputes counts on
+ * every transaction. Diagnostic updates from linter() extensions go
+ * through transactions, so this catches every lint-state change.
+ */
+export function diagnosticsCounterPlugin(counter: DiagnosticsCounter): Extension {
+  return ViewPlugin.define((view) => {
+    counter.update(view.state);
+    return {
+      update(update: ViewUpdate) {
+        counter.update(update.state);
+      },
+    };
+  });
+}
