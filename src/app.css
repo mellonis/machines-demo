@@ -90,6 +90,12 @@
      both apply. Red palette by convention (gutter dots in major IDEs). */
   --graph-breakpoint: #e11d48;
 
+  /* Diagnostic counter pills (#106). Defaults tuned for dark; the
+     :root[data-theme='light'] block below overrides. */
+  --diag-error: #f87171;     /* tailwind red-400 — readable on dark surface */
+  --diag-warning: #fbbf24;   /* tailwind amber-400 */
+  --diag-info: #60a5fa;      /* tailwind blue-400 */
+
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   color-scheme: dark;
 }
@@ -137,6 +143,10 @@
   /* See dark-theme block for rationale. Light-theme red shifted darker for
      contrast against the lighter node fills. */
   --graph-breakpoint: #be123c;
+
+  --diag-error: #dc2626;     /* tailwind red-600 — readable on light surface */
+  --diag-warning: #d97706;   /* tailwind amber-600 */
+  --diag-info: #2563eb;      /* tailwind blue-600 */
 
   color-scheme: light;
 }
