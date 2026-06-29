@@ -89,6 +89,46 @@ describe('lint/unbound — bare identifier references', () => {
     expect(diags[0].message).toBe(`'State' is not defined`);
   });
 
+  it('S-unbound-for-loop-let-binding', () => {
+    const src = `
+      const arr = [];
+      for (let i = 0; i < 3; i++) arr[i] = i;
+    `;
+    expect(unboundAll(src, 'turing')).toEqual([]);
+  });
+
+  it('S-unbound-for-of-binding', () => {
+    const src = `
+      const xs = [1, 2, 3];
+      const seen = [];
+      for (const x of xs) seen.push(x);
+    `;
+    expect(unboundAll(src, 'turing')).toEqual([]);
+  });
+
+  it('S-unbound-for-in-binding', () => {
+    const src = `
+      const obj = { a: 1 };
+      const keys = [];
+      for (const k in obj) keys.push(k);
+    `;
+    expect(unboundAll(src, 'turing')).toEqual([]);
+  });
+
+  it('S-unbound-fn-param-does-not-suppress-toplevel-use', () => {
+    // A name bound only as a function parameter must NOT count as "defined"
+    // for a top-level use of the same name — the loop-binding fix collects
+    // declarations at top-level scope only, not inside function bodies.
+    const src = `
+      const { State } = imports;
+      function helper(movements) { return movements; }
+      const x = movements.left;
+    `;
+    const diags = unboundAll(src, 'turing');
+    expect(diags).toHaveLength(1);
+    expect(diags[0].message).toBe(`'movements' is not defined`);
+  });
+
   it('S-unbound-multiple-undeclared', () => {
     const src = `
       const { PostMachine } = imports;
