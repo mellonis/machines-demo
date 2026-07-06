@@ -753,13 +753,6 @@
       // Attach a contextmenu (right-click) listener for
       // breakpoint-eligible nodes. Left-click stays native (text selection,
       // focus, etc); the menu opens at cursor coords with per-kind items.
-<<<<<<< HEAD
-      // Skip only the `'idle'` sentinel (no underlying State). Halt
-      // singleton (id 0) and halt markers (negative ids) ARE clickable —
-      // they all map to the haltState class via `bareIdOf`, surfacing the
-      // global breakpoint info in the menu.
-      if (!readOnly && onToggleBreakpoint && typeof key === 'number') {
-=======
       // Skip the `'idle'` sentinel (no underlying State) and the abort
       // sentinel (id -1): the visuals indicator layer folds every negative
       // id into the haltState class, so wiring a menu here would silently
@@ -767,10 +760,8 @@
       // until the indicator layer can tell the two sentinels apart. Halt
       // singleton (id 0) and per-frame halt markers (even negative ids)
       // ARE clickable — they all map to the haltState class via
-      // `bareIdOf`, surfacing the global breakpoint info in the menu
-      // (machines-demo#37 layer 2).
+      // `bareIdOf`, surfacing the global breakpoint info in the menu.
       if (!readOnly && onToggleBreakpoint && typeof key === 'number' && key !== -1) {
->>>>>>> cda5a0a (feat: adopt engine/post 7.1.0 — render the aborted outcome distinctly + abort showcases (#122))
         el.style.cursor = 'context-menu';
         el.classList.add('node-clickable');
         el.addEventListener(
