@@ -118,12 +118,31 @@ export function createSnippetsPlugin(opts: Options = {}): Plugin {
             const originalRunStepByStep = (machine as any).runStepByStep.bind(machine);
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             (machine as any).runStepByStep = function* (args: unknown) {
-              for (const m of originalRunStepByStep(args)) {
-                rawStateIds.push(m.state.id);
-                rawNextStateIds.push(
-                  m.nextState === haltSentinel ? 0 : m.nextState.id,
-                );
-                yield m;
+              // Manual drain (not `for…of`) so the engine generator's
+              // return value — the terminal RunResult as of the abort
+              // feature — passes through to whoever exhausts this wrapper,
+              // while each yield is still intercepted for raw-id capture.
+              // The halt sentinel needs the explicit `=== haltSentinel` → 0
+              // mapping; the abort sentinel doesn't (its id IS -1, the
+              // graph's abort node id). The `finally` restores the
+              // IteratorClose propagation `for…of` used to provide (tape-
+              // block lock release if the consumer exits early); closing an
+              // already-done generator is a no-op.
+              const inner = originalRunStepByStep(args);
+              try {
+                let r = inner.next();
+                while (!r.done) {
+                  const m = r.value;
+                  rawStateIds.push(m.state.id);
+                  rawNextStateIds.push(
+                    m.nextState === haltSentinel ? 0 : m.nextState.id,
+                  );
+                  yield m;
+                  r = inner.next();
+                }
+                return r.value;
+              } finally {
+                inner.return?.();
               }
             };
 

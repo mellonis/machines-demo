@@ -93,6 +93,21 @@ describe('ExecutionTraceTable', () => {
     expect(cells[5].textContent).toBe('halt');
   });
 
+  it('T-trace-abort-goto: an abort-terminal transition resolves the goto cell to "abort"', () => {
+    const frames = singleTapeFrames();
+    frames[3] = {
+      ...frames[3],
+      highlight: { fromId: 1, toId: -1, strong: 'from', paused: false },
+    };
+    renderTable({ frames });
+    const aborting = document.querySelector<HTMLTableRowElement>(
+      '[data-testid="trace-row"][data-step="3"]',
+    );
+    const cells = aborting!.querySelectorAll('td');
+    expect(cells[1].textContent).toBe('S');
+    expect(cells[5].textContent).toBe('abort');
+  });
+
   it('T-trace-write-keep: write === read renders "keep"', () => {
     renderTable();
     const row = document.querySelector<HTMLTableRowElement>(

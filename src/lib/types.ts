@@ -116,6 +116,15 @@ export type SteppedResponse = {
    */
   nextStateId: number | null;
   stepsApplied: number;
+  /**
+   * How the machine terminated when this step observed the terminal
+   * RunResult: `'halted'` for the classical halt, `'aborted'` when the run
+   * hit the engine's abort sentinel. `null` when no terminal was observed
+   * on THIS step — either the machine is still runnable, or it was already
+   * halted when the step request arrived (the early-return sends
+   * `halted: true, outcome: null`).
+   */
+  outcome: 'halted' | 'aborted' | null;
 };
 
 export type RanResponse = {
@@ -137,6 +146,31 @@ export type RanResponse = {
   currentStateId: number | null;
   startStep: number;
   stepsApplied: number;
+  /**
+   * How the run terminated: `'halted'` for the classical halt, `'aborted'`
+   * when the run hit the engine's abort sentinel (which punches through
+   * every pending subroutine call frame).
+   */
+  outcome: 'halted' | 'aborted';
+  /**
+   * Display name of the state the run terminated in (the abort-triggering
+   * state for `'aborted'`; for the Post engine this is the instruction-
+   * derived name like `'50'` or `'sub::3'`). `null` when unavailable.
+   */
+  finalStateName: string | null;
+  /**
+   * Engine State.id of the state the run terminated in. Drives the
+   * terminal abort highlight (final state → abort node). `null` when the
+   * engine reported no terminal RunResult (external stop, truncation).
+   */
+  finalStateId: number | null;
+  /**
+   * Backtrace at termination — empty for `'halted'`. For the Turing engine:
+   * the engine RunResult's frozen stack of pending continuation states,
+   * innermost first. For the Post engine: the final iteration's
+   * instruction-level arrival path segments.
+   */
+  backtrace: string[];
 };
 
 /**
@@ -211,7 +245,8 @@ export type PausedResponse = {
    * `kind: 'in-frame'` — the source is inside a callable subtree wrapper;
    *   the engine will pop the halt-stack and resume at the wrapper's
    *   continuation. `haltMarkerId` is the GraphNode.id of the in-frame
-   *   halt marker (negative; `= -frameId`).
+   *   halt marker (even negative; `= -2 * frameId` — odd negatives are
+   *   engine sentinels).
    *
    * Highlight projection was previously driven from this field (the
    * deleted §7' rule in `applyHighlight.ts`), but under the new engine

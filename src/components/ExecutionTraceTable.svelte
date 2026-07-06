@@ -20,10 +20,11 @@
   const tapeCount = $derived(rows[0]?.tape.length ?? 1);
 
   function nodeName(id: number | 'idle' | null): string {
-    // Halt is always id 0 in the engine's Graph. The literal node name there
-    // is an implementation detail (defaults like `id:0`); the table renders
-    // the affordance, not the internals.
+    // Halt is always id 0 and abort always id -1 in the engine's Graph.
+    // The literal node names there are implementation details (defaults
+    // like `id:0`); the table renders the affordance, not the internals.
     if (id === null || id === 0) return 'halt';
+    if (id === -1) return 'abort';
     if (id === 'idle') return 'idle';
     return graph.nodes[id]?.name ?? `#${id}`;
   }

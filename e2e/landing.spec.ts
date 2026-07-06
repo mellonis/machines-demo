@@ -4,20 +4,21 @@ test.describe('landing', () => {
   test('renders snippet panels on /', async ({ page }) => {
     await page.goto('/');
     await expect(page.getByRole('heading', { name: /Turing & Post machines/ })).toBeVisible();
-    // Three curated showcase examples per engine (simple / moderate / composed); default = turing.
-    await expect(page.locator('.snippet-panel')).toHaveCount(3);
+    // Four curated showcase examples per engine (simple / moderate / composed /
+    // abort); default = turing.
+    await expect(page.locator('.snippet-panel')).toHaveCount(4);
   });
 
   test('engine switch updates URL and panels', async ({ page }) => {
     await page.goto('/');
     await page.getByRole('button', { name: /Post snippets/ }).click();
     await expect(page).toHaveURL(/\?engine=post/);
-    await expect(page.locator('.snippet-panel')).toHaveCount(3);
+    await expect(page.locator('.snippet-panel')).toHaveCount(4);
   });
 
   test('deep link to editor opens the example', async ({ page }) => {
     await page.goto('/');
-    // Use the first panel's deep-link explicitly — there are now 3 per engine.
+    // Use the first panel's deep-link explicitly — there are now 4 per engine.
     const link = page.getByRole('link', { name: /Open in editor/ }).first();
     await link.click();
     // MachineView mounts at /turing; Phase 2's boot-priority handler consumes

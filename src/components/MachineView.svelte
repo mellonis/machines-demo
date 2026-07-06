@@ -11,7 +11,7 @@
   import { MachineRunner, WorkerError } from '../lib/machineRunner.ts';
   import * as turing from '@turing-machine-js/machine';
   import { BELT_ANIMATION_MIN_INTERVAL_MS, MAX_TAPES, VIEWPORT_WIDTH } from '../lib/caps.ts';
-  import { type Alphabets, type BreakpointKind, type Command, type Engine, type IdleResponse, type PausedResponse } from '../lib/types.ts';
+  import { type Alphabets, type BreakpointKind, type Command, type Engine, type IdleResponse, type PausedResponse, type RanResponse } from '../lib/types.ts';
   import type { Graph } from '@turing-machine-js/machine';
   import { bareIdOf, type GraphHighlight, type TapeSnapshot } from '@turing-machine-js/visuals';
   import { parseInterval } from '../lib/interval.ts';
@@ -146,6 +146,12 @@
   let currentStateId = $state<number | null>(null);
   let nextStateId = $state<number | null>(null);
   let pauseBefore = $state(false);
+  // Terminal-outcome flavor of HALTED: null while runnable / after an
+  // error; 'aborted' keeps the abort presentation (terminal graph
+  // highlight on the abort node) alive after the run ends. The state id
+  // is the abort-triggering state — the FROM of the terminal highlight.
+  let terminalOutcome = $state<'halted' | 'aborted' | null>(null);
+  let terminalStateId = $state<number | null>(null);
   let pendingOp = $state<'load' | 'run' | null>(null);
   let mirrorMachine: turing.TuringMachine | null = null;
   let mirrorTapeBlock: turing.TapeBlock | null = null;
@@ -290,9 +296,12 @@
   // Other modes return null:
   //  - MANUAL: no truth value (user-chosen commands).
   //  - RUNNING_CONTINUOUS: no per-iter signal (worker doesn't send `idle`).
-  //  - HALTED: follow-up sub-branch (highlight last edge + halt node).
+  //  - HALTED after a classical halt: no highlight. HALTED after an ABORT
+  //    keeps a terminal highlight (final state → abort sentinel node) so
+  //    the abnormal ending stays visible on the diagram.
   const graphHighlight = $derived<GraphHighlight | null>(deriveGraphHighlight({
     graph, executionMode, currentStateId, nextStateId, prevStateId, pauseBefore,
+    terminalOutcome, finalStateId: terminalStateId,
   }));
 
   // The code Reset would restore to: the loaded snippet's saved code, or the
@@ -375,7 +384,40 @@
     }
     log.report(`error: ${msg}`, 'error');
     halted = true;
+    // Errors keep their own presentation; make sure a stale abort flavor
+    // from a prior run doesn't ride along into this HALTED state.
+    terminalOutcome = null;
+    terminalStateId = null;
     executionMode = 'HALTED';
+  }
+
+  /** Shared run-completion reporter for doRun / doStep: logs the terminal
+   *  line (truncated / aborted / halted) and records the outcome flavor
+   *  driving the HALTED-mode presentation. The abort ending carries the
+   *  final state's name plus the backtrace the worker resolved (engine
+   *  continuation stack for the Turing page, instruction-level arrival
+   *  path for the Post page). */
+  function reportRunCompletion(res: RanResponse): void {
+    if (res.truncated) {
+      log.report(`truncated at ${res.stepsApplied} steps (limit hit)`, 'warn');
+      // Truncation is its own presentation — explicitly drop any abort
+      // flavor rather than relying on the cold-start reset having run.
+      terminalOutcome = null;
+      terminalStateId = null;
+      return;
+    }
+    if (res.outcome === 'aborted') {
+      const at = res.finalStateName !== null ? ` at '${res.finalStateName}'` : '';
+      log.report(`aborted${at} after ${res.stepsApplied} step(s)`, 'abort');
+      for (const frame of res.backtrace) {
+        log.report(`↳ ${frame}`, 'abort');
+      }
+      terminalOutcome = 'aborted';
+      terminalStateId = res.finalStateId;
+      return;
+    }
+    log.report(`halted after ${res.stepsApplied} step(s)`, 'ok');
+    terminalOutcome = 'halted';
   }
 
   /* ───── load / step / run ───── */
@@ -459,6 +501,10 @@
       halted = res.halted;
       graph = res.graph;
       stepsApplied = 0;
+      // Fresh build → no terminal outcome yet; drop a stale abort flavor so
+      // the HALTED presentation doesn't leak across sessions.
+      terminalOutcome = null;
+      terminalStateId = null;
       _buildMirrorMachine(res.tapes, res.alphabets);
       await tick();
       setAllFromMirror();
@@ -516,14 +562,17 @@
   // the runner.onBreakpointToggled hook above. Invoked from MachineGraph's
   // right-click context menu (per-kind menu items).
   //
-  // Halt-marker normalization: halt markers (negative ids) are
-  // per-frame visualization sentinels that all collapse to the haltState
-  // singleton (id 0) at runtime. The worker's `collectStates` doesn't
-  // include negative ids — it only has the singleton at 0. So we
-  // normalize before sending; the echo comes back keyed at 0, and
-  // `bareIdOf` (also maps negative → 0) keeps the indicator consistent.
+  // Halt-marker normalization: halt markers (even negative ids,
+  // `-2·frameId`) are per-frame visualization sentinels that all collapse
+  // to the haltState singleton (id 0) at runtime. The worker's
+  // `collectStates` doesn't include marker ids — it only has the singleton
+  // at 0. So we normalize before sending; the echo comes back keyed at 0,
+  // and `bareIdOf` (also maps negative → 0) keeps the indicator
+  // consistent. The abort sentinel (-1) never reaches here — MachineGraph
+  // doesn't wire a context menu on it.
   function onToggleBreakpoint(stateId: number, kind: BreakpointKind): void {
     if (!workerLive) return;
+    if (stateId === -1) return;
     const targetId = stateId < 0 ? 0 : stateId;
     runner.toggleBreakpoint(targetId, kind);
   }
@@ -650,11 +699,7 @@
           ),
         );
       }
-      if (res.truncated) {
-        log.report(`truncated at ${res.stepsApplied} steps (limit hit)`, 'warn');
-      } else {
-        log.report(`halted after ${res.stepsApplied} step(s)`, 'ok');
-      }
+      reportRunCompletion(res);
       executionMode = 'HALTED';
     } catch (err) {
       failHalted(err);
@@ -823,11 +868,7 @@
           ),
         );
       }
-      if (res.truncated) {
-        log.report(`truncated at ${res.stepsApplied} steps (limit hit)`, 'warn');
-      } else {
-        log.report(`halted after ${res.stepsApplied} step(s)`, 'ok');
-      }
+      reportRunCompletion(res);
       executionMode = 'HALTED';
     } catch (err) {
       failHalted(err);
@@ -1165,6 +1206,7 @@
       class:error={latestEntry?.kind === 'error'}
       class:warn={latestEntry?.kind === 'warn'}
       class:ok={latestEntry?.kind === 'ok'}
+      class:abort={latestEntry?.kind === 'abort'}
     >
       {latestEntry?.text ?? ''}
     </div>
@@ -1389,6 +1431,7 @@
     &.error { color: var(--error); }
     &.warn  { color: var(--warn); }
     &.ok    { color: var(--ok); }
+    &.abort { color: var(--abort); }
 
     @media (max-width: 768px) {
       display: block;

@@ -1,6 +1,6 @@
 /* Log entry shape shared by the Log component and the formatters. */
 
-export type LogKind = 'error' | 'warn' | 'ok' | 'pause';
+export type LogKind = 'error' | 'warn' | 'ok' | 'pause' | 'abort';
 
 export type LogRow = {
   text: string;
