@@ -102,13 +102,18 @@ export function scanCanonicalBreakpoints(
   }
 
   for (const [id, { state }] of stateMap) {
+    // The abort sentinel (id -1, boolean debug like haltState) has no
+    // breakpoint UI in the demo — skip it so it can't be folded into the
+    // halt class below.
+    if (id === -1) continue;
     const debug = state.debug;
     if (debug === null || typeof debug !== 'object') continue;
     const before = (debug as { before?: boolean }).before === true;
     const after = (debug as { after?: boolean }).after === true;
     if (!before && !after) continue;
-    // Negative ids are halt-class markers — fold to 0 (matches the
-    // toggleBreakpoint handler at machineWorker.ts).
+    // Remaining negative ids are halt-class markers (even negatives,
+    // `-2·frameId`) — fold to 0 (matches the toggleBreakpoint handler at
+    // machineWorker.ts).
     const rawId = id < 0 ? 0 : bareIdOf(id, graph);
     if (seen.has(rawId)) continue;
     seen.add(rawId);

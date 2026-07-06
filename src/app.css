@@ -12,6 +12,11 @@
   --error: #ff6b6b;
   --warn: #f0b400;
   --ok: #5fd068;
+  /* Abnormal-termination accent (engine abortState). Deeper crimson than
+     --error so the two "bad ending" cues stay tellable apart; the log
+     stripe and the graph's abort node both draw DASHED in this color, so
+     the abort identity is hue + dash, not hue alone. */
+  --abort: #e74c3c;
 
   /* shared surface (used by control panel) */
   --surface-bg: rgba(0, 0, 0, 0.18);
@@ -65,6 +70,9 @@
   --graph-node-tagged-stroke: var(--accent);
   --graph-node-halt-stroke: var(--fg);
   --graph-node-halt-inner-fill: var(--graph-node-fill);
+  /* Abort sentinel node: dashed stroke comes from the mermaid emit shape;
+     the demo owns the color (engine classDef is stripped like tag_*). */
+  --graph-node-abort-stroke: var(--abort);
   --graph-text: var(--fg);
   --graph-edge: color-mix(in srgb, var(--muted) 60%, var(--fg));
   --graph-edge-thick: var(--graph-edge);
@@ -101,6 +109,8 @@
   --error: #dc2626;
   --warn: #b45309;
   --ok: #16a34a;
+  /* follows the dark block's --abort rationale — darker for light bg */
+  --abort: #c0392b;
 
   --surface-bg: rgba(0, 0, 0, 0.04);
   --editor-bg: #ffffff;
@@ -146,6 +156,7 @@
     --error: #dc2626;
     --warn: #b45309;
     --ok: #16a34a;
+    --abort: #c0392b;
 
     --surface-bg: rgba(0, 0, 0, 0.04);
     --editor-bg: #ffffff;

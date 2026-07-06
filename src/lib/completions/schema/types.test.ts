@@ -53,9 +53,9 @@ describe('TURING_SCHEMA (Phase 1)', () => {
 describe('POST_SCHEMA (Phase 1)', () => {
   it('S-schema-post-has-required-namespace-entries', () => {
     const required = [
-      'PostMachine', 'Tape', 'State', 'haltState',
+      'PostMachine', 'Tape', 'State', 'haltState', 'abortState',
       'alphabet', 'blankSymbol', 'markSymbol',
-      'mark', 'erase', 'noop', 'left', 'right', 'stop', 'call', 'check', '$tag',
+      'mark', 'erase', 'noop', 'left', 'right', 'stop', 'abort', 'call', 'check', '$tag',
     ];
     for (const name of required) {
       expect(POST_SCHEMA.namespace[name], `missing namespace entry: ${name}`).toBeDefined();

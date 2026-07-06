@@ -43,6 +43,7 @@
           class:warn={entry.kind === 'warn'}
           class:ok={entry.kind === 'ok'}
           class:pause={entry.kind === 'pause'}
+          class:abort={entry.kind === 'abort'}
           data-testid="log-line"
           data-kind={entry.kind ?? ''}
         >
@@ -102,7 +103,8 @@
     &.error,
     &.warn,
     &.ok,
-    &.pause {
+    &.pause,
+    &.abort {
       padding-left: 8px;
       border-left: 3px solid transparent;
     }
@@ -114,11 +116,15 @@
        log visually binds to the highlighted state node in the diagram —
        same amber/orange palette, same semantic ("attention: paused here"). */
     &.pause { border-left-color: var(--graph-highlight); }
+    /* `abort` binds to the diagram's abort sentinel the same way `pause`
+       binds to the highlight: same crimson, same DASHED stroke. */
+    &.abort { border-left-style: dashed; border-left-color: var(--abort); }
 
     &.error .head { color: var(--error); }
     &.warn  .head { color: var(--warn); }
     &.ok    .head { color: var(--ok); }
     &.pause .head { color: var(--graph-highlight); }
+    &.abort .head { color: var(--abort); }
   }
 
   .sep {

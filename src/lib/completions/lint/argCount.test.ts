@@ -129,6 +129,42 @@ describe('lint/argCount — bare-only instructions called', () => {
     // Message uses the user-typed alias so the diagnostic points at what's on screen.
     expect(diags[0].message).toBe('halt has no callable form (use bare `stop` instead)');
   });
+
+  it('S-lint-abort-with-parens', () => {
+    // abort is a unique-symbol value token like stop — calling it is a
+    // construction-time TypeError, flagged the same way.
+    const src = `
+      const { abort } = imports;
+      abort(1)
+    `;
+    const diags = lintAll(src, 'post');
+    expect(diags).toHaveLength(1);
+    expect(diags[0].severity).toBe('error');
+    expect(diags[0].message).toBe('abort has no callable form (use bare `abort` instead)');
+  });
+
+  it('S-lint-abort-renamed-still-flagged', () => {
+    const src = `
+      const { abort: die } = imports;
+      die()
+    `;
+    const diags = lintAll(src, 'post');
+    expect(diags).toHaveLength(1);
+    expect(diags[0].message).toBe('die has no callable form (use bare `abort` instead)');
+  });
+
+  it('S-lint-ifOtherSymbol-with-parens', () => {
+    // The engine's symbol token gets the same bare-only treatment now that
+    // the linter classifies by `kind: 'symbol'`.
+    const src = `
+      const { ifOtherSymbol } = imports;
+      ifOtherSymbol()
+    `;
+    const diags = lintAll(src, 'turing');
+    expect(diags).toHaveLength(1);
+    expect(diags[0].severity).toBe('error');
+    expect(diags[0].message).toBe('ifOtherSymbol has no callable form (use bare `ifOtherSymbol` instead)');
+  });
 });
 
 describe('lint/argCount — constructors and member methods', () => {

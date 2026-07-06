@@ -29,6 +29,7 @@ A swap between any two adjacent tiers should be visually obvious without squinti
 | Halt outer-circle stroke | `--graph-node-halt-stroke` | The "ring" |
 | Halt outer-circle fill | `--graph-node-halt-outer-fill` | Usually `none` so the ring reads as a ring |
 | Halt inner-circle fill | `--graph-node-halt-inner-fill` | The solid disc inside the ring |
+| Abort node stroke | `--graph-node-abort-stroke` | Second terminal (`abortState`): same double-circle shape as halt, crimson + dashed (aliases `--abort`, shared with the log's abort stripe); the engine's `classDef abortSentinel` is stripped like `tag_*` and the retained `class s1 abortSentinel` directive is the CSS hook |
 | Edge stroke (default `-->`) | `--graph-edge` | Regular transition |
 | Edge stroke (thick `==>`) | `--graph-edge-thick` | Wrapped-into transitions (stack-push) |
 | Edge stroke (dotted `-. enter / onHalt .->`) | `--graph-edge-dotted` | Synthetic entries + wrapper redirects |

@@ -60,7 +60,7 @@ type OnPausePayload = Omit<MachineYield, 'state'> & {
 };
 
 type AnyMachine = {
-  runStepByStep: (opts: { initialState: unknown }) => Generator<MachineYield, void, void>;
+  runStepByStep: (opts: { initialState: unknown }) => Generator<MachineYield, TerminalRunResult | void, void>;
   run: (opts: {
     initialState?: unknown;
     stepsLimit?: number;
@@ -146,7 +146,7 @@ let phase: WorkerPhase = { kind: 'idle' };
 let machine: AnyMachine | null = null;
 let initialState: unknown = null;
 let tapes: AnyTape[] = [];
-let generator: Generator<MachineYield, void, void> | null = null;
+let generator: Generator<MachineYield, TerminalRunResult | void, void> | null = null;
 let stepsApplied = 0;
 let pendingCommand: MachineYield | null = null;
 // Engine v7 Graph snapshot captured at build, retained so onPause can ask
@@ -182,13 +182,26 @@ let resumeResolve: (() => void) | null = null;
 // pause(), Continue → continue(). All pauses (breakpoint / step / manual) come
 // back through the single `pause` event.
 type SessionLike = {
-  on: (event: 'step' | 'pause' | 'iter' | 'halt',
-       listener: (m: MachineYield) => void | Promise<void>) => SessionLike;
+  on: ((event: 'step' | 'pause' | 'iter',
+       listener: (m: MachineYield) => void | Promise<void>) => SessionLike)
+    & ((event: 'halt' | 'abort',
+       listener: (r: TerminalRunResult) => void) => SessionLike);
   start: () => Promise<void>;
   continue: () => void;
   stepIn: () => void;
   stop: () => void;
   pause: () => void;
+};
+
+// Structural view of the engine's RunResult — the payload of the session's
+// terminal 'halt' / 'abort' events AND the step generator's return value.
+// `stack` is frozen-at-termination: empty for a natural halt, the pending
+// continuation states (innermost first) for an abort.
+type TerminalRunResult = {
+  outcome: 'halted' | 'aborted';
+  state: { id: number; name?: string };
+  stack: readonly { id: number; name?: string }[];
+  step: number;
 };
 
 // The active session for the current run, hoisted so the `pause` request
@@ -348,13 +361,14 @@ function step(): {
   currentStateId: number | null;
   nextStateId: number | null;
   halted: boolean;
+  outcome: 'halted' | 'aborted' | null;
 } {
   expectPhase(phase.kind, ['built']);
   const built = phase as Extract<WorkerPhase, { kind: 'built' }>;
   if (built.halted || !pendingCommand || !generator) {
     return {
       commands: null, reads: null, matchKinds: null, nextCommands: null,
-      currentStateId: null, nextStateId: null, halted: true,
+      currentStateId: null, nextStateId: null, halted: true, outcome: null,
     };
   }
   const commands = commandsFromYield(pendingCommand);
@@ -363,9 +377,13 @@ function step(): {
   const r = generator.next();
   stepsApplied += 1;
   let halted: boolean;
+  let outcome: 'halted' | 'aborted' | null = null;
   if (r.done) {
     halted = true;
     pendingCommand = null;
+    // The step generator's return value is the engine RunResult — the only
+    // signal distinguishing the classical halt from the abort sentinel.
+    outcome = r.value?.outcome ?? 'halted';
   } else {
     halted = false;
     pendingCommand = r.value;
@@ -380,7 +398,7 @@ function step(): {
   const nextStateId = pendingCommand && machine?.tapeBlock
     ? nextStateIdFromYield(pendingCommand, machine.tapeBlock)
     : null;
-  return { commands, reads, matchKinds, nextCommands, currentStateId, nextStateId, halted };
+  return { commands, reads, matchKinds, nextCommands, currentStateId, nextStateId, halted, outcome };
 }
 
 /**
@@ -445,7 +463,14 @@ async function run(
   debug: boolean,
   step: boolean,
   intervalMs: number | null,
-): Promise<{ truncated: boolean; startStep: number }> {
+): Promise<{
+  truncated: boolean;
+  startStep: number;
+  outcome: 'halted' | 'aborted';
+  finalStateName: string | null;
+  finalStateId: number | null;
+  backtrace: string[];
+}> {
   expectPhase(phase.kind, ['built']);
   const built = phase as Extract<WorkerPhase, { kind: 'built' }>;
   if (built.halted || !machine) throw new Error('cannot run: halted or not built');
@@ -562,7 +587,8 @@ async function run(
   // wraps the engine session with post-specific MachineState wrapping
   // (arrivalPath / candidatePaths) plus breakpoint-registry filtering.
   // TuringMachine consumes the engine session directly.
-  const session = machine instanceof post.PostMachine
+  const isPost = machine instanceof post.PostMachine;
+  const session = isPost
     ? (machine as unknown as { debugRun: (o: { stepsLimit?: number }) => unknown })
         .debugRun({ stepsLimit: maxSteps })
     : new (turing as unknown as { DebugSession: new (m: unknown, o: unknown) => unknown })
@@ -574,10 +600,26 @@ async function run(
   const ses = session as SessionLike;
   activeSes = ses;
 
+  // Terminal RunResult capture: `start()` still resolves void, so the
+  // outcome / final state / backtrace arrive only through the terminal
+  // events (exactly one of 'halt' / 'abort' fires per run; neither fires
+  // on a truncated 'Long execution' throw or an external stop()).
+  let runResult: TerminalRunResult | null = null;
+  // Post-engine wrapped yields carry the instruction-level arrival path;
+  // the last one seen is the abort site's Post-level location. Turing
+  // yields have no such field — stays null there.
+  let lastPostPath: string | null = null;
+
   ses.on('step', (m: MachineYield) => {
     runCommandBuffer.push(commandsFromYield(m));
     runReadsBuffer.push(readsFromYield(m));
     runMatchKindsBuffer.push(matchKindsFromYield(m));
+    if (isPost) {
+      const ap = (m as { arrivalPath?: unknown }).arrivalPath;
+      if (ap) {
+        lastPostPath = (post as unknown as { formatPath: (p: unknown) => string }).formatPath(ap);
+      }
+    }
     // After this step, iter K's transition has effectively "fired"
     // (the runner advances state after step returns). Stash this state.id
     // so iter K+1's before-pause has the prior state available as the
@@ -585,6 +627,8 @@ async function run(
     prevYieldedStateId = m.state.id;
     stepsApplied += 1;
   });
+  ses.on('halt', (r) => { runResult = r; });
+  ses.on('abort', (r) => { runResult = r; });
   ses.on('pause', async (m) => {
     // The engine's pause payload carries `pause` (PausedMachineState); the
     // structural SessionLike listener types it as the leaner MachineYield, so
@@ -630,7 +674,30 @@ async function run(
   }
 
   phase = { kind: 'built', halted: true };
-  return { truncated, startStep: stepsApplied - runCommandBuffer.length };
+  // TS narrows `runResult` to null here (the assignments happen inside the
+  // session listeners, invisible to control-flow analysis) — widen it back.
+  const result = runResult as TerminalRunResult | null;
+  const outcome = result?.outcome ?? 'halted';
+  const finalStateName = result
+    ? resolveDisplayName(result.state.id, result.state.name ?? '')
+    : null;
+  // Backtrace at abort: engine-level pending continuations for the Turing
+  // page; the instruction-level arrival path of the abort site for the
+  // Post page (its RunResult.stack holds synthesized continuation states
+  // whose composite names read as noise in a text log).
+  const backtrace = outcome !== 'aborted'
+    ? []
+    : isPost
+      ? (lastPostPath !== null ? [lastPostPath] : [])
+      : (result?.stack ?? []).map((s) => resolveDisplayName(s.id, s.name ?? ''));
+  return {
+    truncated,
+    startStep: stepsApplied - runCommandBuffer.length,
+    outcome,
+    finalStateName,
+    finalStateId: result?.state.id ?? null,
+    backtrace,
+  };
 }
 
 function send(msg: WorkerResponse): void {
@@ -691,7 +758,7 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
     }
 
     if (req.type === 'step') {
-      const { commands, reads, matchKinds, nextCommands, currentStateId, nextStateId, halted } = step();
+      const { commands, reads, matchKinds, nextCommands, currentStateId, nextStateId, halted, outcome } = step();
       send({
         type: 'stepped',
         halted,
@@ -702,12 +769,13 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
         currentStateId,
         nextStateId,
         stepsApplied,
+        outcome,
       });
       return;
     }
 
     if (req.type === 'run') {
-      const { truncated, startStep } = await run(
+      const { truncated, startStep, outcome, finalStateName, finalStateId, backtrace } = await run(
         req.maxSteps ?? MAX_STEPS,
         req.debug ?? false,
         req.step ?? false,
@@ -726,6 +794,10 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
         currentStateId: pendingCommand ? pendingCommand.state.id : null,
         startStep,
         stepsApplied,
+        outcome,
+        finalStateName,
+        finalStateId,
+        backtrace,
       });
       runCommandBuffer = [];
       runReadsBuffer = [];

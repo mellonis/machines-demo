@@ -19,7 +19,9 @@ import type { Graph } from '@turing-machine-js/machine';
  *
  * In-frame vs real determined by the source's graph `frameId`:
  *  - source state is inside a frame → in-frame halt (will pop back to the
- *    wrapper's continuation); halt marker id is `-frameId`.
+ *    wrapper's continuation); halt marker id is `-2 * frameId` (even
+ *    negatives — odd negatives are reserved for engine sentinels like
+ *    abortState).
  *  - source state is outside any frame → real halt (program-end).
  *
  * Returns `undefined` (no tag) when any gate fails OR when the lookup throws
@@ -63,7 +65,7 @@ export function computeImminentHalt(args: {
     const sourceNode = args.currentGraph?.nodes[args.m.state.id];
     const frameId = sourceNode?.frameId;
     return (frameId !== null && frameId !== undefined)
-      ? { kind: 'in-frame', haltMarkerId: -frameId }
+      ? { kind: 'in-frame', haltMarkerId: -2 * frameId }
       : { kind: 'real' };
   } catch {
     // No matching transition (engine throws for unhandled symbols) —

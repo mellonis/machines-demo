@@ -54,6 +54,7 @@ describe('MachineRunner', () => {
         nextStateId: null,
         prevStateId: null,
         stepsApplied: 1,
+        outcome: null,
       };
       current().respond(steppedPayload);
 
@@ -84,6 +85,10 @@ describe('MachineRunner', () => {
         type: 'ran' as const,
         tapes: [],
         truncated: false,
+        outcome: 'halted' as const,
+        finalStateName: null,
+        finalStateId: null,
+        backtrace: [],
         commands: [],
         reads: [],
         matchKinds: [],
@@ -94,6 +99,36 @@ describe('MachineRunner', () => {
       current().respond(ranPayload);
 
       await expect(runPromise).resolves.toEqual(ranPayload);
+    });
+
+    it('R-run-aborted-passthrough: an aborted ran resolves with outcome, final state and backtrace intact', async () => {
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const buildPromise = runner.build('// user code');
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
+      await buildPromise;
+
+      const runPromise = runner.run();
+
+      const abortedPayload = {
+        type: 'ran' as const,
+        tapes: [],
+        truncated: false,
+        commands: [],
+        reads: [],
+        matchKinds: [],
+        currentStateId: null,
+        startStep: 0,
+        stepsApplied: 3,
+        outcome: 'aborted' as const,
+        finalStateName: 'scanBits',
+        finalStateId: 2,
+        backtrace: ['accept'],
+      };
+      current().respond(abortedPayload);
+
+      await expect(runPromise).resolves.toEqual(abortedPayload);
     });
 
     it('R-protocol-run-defaults: posts MAX_STEPS, debug=false, step=false on bare run()', async () => {
@@ -118,6 +153,10 @@ describe('MachineRunner', () => {
         type: 'ran',
         tapes: [],
         truncated: false,
+        outcome: 'halted' as const,
+        finalStateName: null,
+        finalStateId: null,
+        backtrace: [],
         commands: [],
         reads: [],
         matchKinds: [],
@@ -186,6 +225,10 @@ describe('MachineRunner', () => {
         type: 'ran',
         tapes: [],
         truncated: false,
+        outcome: 'halted' as const,
+        finalStateName: null,
+        finalStateId: null,
+        backtrace: [],
         commands: [],
         reads: [],
         matchKinds: [],
@@ -315,6 +358,10 @@ describe('MachineRunner', () => {
         type: 'ran' as const,
         tapes: [],
         truncated: false,
+        outcome: 'halted' as const,
+        finalStateName: null,
+        finalStateId: null,
+        backtrace: [],
         commands: [],
         reads: [],
         matchKinds: [],
@@ -343,6 +390,10 @@ describe('MachineRunner', () => {
         type: 'ran',
         tapes: [],
         truncated: false,
+        outcome: 'halted' as const,
+        finalStateName: null,
+        finalStateId: null,
+        backtrace: [],
         commands: [],
         reads: [],
         matchKinds: [],
@@ -388,6 +439,10 @@ describe('MachineRunner', () => {
         type: 'ran',
         tapes: [],
         truncated: false,
+        outcome: 'halted' as const,
+        finalStateName: null,
+        finalStateId: null,
+        backtrace: [],
         commands: [],
         reads: [],
         matchKinds: [],
@@ -433,6 +488,10 @@ describe('MachineRunner', () => {
         type: 'ran',
         tapes: [],
         truncated: false,
+        outcome: 'halted' as const,
+        finalStateName: null,
+        finalStateId: null,
+        backtrace: [],
         commands: [],
         reads: [],
         matchKinds: [],
@@ -460,6 +519,10 @@ describe('MachineRunner', () => {
         type: 'ran',
         tapes: [],
         truncated: false,
+        outcome: 'halted' as const,
+        finalStateName: null,
+        finalStateId: null,
+        backtrace: [],
         commands: [],
         reads: [],
         matchKinds: [],
@@ -531,6 +594,10 @@ describe('MachineRunner', () => {
         type: 'ran',
         tapes: [],
         truncated: false,
+        outcome: 'halted' as const,
+        finalStateName: null,
+        finalStateId: null,
+        backtrace: [],
         commands: [],
         reads: [],
         matchKinds: [],
@@ -562,6 +629,10 @@ describe('MachineRunner', () => {
         type: 'ran',
         tapes: [],
         truncated: false,
+        outcome: 'halted' as const,
+        finalStateName: null,
+        finalStateId: null,
+        backtrace: [],
         commands: [],
         reads: [],
         matchKinds: [],
@@ -671,6 +742,10 @@ describe('MachineRunner', () => {
         type: 'ran',
         tapes: [],
         truncated: false,
+        outcome: 'halted' as const,
+        finalStateName: null,
+        finalStateId: null,
+        backtrace: [],
         commands: [],
         reads: [],
         matchKinds: [],
@@ -749,6 +824,10 @@ describe('MachineRunner', () => {
         type: 'ran',
         tapes: [],
         truncated: false,
+        outcome: 'halted' as const,
+        finalStateName: null,
+        finalStateId: null,
+        backtrace: [],
         commands: [],
         reads: [],
         matchKinds: [],
@@ -798,6 +877,10 @@ describe('MachineRunner', () => {
         type: 'ran',
         tapes: [],
         truncated: false,
+        outcome: 'halted' as const,
+        finalStateName: null,
+        finalStateId: null,
+        backtrace: [],
         commands: [],
         reads: [],
         matchKinds: [],
@@ -846,6 +929,10 @@ describe('MachineRunner', () => {
         type: 'ran',
         tapes: [],
         truncated: false,
+        outcome: 'halted' as const,
+        finalStateName: null,
+        finalStateId: null,
+        backtrace: [],
         commands: [],
         reads: [],
         matchKinds: [],
@@ -872,6 +959,10 @@ describe('MachineRunner', () => {
         type: 'ran',
         tapes: [],
         truncated: false,
+        outcome: 'halted' as const,
+        finalStateName: null,
+        finalStateId: null,
+        backtrace: [],
         commands: [],
         reads: [],
         matchKinds: [],

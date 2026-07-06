@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { toMermaid, type Graph } from '@turing-machine-js/machine';
+  import { mermaidIdFor, parseMermaidId, toMermaid, type Graph } from '@turing-machine-js/machine';
     import {
     applyHighlight,
     applyIndicator,
@@ -674,7 +674,14 @@
   function stripEngineStyling(source: string): string {
     return source
       .split('\n')
-      .filter((line) => !line.trim().startsWith('classDef tag_'))
+      .filter((line) => {
+        const t = line.trim();
+        // Both role classDefs are demo-themed: `tag_*` (tagged states) and
+        // `abortSentinel` (the abort node). The `class <id> <name>` lines
+        // stay, so mermaid still stamps the role class onto the node's <g>
+        // for our CSS to hook.
+        return !t.startsWith('classDef tag_') && !t.startsWith('classDef abortSentinel');
+      })
       .join('\n');
   }
 
@@ -717,34 +724,44 @@
     if (!svgHostEl) return;
     const root = svgHostEl.querySelector('svg');
     if (!root) return;
+    // Valid node-id tokens are known up front: `mermaidIdFor` over every
+    // graph node id (`uN` user states, `s0` halt, `s1` abort, `s0-F`
+    // per-frame halt markers) plus the synthetic `idle` sentinel. Matching
+    // against this set (instead of a token-shape regex alone) disambiguates
+    // `…-flowchart-s0-3-42` (marker s0-3, render counter 42) from
+    // `…-flowchart-s0-42` (halt s0, render counter 42) without guessing at
+    // mermaid's counter format beyond "digits at the end".
+    const expectedTokens = new Set<string>([
+      'idle',
+      ...Object.keys(graph?.nodes ?? {}).map((id) => mermaidIdFor(Number(id))),
+    ]);
     root.querySelectorAll<SVGElement>('g.node').forEach((el) => {
-      // id shape: `${renderId}-flowchart-${nodeId}-${suffix}`. Extract `nodeId`.
-      // `sN` → numeric state id N. `cN` → halt marker for frame N, keyed as
-      // negative -N (engine doc: "halt marker id = -frameId"); the highlight
-      // effect retargets `toId === 0` (real halt) to `-frameId` when the
-      // source state lives inside frame N, so the visible edge ends at the
-      // in-frame marker rather than the outside real-halt singleton.
-      // `idle` → synthetic entry sentinel. `w_N` → subgraph wrapper (the
-      // cluster IS user-facing for the frame-active border, but that lookup
-      // uses clusterCache, not nodeCache).
-      const m = el.id.match(/-flowchart-(s\d+|idle|c\d+|w_\d+)-/);
+      // id shape: `${renderId}-flowchart-${nodeId}-${suffix}`. Extract
+      // `nodeId` (greedy up to the trailing counter). `uN` → engine state
+      // id N; `s0` → halt singleton (0); `s1` → abort sentinel (-1);
+      // `s0-F` → frame F's halt marker (-2F) — the highlight effect
+      // retargets `toId === 0` (real halt) to the in-frame marker when the
+      // source state lives inside frame F. `idle` → synthetic entry
+      // sentinel. `w_N` subgraph wrappers are skipped here (not in
+      // `expectedTokens`) — the frame-active border uses clusterCache.
+      const m = el.id.match(/-flowchart-(.+)-\d+$/);
       if (!m) return;
       const tok = m[1];
-      const key: number | 'idle' | null =
-        tok === 'idle' ? 'idle'
-        : tok.startsWith('s') ? Number(tok.slice(1))
-        : tok.startsWith('c') ? -Number(tok.slice(1))
-        : null; // w_N skipped here — clusterCache handles those.
-      if (key === null) return;
+      if (!expectedTokens.has(tok)) return;
+      const key: number | 'idle' = tok === 'idle' ? 'idle' : parseMermaidId(tok);
       if (!nodeCache.has(key)) nodeCache.set(key, el);
       // Attach a contextmenu (right-click) listener for
       // breakpoint-eligible nodes. Left-click stays native (text selection,
       // focus, etc); the menu opens at cursor coords with per-kind items.
-      // Skip only the `'idle'` sentinel (no underlying State). Halt
-      // singleton (id 0) and halt markers (negative ids) ARE clickable —
-      // they all map to the haltState class via `bareIdOf`, surfacing the
-      // global breakpoint info in the menu.
-      if (!readOnly && onToggleBreakpoint && typeof key === 'number') {
+      // Skip the `'idle'` sentinel (no underlying State) and the abort
+      // sentinel (id -1): the visuals indicator layer folds every negative
+      // id into the haltState class, so wiring a menu here would silently
+      // toggle HALT breakpoints — abort breakpoints stay out of the UI
+      // until the indicator layer can tell the two sentinels apart. Halt
+      // singleton (id 0) and per-frame halt markers (even negative ids)
+      // ARE clickable — they all map to the haltState class via
+      // `bareIdOf`, surfacing the global breakpoint info in the menu.
+      if (!readOnly && onToggleBreakpoint && typeof key === 'number' && key !== -1) {
         el.style.cursor = 'context-menu';
         el.classList.add('node-clickable');
         el.addEventListener(
@@ -1009,6 +1026,11 @@
     if (!svgHostEl) return;
     applyIndicator(bps ?? new Set(), graph, nodeCache.keys(), {
       setBreakpoint(id, on) {
+        // The abort sentinel (-1) carries no breakpoint UI — upstream
+        // `bareIdOf` folds every negative id to the haltState class, so
+        // without this guard a halt breakpoint would light the abort
+        // node's dot too.
+        if (id === -1) return;
         const el = nodeCache.get(id);
         if (!el) return;
         if (on) el.classList.add('mg-breakpoint');
@@ -1740,6 +1762,16 @@
   .svg-host :global(g.node .inner-circle) {
     fill: var(--graph-node-halt-inner-fill) !important;
     stroke: var(--graph-node-halt-stroke) !important;
+  }
+
+  /* Abort sentinel node — same double-circle shape as halt (it's the
+     second terminal), differentiated by the demo's abort identity:
+     crimson + DASHED stroke (mirrors the engine's stripped
+     `classDef abortSentinel` role; the log's abort stripe matches). */
+  .svg-host :global(g.node.abortSentinel .outer-circle),
+  .svg-host :global(g.node.abortSentinel .inner-circle) {
+    stroke: var(--graph-node-abort-stroke) !important;
+    stroke-dasharray: 4 3 !important;
   }
 
   /* Thick (==>) edges = stack-push call; mermaid emits class

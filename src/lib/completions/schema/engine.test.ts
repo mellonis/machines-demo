@@ -38,19 +38,52 @@ const COLLECT_TYPEREFS = (s: EngineSchema): TypeRef[] => {
   return refs;
 };
 
+// Expected runtime `typeof` per schema kind. Kinds that model callables
+// must be functions at runtime and value tokens must be symbols — a
+// name-existence check alone is blind to a callable↔value retype (post's
+// `stop` becoming a unique-symbol token is exactly that drift shape).
+const RUNTIME_TYPEOF_BY_KIND: Record<string, readonly string[]> = {
+  class: ['function'],
+  function: ['function'],
+  symbol: ['symbol'],
+  singleton: ['object', 'string'],
+  constants: ['object'],
+  // A post-instruction with `params` is a producer function; the bare-only
+  // (paramless) shape used to model value-like commands as well, but those
+  // now live under `symbol` — every remaining post-instruction is callable.
+  'post-instruction': ['function'],
+};
+
 describe('schema drift guard', () => {
-  it('S-schema-runtime-drift-turing — every TURING_SCHEMA.namespace entry is a runtime key', () => {
-    const runtimeKeys = new Set(Object.keys(turingNs));
-    for (const name of Object.keys(TURING_SCHEMA.namespace)) {
-      expect(runtimeKeys.has(name), `Schema entry "${name}" not in @turing-machine-js/machine runtime`).toBe(true);
-    }
+  for (const [label, schema, ns] of [
+    ['turing', TURING_SCHEMA, turingNs],
+    ['post', POST_SCHEMA, postNs],
+  ] as const) {
+    it(`S-schema-runtime-drift-${label} — every schema namespace entry is a runtime key of the kind-matching typeof`, () => {
+      const runtime = ns as Record<string, unknown>;
+      for (const [name, entry] of Object.entries(schema.namespace)) {
+        expect(name in runtime, `Schema entry "${name}" not in the ${label} runtime`).toBe(true);
+        const allowed = RUNTIME_TYPEOF_BY_KIND[entry.kind];
+        expect(
+          allowed,
+          `kind "${entry.kind}" (entry "${name}") missing from RUNTIME_TYPEOF_BY_KIND — extend the map`,
+        ).toBeDefined();
+        expect(
+          allowed.includes(typeof runtime[name]),
+          `Schema entry "${name}" (kind: ${entry.kind}) is typeof ${typeof runtime[name]} at runtime — expected ${allowed.join(' | ')}`,
+        ).toBe(true);
+      }
+    });
+  }
+
+  it('S-schema-stop-is-symbol — post stop is a non-callable value token in schema and runtime', () => {
+    expect(POST_SCHEMA.namespace.stop.kind).toBe('symbol');
+    expect(typeof (postNs as Record<string, unknown>).stop).toBe('symbol');
   });
 
-  it('S-schema-runtime-drift-post — every POST_SCHEMA.namespace entry is a runtime key', () => {
-    const runtimeKeys = new Set(Object.keys(postNs));
-    for (const name of Object.keys(POST_SCHEMA.namespace)) {
-      expect(runtimeKeys.has(name), `Schema entry "${name}" not in @post-machine-js/machine runtime`).toBe(true);
-    }
+  it('S-schema-abort-is-symbol — post abort is a non-callable value token in schema and runtime', () => {
+    expect(POST_SCHEMA.namespace.abort.kind).toBe('symbol');
+    expect(typeof (postNs as Record<string, unknown>).abort).toBe('symbol');
   });
 });
 

@@ -37,7 +37,11 @@ export type ExecutionMode =
  *    diagram should agree on the FROM side.
  *
  * Returns `null` when no highlight applies (modes that have no truth
- * value: MANUAL, RUNNING_CONTINUOUS, HALTED).
+ * value: MANUAL, RUNNING_CONTINUOUS, and HALTED after a classical halt).
+ * HALTED after an ABORT keeps a terminal highlight: the abort-triggering
+ * state → the abort sentinel node (raw `toId: -1` — the visuals layer maps
+ * odd negative sentinel ids to their diagram node directly), so the
+ * abnormal ending stays visible on the diagram after the run.
  */
 export function deriveGraphHighlight(args: {
   graph: Graph | null;
@@ -46,6 +50,10 @@ export function deriveGraphHighlight(args: {
   nextStateId: number | null;
   prevStateId: number | null;
   pauseBefore: boolean;
+  /** How the machine terminated (meaningful in HALTED mode only). */
+  terminalOutcome: 'halted' | 'aborted' | null;
+  /** Engine State.id the run terminated in (HALTED mode only). */
+  finalStateId: number | null;
 }): GraphHighlight | null {
   if (!args.graph) return null;
 
@@ -53,6 +61,16 @@ export function deriveGraphHighlight(args: {
   function fromCanon(id: number | 'idle'): number | 'idle';
   function fromCanon(id: number | 'idle'): number | 'idle' {
     return typeof id === 'number' ? bareIdOf(id, args.graph!) : id;
+  }
+
+  if (args.executionMode === 'HALTED') {
+    if (args.terminalOutcome !== 'aborted') return null;
+    return {
+      fromId: args.finalStateId !== null ? fromCanon(args.finalStateId) : 'idle',
+      toId: -1,
+      strong: 'to',
+      paused: true,
+    };
   }
 
   if (args.executionMode === 'RUNNING_AUTO') {

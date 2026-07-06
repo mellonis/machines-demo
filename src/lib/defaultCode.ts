@@ -204,6 +204,60 @@ const initialState = new State({
 return { machine, initialState, tape };
 `;
 
+const TURING_ABORT_VALIDATE = `// Task: validate that the tape holds only bits (0/1), scanning from inside
+// a called subroutine; ABORT the whole run on the first unexpected symbol.
+// Contrast with 'callable-subtree': a halt INSIDE the call returns to the
+// caller's continuation, but abort punches straight through every pending
+// call frame and terminates the run — the continuation is never reached.
+
+/*
+ * Available imports (named exports of @turing-machine-js/machine):
+ *   Alphabet, State, Tape, TapeBlock, TuringMachine,
+ *   haltState, abortState, ifOtherSymbol, movements, ...
+ *
+ * Return: { machine, initialState }
+ */
+
+const {
+  Alphabet, State, Tape, TapeBlock, TuringMachine,
+  haltState, abortState, ifOtherSymbol, movements,
+} = imports;
+
+const alphabet = new Alphabet([' ', '0', '1', 'x']);
+const tape = new Tape({ alphabet, symbols: ['1', '0', 'x', '1'] });
+const tapeBlock = TapeBlock.fromTapes([tape]);
+const machine = new TuringMachine({ tapeBlock });
+const { symbol } = tapeBlock;
+
+// Subroutine: walk right over bits; RETURN (in-call halt) at the first
+// blank; ABORT on anything else.
+const scanBits = new State({
+  [symbol(['0'])]: { command: [{ movement: movements.right }] },
+  [symbol(['1'])]: { command: [{ movement: movements.right }] },
+  [symbol([alphabet.blankSymbol])]: {
+    command: [{ movement: movements.stay }],
+    nextState: haltState,
+  },
+  [ifOtherSymbol]: {
+    command: [{ movement: movements.stay }],
+    nextState: abortState,
+  },
+}, 'scanBits');
+
+// Continuation: only reached when the scan returns cleanly — with this
+// tape (it contains an 'x') it never runs.
+const accept = new State({
+  [ifOtherSymbol]: {
+    command: [{ movement: movements.stay }],
+    nextState: haltState,
+  },
+}, 'accept');
+
+const initialState = scanBits.withOverriddenHaltState(accept);
+
+return { machine, initialState };
+`;
+
 const POST_MARK_AND_STEP = `// Task: mark the current cell, step right, mark again, step right. Halt.
 // Pure-sequential program — no branching. The simplest interesting
 // Post-machine pattern: mutate the tape, advance the head, repeat.
@@ -307,6 +361,42 @@ machine.replaceTapeWith(new Tape({
 return { machine };
 `;
 
+const POST_ABORT_GUARD = `// Task: expect a mark under the head, three times, stepping right between
+// checks. The guard subroutine RETURNS ('stop') on a mark and ABORTS the
+// entire run ('abort') on a blank. The third check lands on a blank.
+// 'stop' inside a subroutine means return-to-caller (classical halt);
+// 'abort' has no continuation — it terminates the run from any depth.
+
+/*
+ * Available imports (named exports of @post-machine-js/machine):
+ *   PostMachine, Tape, alphabet, blankSymbol, markSymbol,
+ *   abort, call, check, erase, left, mark, noop, right, stop, ...
+ */
+
+const { PostMachine, Tape, abort, call, check, right, stop } = imports;
+
+const machine = new PostMachine({
+  expectMark: {
+    1: check(2, 3),  // marked? return; blank? abort the whole run
+    2: stop,         // return to caller's continuation
+    3: abort,        // abnormal termination — punches through the call
+  },
+  10: call('expectMark'),
+  20: right,
+  30: call('expectMark'),
+  40: right,
+  50: call('expectMark'),
+  60: stop,          // never reached with this tape
+}, { blankSymbol: '␣', markSymbol: '•' });
+
+machine.replaceTapeWith(new Tape({
+  alphabet: machine.tape.alphabet,
+  symbols: ['•', '•', '␣'],
+}));
+
+return { machine };
+`;
+
 const TURING_EXAMPLES: readonly Example[] = [
   {
     id: 'replace-b',
@@ -357,6 +447,25 @@ What to look for on the graph:
 - The bold \`call\` arrow (wrapper → bare) is the call edge.
 - The dotted \`return\` arrow leaves the cluster back out to \`writeMarker\` — that's the path the engine takes when the bare halts inside the subroutine.`,
   },
+  {
+    id: 'abort-validate',
+    title: 'Abort on invalid input (abortState)',
+    code: TURING_ABORT_VALIDATE,
+    showcase: true,
+    description: "Validate bits from a subroutine; abort punches through the call on 'x'.",
+    lessonNotes: `An input validator built as a called subroutine — and the machine's OTHER terminal. \`scanBits\` walks rightward over \`0\`s and \`1\`s; a blank means "input is clean" and the run should continue; anything else means the input is malformed and the whole run must end NOW.
+
+The two endings use two different sentinels:
+
+- on blank — \`haltState\`. But \`scanBits\` runs INSIDE a call (\`withOverriddenHaltState\`), so this halt is reinterpreted as "return to the continuation \`accept\`" — the same mechanics as \`callable-subtree\`.
+- on anything else — \`abortState\`. Abort is never reinterpreted: it punches through the pending call frame and terminates the run from any depth. \`accept\` is never reached with this tape (it holds an \`x\`).
+
+What to look for on the graph:
+
+- the dashed-red \`abort\` node is the second terminal, drawn apart from the halt ring.
+- the arc into it leaves from INSIDE the subroutine cluster — no return arrow, no continuation: the run just ends.
+- compare with the dotted \`return\` arrow the clean ending takes to \`accept\` — that path exists, this tape just never takes it.`,
+  },
   { id: 'copy-two-tapes', title: 'Copy tape (multi-tape)', code: TURING_COPY_TWO_TAPES },
 ];
 
@@ -405,6 +514,24 @@ The main program is just two \`call\` instructions in sequence; the subroutine w
 Between the two calls, the head sits on the cell just marked by the first call, so the second call resumes scanning rightward from there.
 
 On the graph, the dashed cluster bundles the subroutine instructions — that's the callable subtree. Two separate \`call\` sites in main produce two separate wrapper-entries into the cluster, but the body inside is shared.`,
+  },
+  {
+    id: 'abort-guard',
+    title: 'Guard subroutine: stop vs abort',
+    code: POST_ABORT_GUARD,
+    showcase: true,
+    description: 'Guard subroutine: stop = return, abort = kill the whole run.',
+    lessonNotes: `A guard pattern contrasting the Post machine's two termination commands. Main expects a mark under the head three times, stepping right between checks; the \`expectMark\` subroutine enforces it.
+
+- \`stop\` is the classical halt. Inside a subroutine it means "this scope is done" — execution RETURNS to the caller's continuation. The first two calls take this path.
+- \`abort\` is the extension command for abnormal termination. It has no continuation at all: from any depth it ends the entire run. The third call lands on a blank and takes this path — instruction \`60\` never executes.
+
+On a two-symbol machine there is no room for an in-band error marker without stealing tape vocabulary, so abort is the only out-of-band error channel: "this input is invalid" travels as an OUTCOME (\`aborted\` vs \`halted\`), not as a symbol written somewhere.
+
+What to look for on the graph:
+
+- \`expectMark\`'s cluster has TWO exits: the dotted \`return\` path (from \`2: stop\`) back to each caller's continuation, and the arc into the dashed-red \`abort\` terminal (from \`3: abort\`).
+- the \`abort\` node sits outside every cluster — it belongs to the machine, not to any scope.`,
   },
 ];
 

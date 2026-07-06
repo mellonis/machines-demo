@@ -73,8 +73,10 @@ Entry: cold-start Step (`run({ step: true })` arms `ses.stepIn()` before `ses.st
 Exit: Step (`resume({ step: true })` → the pause listener calls `ses.stepIn()`, → RUNNING_PAUSED via re-pause before the next iter), Continue (`ses.continue()`, → RUNNING_AUTO / RUNNING_CONTINUOUS for the duration of the resume), Stop (`ses.stop()`, terminate worker → HALTED), Take Control (→ MANUAL).
 
 ### HALTED
-Terminal state. The machine reached its halt state, errored, timed out, or hit `MAX_STEPS` truncation. Tape is frozen at the final state. Build / Step / Run reload-from-code.
-Entry: run completion, Stop, error, timeout, or truncation from any RUNNING_*; build error from any cold-start.
+Terminal state. The machine reached its halt state, **aborted** (the engine's `abortState` sentinel — abnormal termination that punches through pending subroutine call frames), errored, timed out, or hit `MAX_STEPS` truncation. Tape is frozen at the final state. Build / Step / Run reload-from-code.
+
+HALTED is one mode with an **outcome flavor**, not two modes: the `ran` / `stepped` responses carry `outcome: 'halted' | 'aborted'` (captured from the engine session's terminal `'halt'` / `'abort'` event), and MachineView keeps `terminalOutcome` + `terminalStateId` for the presentation. A classical halt logs the `ok` line and keeps no graph highlight; an abort logs `aborted at '<state>' after N step(s)` (kind `abort` — crimson dashed stripe) plus one `↳ <frame>` line per backtrace entry (engine continuation stack on the Turing page, the abort site's instruction-level arrival path on the Post page), and keeps a terminal graph highlight on the abort sentinel node (`toId: -1` → mermaid `s1`). Errors and truncation clear the flavor.
+Entry: run completion (halted or aborted), Stop, error, timeout, or truncation from any RUNNING_*; build error from any cold-start.
 Exit: Build (→ MANUAL), Step / Run (→ RUNNING_* via cold-start). Take Control is hidden (nothing to take — see §9 for the design question).
 
 ## 3. Flag reference
