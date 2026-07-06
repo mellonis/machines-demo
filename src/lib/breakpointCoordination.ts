@@ -53,13 +53,13 @@ export function mergeDebugKinds(
 // (Removed: `decideJoinedBare` and `decideOnIter`. `decideOnIter` drove the
 // worker's synthetic step-boundary dispatch + the after-fire-Step suppression
 // rule; both are gone now that Step / click-Pause are driven through the
-// engine's `stepIn()` / `pause()` (engine #102) and surface via the single
+// engine's `stepIn()` / `pause()` and surface via the single
 // `pause` event. Step is now before-side, so it never collides with an
 // after-side breakpoint and needs no dedup.)
 
 /**
- * One entry per logical breakpoint found by the post-build scan
- * (machines-demo#78). `stateId` is canonicalized: wrapper/bare pairs
+ * One entry per logical breakpoint found by the post-build
+ * scan. `stateId` is canonicalized: wrapper/bare pairs
  * fold to the bare's id; halt-class negative ids fold to `0`.
  * `before` / `after` mirror the bits of `state.debug.{before,after}`
  * read from the engine; both `false` is never emitted (the helper
@@ -92,7 +92,7 @@ export function scanCanonicalBreakpoints(
   const seen = new Set<number>();
   const entries: CanonicalBreakpointEntry[] = [];
 
-  // haltState (engine #207) — debug is a single boolean, not a DebugConfig.
+  // haltState — debug is a single boolean, not a DebugConfig.
   // Surface as a `before: true` entry under canonical id 0 (matches the UI's
   // single "Pause" toggle for halt and the toggleBreakpoint handler's
   // stateId 0 normalization).

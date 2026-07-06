@@ -40,7 +40,7 @@ export const BELT_ANIMATION_MIN_INTERVAL_MS = 400;
 /** Render-view cap: `Log.svelte` only ever renders this many entries.
  *  Anything older lives in the LogStore's non-reactive buffer and is
  *  summarized by a synthetic overflow header. Bounds the DOM cost of a
- *  large-trace flush; configurable in the future via #65. */
+ *  large-trace flush; may become user-configurable in the future. */
 export const LOG_RENDER_CAP = 5000;
 
 /** Flush interval for the LogStore's buffer-to-view recompute. `report` /

@@ -1,4 +1,4 @@
-// Pure viewport-math helpers for the machine-graph panel (machines-demo#110).
+// Pure viewport-math helpers for the machine-graph panel.
 //
 // - `computeCenterScroll` decides where to scroll a container so a target
 //   element sits at the visible center, but only when the element has
@@ -76,7 +76,7 @@ export function computeCenterScroll(
 
 /**
  * Pick the largest zoom ≤ 1 such that at least `minVisibleAreaRatio` of the
- * SVG's intrinsic area fits inside the body's content box (machines-demo#110).
+ * SVG's intrinsic area fits inside the body's content box.
  * Returns `1` when the SVG already fits comfortably at full size.
  *
  * The visible-area ratio is a strictly decreasing function of zoom — larger

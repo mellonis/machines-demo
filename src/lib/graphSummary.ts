@@ -1,6 +1,6 @@
 // Pure-function helper that turns an engine v7 `Graph` snapshot into a
 // readable, screen-reader-friendly summary. Used by `MachineGraph.svelte`'s
-// `.sr-only` text alternative (machines-demo#95 B1) — the rendered SVG
+// `.sr-only` text alternative — the rendered SVG
 // carries no `<title>`/`<desc>`/text alternative, so without this the
 // central simulator artifact is opaque to assistive tech.
 //

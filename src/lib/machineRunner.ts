@@ -60,7 +60,7 @@ export class MachineRunner {
   private runPending: RunPending | null = null;
   /**
    * Caller-set callback that fires whenever the worker echoes a
-   * `breakpointToggled` response (machines-demo#37 layer 1). The toggle
+   * `breakpointToggled` response. The toggle
    * request itself is fire-and-forget on the runner side; the UI updates
    * its indicator state on receipt of this echo rather than awaiting a
    * Promise, because toggles can land mid-run (parallel to the run loop)
@@ -316,7 +316,7 @@ export class MachineRunner {
 
   /**
    * Toggle a `before` or `after` breakpoint on the State whose engine
-   * `GraphNode.id` matches `stateId` (machines-demo#37). The OTHER kind's
+   * `GraphNode.id` matches `stateId`. The OTHER kind's
    * current bit is preserved worker-side. Fire-and-forget; the worker
    * echoes a `breakpointToggled` response (with the same `kind`) which
    * routes to `onBreakpointToggled`. No-op if the worker hasn't been

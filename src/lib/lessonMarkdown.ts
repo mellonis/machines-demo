@@ -1,4 +1,4 @@
-// Minimal markdown subset for snippet lesson notes (#112).
+// Minimal markdown subset for snippet lesson notes.
 // Author-controlled content from defaultCode.ts only — no user input. The
 // renderer covers exactly what the showcase notes need: paragraphs, bullet
 // lists, and inline-code spans. Everything else is left as plain text.

@@ -52,7 +52,7 @@ export type ScenarioBPConfig = {
   /** Per-state BPs. State names must match the engine's `state.name`
    *  exactly (incl. composite wrapper names like `'walkToBlank(writeMarker)'`). */
   states?: Record<string, StateBPConfig>;
-  /** Halt-BP — `haltState.debug = boolean` (turing-machine-js#207). */
+  /** Halt-BP — `haltState.debug = boolean` (the engine's halt debug flag). */
   halt?: boolean;
 };
 
@@ -158,7 +158,7 @@ export async function runScenario(input: ScenarioInput): Promise<ScenarioOutput>
     }
   }
 
-  // Halt-BP (turing-machine-js#207: boolean).
+  // Halt-BP (`haltState.debug` is a plain boolean).
   (turing.haltState as { debug: boolean }).debug = input.bp.halt === true;
 
   // Tracking: prev state id (for before-pause's prevStateId), step counter.

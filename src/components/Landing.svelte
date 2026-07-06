@@ -7,7 +7,7 @@
 
   let engine = $state<Engine>('turing');
 
-  // Playback orchestration (#112 design point 5). One IntersectionObserver
+  // Playback orchestration. One IntersectionObserver
   // over all panel slots — the panel with the highest visible ratio becomes
   // `active`; everyone else freezes at frame 0. Reduced motion is checked
   // here too: under prefers-reduced-motion the IO is never created — every

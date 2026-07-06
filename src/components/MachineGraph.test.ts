@@ -29,7 +29,7 @@ const STUB_GRAPH = {
   nodes: {},
 } as never; // structural-cast — the component only forwards to toMermaid
 
-// Minimal two-state graph for the text-alternative test (#95 B1). Shape
+// Minimal two-state graph for the text-alternative test. Shape
 // mirrors the engine's `Graph` type — see `@turing-machine-js/machine`'s
 // `utilities/graph.d.ts`. `pattern` / `command[].symbol` / `.movement`
 // strings are the engine's pre-decoded edge-label vocabulary.

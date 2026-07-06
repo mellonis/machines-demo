@@ -1,10 +1,10 @@
 # Execution model and debugger semantics
 
-> Canonical reference for what each mode does, what each user action triggers, and where the machine lands. Tests in [#47](https://github.com/mellonis/machines-demo/issues/47) cite the scenario IDs (`S-...`) defined throughout. Working conventions and file structure remain in [`CLAUDE.md`](../CLAUDE.md).
+> Canonical reference for what each mode does, what each user action triggers, and where the machine lands. The test suites cite the scenario IDs (`S-...`) defined throughout. Working conventions and file structure remain in [`CLAUDE.md`](../CLAUDE.md).
 
 ## 1. Overview
 
-The demo runs user-typed JavaScript inside a Web Worker that drives a `@turing-machine-js/machine` v7.0.0-alpha.6 machine through a **`DebugSession`** ([engine #102](https://github.com/mellonis/turing-machine-js/issues/102)). The engine's v7 `run()` is sync + callback-free; all interactive observation (breakpoints, step controls, click-pause, throttle) moved into the session. The worker constructs one — `machine.debugRun(...)` for Post (returns a `PostDebugSession`), `new DebugSession(machine, ...)` for Turing — and listens to its `step` / `pause` / `iter` / `halt` events. The main thread tracks the worker's progress with a 5-mode state machine: one resting state (MANUAL), three running states (RUNNING_AUTO, RUNNING_CONTINUOUS, RUNNING_PAUSED), and one terminal (HALTED).
+The demo runs user-typed JavaScript inside a Web Worker that drives a `@turing-machine-js/machine` v7.0.0-alpha.6 machine through a **`DebugSession`**. The engine's v7 `run()` is sync + callback-free; all interactive observation (breakpoints, step controls, click-pause, throttle) moved into the session. The worker constructs one — `machine.debugRun(...)` for Post (returns a `PostDebugSession`), `new DebugSession(machine, ...)` for Turing — and listens to its `step` / `pause` / `iter` / `halt` events. The main thread tracks the worker's progress with a 5-mode state machine: one resting state (MANUAL), three running states (RUNNING_AUTO, RUNNING_CONTINUOUS, RUNNING_PAUSED), and one terminal (HALTED).
 
 Engine pages (`/turing`, `/post`) mount in MANUAL. Initial editor content follows a 4-tier boot priority: `?example=<id>` query > `?snippet=<uuid>` query > localStorage `code` > first bundled example for the engine. Implementation lives in `src/lib/initialBoot.ts` as the pure helper `computeInitialBoot(...)`. No tape animation runs until the user clicks Step or Run.
 
@@ -211,7 +211,7 @@ Each Step advances exactly one iter, same as before — but the displayed pause 
 
 **Edge cases**
 - `debug=on`: a user-authored `.before` breakpoint on the next iter's state lands on the same moment the step would. The engine fires a single `pause` event and resolves the `breakpoint > step > manual` precedence in favor of `cause: 'breakpoint'`; the step mode is still consumed (one-shot rule). The long-format log line reads the same `before` side either way.
-- Stepping onto the halt-triggering iter: when `haltState.debug` is on the worker labels the resulting after-side halt pause "paused before halt (after X)" (engine #207 — `m.state` is the triggering state, `m.pause.side === 'after'`). When the halt breakpoint is off, the run simply finishes and the worker sends `ran` → HALTED.
+- Stepping onto the halt-triggering iter: when `haltState.debug` is on the worker labels the resulting after-side halt pause "paused before halt (after X)" (`m.state` is the triggering state, `m.pause.side === 'after'`). When the halt breakpoint is off, the run simply finishes and the worker sends `ran` → HALTED.
 
 The sequence diagram below shows the complete cycle: Run (debug=on) → break → Step → re-pause → Continue → halt or further breaks.
 
@@ -341,7 +341,7 @@ Both surface as `WorkerError` in the runner; main thread's `failHalted` rebuilds
 
 A run that doesn't halt naturally hits `MAX_STEPS = 100_000` inside the worker's `runToEnd` cap. Worker sends `ran` with `truncated: true`.
 
-- `S-truncate-auto` / `S-truncate-cont` — main thread receives `ran`. → HALTED with `truncated: did not halt within MAX_STEPS steps` log entry. Per-step entries are **suppressed** when `truncated: true` (band-aid until [#45](https://github.com/mellonis/machines-demo/issues/45) lands; rendering 100k log entries freezes the main thread for seconds).
+- `S-truncate-auto` / `S-truncate-cont` — main thread receives `ran`. → HALTED with `truncated: did not halt within MAX_STEPS steps` log entry. Per-step entries are **suppressed** when `truncated: true` (band-aid until the Log can render huge traces efficiently; rendering 100k log entries freezes the main thread for seconds).
 
 **Log entries**
 - `truncated: did not halt within MAX_STEPS steps`
@@ -362,26 +362,24 @@ A run that doesn't halt naturally hits `MAX_STEPS = 100_000` inside the worker's
 
 ## 9. Current divergences from spec
 
-A punchlist of where today's code differs from the spec, each with a tracking-issue link. Acts as a TODO list for follow-up PRs; #47 cites scenario IDs and `it.skip` divergent ones until they close.
+A punchlist of where today's code differs from the spec. Acts as a TODO list for follow-up work; the test suites cite scenario IDs and `it.skip` divergent ones until they close.
 
 - **Take Control's scope narrowed** — only meaningful from RUNNING_* (terminate the worker and land MANUAL, distinct from Stop which lands HALTED). Hidden from MANUAL (already the resting mode) and HALTED (terminal — nothing to take). Open design question: should Take Control collapse into Stop with a "preserve mirror" flag, or stay as its own affordance to keep the user-visible semantics ("take control of this partial run" vs "abandon this run") distinct? No tracking issue yet.
 
-> ⚠️ The former entries here — "IDLE mode does not exist", "halting iter's `state.debug.after` never fires", "`haltState.debug.after` silently ignored" — are all **resolved**. IDLE was retired entirely with the DEMO + IDLE removal; Step no longer arms `.after` (it uses the engine's `stepIn()`, before-side); `haltState.debug` is now a `boolean` ([turing-machine-js#207](https://github.com/mellonis/turing-machine-js/issues/207)) whose pause fires reliably on the after-side of the halt-triggering iter. None of these divergences apply anymore.
+> ⚠️ The former entries here — "IDLE mode does not exist", "halting iter's `state.debug.after` never fires", "`haltState.debug.after` silently ignored" — are all **resolved**. IDLE was retired entirely with the DEMO + IDLE removal; Step no longer arms `.after` (it uses the engine's `stepIn()`, before-side); `haltState.debug` is now a `boolean` upstream whose pause fires reliably on the after-side of the halt-triggering iter. None of these divergences apply anymore.
 
 ## 10. Engine quirks
 
 Upstream behaviors the spec encodes (won't change without a major upstream version, so the spec works around them):
 
-- The `DebugSession` `step` event is fire-and-forget and synchronous (per-iter, mid-iter, between any before-pause and after-pause). The demo's `step` listener uses it purely to buffer commands / reads / match-kinds and track `prevYieldedStateId` — it never awaits. Per-iter **awaited** coordination lives on the `iter` event (the engine awaits it, sequenced after any after-pause), which the demo uses for the RUNNING_AUTO throttle. The `pause` event is also awaited (the engine blocks on its internal resume-promise until `continue` / `stepIn` / `stop`). Cross-ref [turing-machine-js#102](https://github.com/mellonis/turing-machine-js/issues/102) for the `DebugSession` reshape.
+- The `DebugSession` `step` event is fire-and-forget and synchronous (per-iter, mid-iter, between any before-pause and after-pause). The demo's `step` listener uses it purely to buffer commands / reads / match-kinds and track `prevYieldedStateId` — it never awaits. Per-iter **awaited** coordination lives on the `iter` event (the engine awaits it, sequenced after any after-pause), which the demo uses for the RUNNING_AUTO throttle. The `pause` event is also awaited (the engine blocks on its internal resume-promise until `continue` / `stepIn` / `stop`). This is the engine's v7 `DebugSession` contract.
 
 §9 vs §10: §9 lists demo-side gaps to be closed; §10 lists engine semantics that won't change. Items can move from §10 to §9 if the upstream issue lands and a corresponding demo-side simplification becomes possible.
 
 ## 11. Cross-references
 
 - [`CLAUDE.md`](../CLAUDE.md) — working conventions, file structure, build commands. Runtime-behavior content moved here.
-- [`docs/superpowers/specs/2026-05-08-worker-run-mode-design.md`](superpowers/specs/2026-05-08-worker-run-mode-design.md) — the [#40](https://github.com/mellonis/machines-demo/issues/40) design; gives the *why* behind RUNNING_PAUSED and the worker contract.
-- [#47](https://github.com/mellonis/machines-demo/issues/47) — test infrastructure that consumes the scenario IDs defined in this doc.
-- [#46](https://github.com/mellonis/machines-demo/issues/46) — issue this spec resolves.
+- [`docs/superpowers/specs/2026-05-08-worker-run-mode-design.md`](superpowers/specs/2026-05-08-worker-run-mode-design.md) — the worker-run-mode design; gives the *why* behind RUNNING_PAUSED and the worker contract.
 
 ## 12. Scenario ID grammar
 
@@ -409,5 +407,5 @@ Conventions:
 Where IDs live:
 - **Matrix cells** (§6): `S-step-paused-off: arm .after, resume(step), → PAUSED`. Text after `:` is the one-line outcome.
 - **Walk-throughs** (§8): each opens with `### \`S-step-paused-off\` / \`S-step-paused-on\` — Step from break` so the ID is the section anchor.
-- **Tests** ([#47](https://github.com/mellonis/machines-demo/issues/47)): each `it()` cites at least one ID. UI-flow tests cite `S-...` (component / E2E layers); runner / worker / helper tests cite `R-...`. Failing tests point straight at the spec rule they broke.
+- **Tests**: each `it()` cites at least one ID. UI-flow tests cite `S-...` (component / E2E layers); runner / worker / helper tests cite `R-...`. Failing tests point straight at the spec rule they broke.
 - **§9 entries**: cite the IDs they affect when describing today's divergences.

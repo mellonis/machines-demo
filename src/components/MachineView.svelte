@@ -72,14 +72,14 @@
   let alphabets = $state<Alphabets>([]);
   const log = new LogStore();
   let lastSnapshots = $state<TapeSnapshot[] | null>(null);
-  // State-graph panel (machines-demo#9). `graph` is the engine-v7 Graph
+  // State-graph panel. `graph` is the engine-v7 Graph
   // snapshot captured at Build via State.toGraph; null pre-Build.
   // `graphCollapsed` defaults to "open on desktop, closed on mobile" per
   // the issue's UX note; `graphModalOpen` drives the expand-to-modal view.
   let graph = $state<Graph | null>(null);
   let graphCollapsed = $state(untrack(() => initialGraphCollapsed(engine)));
   let graphModalOpen = $state(false);
-  // Native <dialog> ref for the expanded-graph modal (machines-demo#95 B2).
+  // Native <dialog> ref for the expanded-graph modal.
   // Replaces the previous `<div role="presentation">` backdrop + manual
   // Escape / outside-click handlers — `showModal()` gives focus trap,
   // Escape, return-focus to the opener, and scroll-lock for free, and
@@ -101,7 +101,7 @@
   // forces the effect to re-fire per event.
   let stepsApplied = $state(0);
 
-  // machines-demo#37 — per-state breakpoint kinds, keyed by canonical
+  // Per-state breakpoint kinds, keyed by canonical
   // bare id (wrapper and bare share `#debugRef` engine-side; they're one
   // breakpoint from the user's POV — see `bareIdOf`). Each entry is the
   // current `{ before, after }` state for that equivalence class.
@@ -131,7 +131,7 @@
   $effect(() => {
     saveGraphCollapsed(engine, graphCollapsed);
   });
-  // Highlight state (#10). Carried through from the paused response:
+  // Highlight state. Carried through from the paused response:
   //   - `prevStateId` is the state we just left (= FROM of the just-fired
   //     transition that brought us to `currentStateId`). Null only at the
   //     very first iter's before-pause; treated as the synthetic `idle`
@@ -208,7 +208,7 @@
 
   const runner = new MachineRunner(untrack(() => engine), () => new MachineWorker());
 
-  // machines-demo#37 — install the breakpoint-echo callback once at runner
+  // Install the breakpoint-echo callback once at runner
   // construction. The worker emits `breakpointToggled` after each
   // toggleBreakpoint mutation (with the same `kind`); the UI updates its
   // per-state Map in lockstep so context-menu checkmarks feel synchronous
@@ -267,7 +267,7 @@
     executionMode !== 'RUNNING_PAUSED',
   );
 
-  // State-graph highlight (#10): mirrors the LAST FIRED transition (so the
+  // State-graph highlight: mirrors the LAST FIRED transition (so the
   // graph stays in lockstep with the most recent log entry). Strong on
   // m.state in all cases — "you are here".
   //
@@ -468,7 +468,7 @@
       // fresh worker. Each toggle flips off→on (fresh States have no debug
       // set), so we issue one `toggleBreakpoint` per stored kind per class.
       //
-      // machines-demo#78: user code may have programmatically set
+      // User code may have programmatically set
       // `state.debug`. Those entries arrive in `res.codeSetBreakpoints` —
       // they're ALREADY applied in the fresh worker so we skip the replay
       // for those ids (replaying would flip them OFF), and we write them
@@ -510,7 +510,7 @@
     }
   }
 
-  // machines-demo#37 — toggle a state-level breakpoint (kind: 'before' or
+  // Toggle a state-level breakpoint (kind: 'before' or
   // 'after') by engine `GraphNode.id`. Fire-and-forget; the worker echoes
   // a `breakpointToggled` response which updates the `breakpoints` Map via
   // the runner.onBreakpointToggled hook above. Invoked from MachineGraph's
@@ -682,7 +682,7 @@
       );
       renderChain = renderChain.then(() => renderFromMirror(commands, animate));
     }
-    // Drive the per-iter graph highlight (#10). Iter-end semantics: we
+    // Drive the per-iter graph highlight. Iter-end semantics: we
     // just landed in `currentStateId`, and `nextStateId` is where the
     // next iter would go. The RUNNING_AUTO branch of `graphHighlight`
     // reads these without touching `pauseBefore`.
@@ -692,7 +692,7 @@
   }
 
   function onPausedHandler(paused: PausedResponse): void {
-    // Highlight (#10): capture prev / current / next so the graph can light
+    // Highlight: capture prev / current / next so the graph can light
     // up the JUST-FIRED transition triple (matching the last logged step).
     // `pauseBefore` selects which triple to use — see graphHighlight derived.
     prevStateId = paused.prevStateId;
@@ -1039,8 +1039,7 @@
   <div class="panel-tape">
     <TapesStack bind:this={tapesStackRef} {tapeCount} caretColors={CARET_COLORS} />
 
-    <!-- Expanded ("modal") graph (machines-demo#9 + post-#37, reshaped
-         for #95 B2). Native <dialog> opened via `showModal()` — browser
+    <!-- Expanded ("modal") graph. Native <dialog> opened via `showModal()` — browser
          provides focus trap, Escape, return-focus to the opener, and
          scroll-lock. `oncancel`/`onclose` mirror user-driven closes
          (Escape, ::backdrop programmatic close) back to `graphModalOpen`
@@ -1212,14 +1211,14 @@
     }
   }
 
-  /* State-graph row (machines-demo#9) — sits between TapesStack and the
+  /* State-graph row — sits between TapesStack and the
      control panel. Just a top-margin spacer so the collapsible card has
      air around it; the card owns its own border/background. */
   .machine-graph-row {
     margin-top: 12px;
   }
 
-  /* Native <dialog> for the expanded MachineGraph (#9 → #95 B2). Sized
+  /* Native <dialog> for the expanded MachineGraph. Sized
      to mirror the previous fixed-positioned panel (80vw × 80vh, centered).
      `<dialog>` opened via `showModal()` is placed in the browser's top
      layer with implicit aria-modal + focus trap + Escape; the centering
