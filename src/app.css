@@ -90,7 +90,7 @@
      both apply. Red palette by convention (gutter dots in major IDEs). */
   --graph-breakpoint: #e11d48;
 
-  /* Diagnostic counter pills (#106). Defaults tuned for dark; the
+  /* Diagnostic counter pills. Defaults tuned for dark; the
      :root[data-theme='light'] block below overrides. */
   --diag-error: #f87171;     /* tailwind red-400 — readable on dark surface */
   --diag-warning: #fbbf24;   /* tailwind amber-400 */
