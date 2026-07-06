@@ -8,6 +8,7 @@ export const TURING_SCHEMA: EngineSchema = {
     TapeBlock:       { kind: 'class', classRef: 'TapeBlock', detail: 'multi-tape block' },
     TuringMachine:   { kind: 'class', classRef: 'TuringMachine', detail: 'machine' },
     haltState:       { kind: 'singleton', type: { kind: 'class', name: 'State' }, detail: 'global halt singleton' },
+    abortState:      { kind: 'singleton', type: { kind: 'class', name: 'State' }, detail: 'global abort singleton (abnormal termination)' },
     ifOtherSymbol:   { kind: 'symbol', detail: 'catch-all pattern key' },
     movements:       { kind: 'constants', constantsRef: 'movements', detail: '{ left, right, stay }' },
     symbolCommands:  { kind: 'constants', constantsRef: 'symbolCommands', detail: '{ keep, erase }' },

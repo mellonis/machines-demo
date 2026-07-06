@@ -6,6 +6,7 @@ export const POST_SCHEMA: EngineSchema = {
     Tape:          { kind: 'class', classRef: 'Tape', detail: 'single tape (re-exported from engine)' },
     State:         { kind: 'class', classRef: 'State', detail: 'transition node (re-exported from engine)' },
     haltState:     { kind: 'singleton', type: { kind: 'class', name: 'State' }, detail: 'global halt singleton' },
+    abortState:    { kind: 'singleton', type: { kind: 'class', name: 'State' }, detail: 'global abort singleton (abnormal termination)' },
 
     alphabet:      { kind: 'singleton', type: { kind: 'primitive', name: 'unknown' }, detail: 'default Post alphabet (blank, mark)' },
     blankSymbol:   { kind: 'singleton', type: { kind: 'primitive', name: 'string' }, detail: "default blank symbol (' ')" },
@@ -14,7 +15,11 @@ export const POST_SCHEMA: EngineSchema = {
     mark:          { kind: 'post-instruction', params: [{ name: 'jumpTo', type: { kind: 'primitive', name: 'number' }, detail: 'instruction index to jump to' }], detail: 'mark current cell (bare or with jump index)' },
     erase:         { kind: 'post-instruction', params: [{ name: 'jumpTo', type: { kind: 'primitive', name: 'number' }, detail: 'instruction index to jump to' }], detail: 'erase current cell (bare or with jump index)' },
     noop:          { kind: 'post-instruction', params: [{ name: 'jumpTo', type: { kind: 'primitive', name: 'number' }, detail: 'instruction index to jump to' }], detail: 'no-op (bare or unconditional jump)' },
-    stop:          { kind: 'post-instruction', detail: 'halt (bare-only — has no indexed form)' },
+    // stop / abort are non-callable unique-symbol value tokens as of the
+    // abort feature (post-machine v7.1) — `kind: 'symbol'` like the engine's
+    // ifOtherSymbol, NOT bare-only post-instructions.
+    stop:          { kind: 'symbol', detail: 'halt token — end current scope (return inside a subroutine)' },
+    abort:         { kind: 'symbol', detail: 'abort token — terminate the entire run from any depth' },
 
     left:          { kind: 'post-instruction', params: [{ name: 'jumpTo', type: { kind: 'primitive', name: 'number' }, detail: 'instruction index to jump to' }], detail: 'step left (bare or with jump index)' },
     right:         { kind: 'post-instruction', params: [{ name: 'jumpTo', type: { kind: 'primitive', name: 'number' }, detail: 'instruction index to jump to' }], detail: 'step right (bare or with jump index)' },

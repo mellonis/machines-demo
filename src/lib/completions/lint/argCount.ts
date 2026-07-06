@@ -73,8 +73,11 @@ function bareOnlyDiagnostic(call: SyntaxNode, state: EditorState, env: Env): Dia
   const schemaName = env.schema.namespace[typed] ? typed : (originalImportName(typed, env, state) ?? typed);
   const entry = env.schema.namespace[schemaName];
   if (!entry) return null;
-  if (entry.kind !== 'post-instruction') return null;
-  if (entry.params) return null; // has a callable form; arity check handles it
+  // Two bare-only shapes: unique-symbol value tokens (post's stop/abort,
+  // the engine's ifOtherSymbol) and post-instructions without a
+  // parameterized form. Calling either is a construction-time error.
+  if (entry.kind !== 'post-instruction' && entry.kind !== 'symbol') return null;
+  if (entry.kind === 'post-instruction' && entry.params) return null; // has a callable form; arity check handles it
   return {
     from: call.from,
     to: call.to,
