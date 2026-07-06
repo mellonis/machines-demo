@@ -94,7 +94,7 @@
   let saveName = $state('');
   let pendingOverwrite = $state(false);
   let nameInputEl = $state<HTMLInputElement | undefined>(undefined);
-  // Native <dialog> ref for the save popover (machines-demo#95 M4).
+  // Native <dialog> ref for the save popover.
   // Opened via showModal() so the browser handles focus trap, native
   // Escape (via the cancel event), return-focus to the save button on
   // close, and scroll-lock. Positioning uses CSS anchor positioning
@@ -803,7 +803,7 @@
   .save-menu {
     display: inline-flex;
 
-    /* Anchor target for the save popover dialog (machines-demo#95 M4).
+    /* Anchor target for the save popover dialog.
        The popover is a native <dialog> opened via showModal(), so it
        renders in the top layer and uses CSS anchor positioning to
        attach below the save button. Firefox without anchor-positioning

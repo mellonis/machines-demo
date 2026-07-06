@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { commandsEntry } from './format.ts';
 import type { Command } from './types.ts';
 
-// Engine edge-label notation (machines-demo#69): `[reads] → [writes]/[moves]`.
+// Engine edge-label notation: `[reads] → [writes]/[moves]`.
 // Read cells: literal-quoted `'X'` or `B` (blank). Write cells: literal-quoted
 // or `K` (keep, command.symbol === null) or `E` (erase, command.symbol equals
 // blank). Move cells: bare `L`/`R`/`S`.
@@ -102,12 +102,12 @@ describe('commandsEntry — edge-label notation', () => {
   });
 
   // Wildcard marker (`*='X'`) — driven by per-tape matchKinds sourced from
-  // engine `MachineState.matchedTransition.matchKinds` (turing-machine-js
-  // #205). Position renders as `*='<lit>'` iff the firing alternative
+  // engine `MachineState.matchedTransition.matchKinds`.
+  // Position renders as `*='<lit>'` iff the firing alternative
   // matched via `ifOtherSymbol` at that tape index. The literal symbol
   // is always shown (no `B` shortcut for blanks) so the user can see
   // WHAT the catch-all caught — that's the whole point of the marker.
-  describe('wildcard read marker (#205)', () => {
+  describe('wildcard read marker', () => {
     it('renders single-tape wildcard read as `*=<lit>`', () => {
       const reads = ['1'];
       const commands: Command[] = [{ movement: 'R', symbol: null }];

@@ -99,10 +99,10 @@
   let graphReady = $state(false);
   // True after natural playback end. Nulls out the trace's current-row
   // highlight so a finished panel reads as not-currently-playing — parallels
-  // the graph's neutral clear at the same moment (#108).
+  // the graph's neutral clear at the same moment.
   let cleared = $state(true);
-  // 4-state playback machine driven by `active` (see #112 "Playback
-  // orchestration"). Plain closure variable — not $state — because the
+  // 4-state playback machine driven by `active` (see the "Playback
+  // orchestration" $effect below). Plain closure variable — not $state — because the
   // active-toggle $effect reads AND writes it; making it reactive would
   // make the effect re-fire on every transition and loop indefinitely. The
   // template never reads it directly.
@@ -212,7 +212,7 @@
       if (!player.forward()) {
         // Playback reached the last frame on the previous tick. Clear the
         // residual highlight from that frame so the graph returns to neutral
-        // before the Replay control sits idle on it (#108).
+        // before the Replay control sits idle on it.
         clearGraphHighlights();
         cleared = true;
         clearReplayTimer();
@@ -258,8 +258,8 @@
     applyGraph();
   }
 
-  // Landing's IntersectionObserver drives `active`; this $effect dispatches
-  // the 4-state playback machine (see #112 "Playback orchestration"). Body
+  // Landing's IntersectionObserver drives `active`; this $effect is the
+  // "Playback orchestration" dispatcher of the 4-state playback machine. Body
   // wrapped in `untrack` so $state reads inside the dispatch helpers
   // (`machineGraphRef`, `tapesStackRef`, `graphReady`) don't become effect
   // deps and trip an infinite update loop. Reduced motion short-circuits
@@ -426,7 +426,7 @@
   }
 
   .tapes {
-    /* Player fills the column at 100% width (#112 design point 3) — let the
+    /* Player fills the column at 100% width — let the
        tape stretch the full track rather than centering with slack. */
     min-width: 0;
   }
@@ -487,7 +487,7 @@
     background: color-mix(in srgb, var(--cell-bg) 80%, var(--fg));
   }
 
-  /* Sibling-to-Replay button styling (machines-demo#110): the link sits
+  /* Sibling-to-Replay button styling: the link sits
      next to the .replay <button> when playback is done, so the underline-
      link look read as mismatched. Keep it an <a> for keyboard / right-click
      / open-in-new-tab semantics — just match the button's surface. */

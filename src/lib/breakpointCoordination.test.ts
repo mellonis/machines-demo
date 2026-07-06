@@ -5,15 +5,15 @@ import type { Graph } from '@turing-machine-js/machine';
 
 /**
  * Unit tests for the pure worker-side coordination helpers. Companion to
- * the highlight + breakpoints rules doc (now in `@turing-machine-js/visuals`):
- * https://github.com/mellonis/turing-machine-js/blob/v7/packages/visuals/docs/graph-highlight-and-breakpoints.md
+ * the highlight + breakpoints rules doc shipped in
+ * `@turing-machine-js/visuals` (`docs/graph-highlight-and-breakpoints.md`).
  *
  *   §15  → mergeDebugKinds (per-kind toggle that preserves the other bit)
  *
  * (Removed: `decideJoinedBare` + `decideOnIter` tests — both helpers were
  * deleted. `decideOnIter` drove the synthetic step-boundary dispatch, which
  * is gone now that Step / click-Pause run through the engine's stepIn() /
- * pause() (engine #102). See the comment in `breakpointCoordination.ts`.)
+ * pause(). See the comment in `breakpointCoordination.ts`.)
  */
 
 describe('mergeDebugKinds (§15 per-kind toggle)', () => {
@@ -75,7 +75,7 @@ describe('mergeDebugKinds (§15 per-kind toggle)', () => {
   });
 });
 
-describe('scanCanonicalBreakpoints (machines-demo#78)', () => {
+describe('scanCanonicalBreakpoints', () => {
   it('returns [] for an empty state map', () => {
     const stateMap = new Map();
     const graph: Graph = { initialId: 0, alphabets: [[' ']], nodes: {} } as Graph;

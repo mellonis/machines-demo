@@ -10,7 +10,7 @@ import type { PausedResponse } from './types.ts';
  * 1. Halt-imminent (after-pause where worker tagged `imminentHalt`) —
  *    fires only when halt-BP is on AND the iter's transition resolves to
  *    haltState. Wording: `"paused before halt (after X)"`. "(after X)" is
- *    accurate under the new engine timing (#207): X's iter just ran.
+ *    accurate under the new engine timing: X's iter just ran.
  * 2. Before-pause — surface head symbols (the step-log line for this
  *    iter hasn't landed yet). Encoding matches `formatStepNotation`
  *    byte-for-byte so the pause line + step line use the same glyph

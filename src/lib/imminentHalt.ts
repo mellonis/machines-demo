@@ -7,7 +7,7 @@ import type { Graph } from '@turing-machine-js/machine';
  * value, return the imminentHalt tag (or undefined for "not halt-imminent").
  *
  * Gating rules:
- * 1. Only fires on `after` pauses (#207's halt timing). Before-pauses cannot
+ * 1. Only fires on `after` pauses (the engine's halt timing). Before-pauses cannot
  *    be halt-imminent under the new engine — halt fires on the after side.
  * 2. Only fires when `haltState.debug === true` — the user has armed the
  *    halt-BP. A regular per-state `state.debug.after` BP firing on an iter
@@ -46,7 +46,7 @@ export function computeImminentHalt(args: {
   /** Engine `Graph` snapshot. Used to look up the source state's `frameId`
    *  to distinguish in-frame from real halt. */
   currentGraph: Graph | null;
-  /** Current value of `turing.haltState.debug` (boolean post-#207). The
+  /** Current value of `turing.haltState.debug` (a plain boolean). The
    *  gate that prevents halt-imminent wording from firing on plain
    *  state-level after-pauses. */
   haltStateDebug: boolean;

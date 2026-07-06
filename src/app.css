@@ -38,7 +38,7 @@
   --anim-button-hover-ms: 120ms;
   --anim-cell-write-ms: 320ms;
 
-  /* state-graph palette (machines-demo#9 / #10). The demo owns the look
+  /* state-graph palette. The demo owns the look
      of the rendered diagram — engine-emitted classDefs are stripped at
      render time so these tokens drive everything. Generic `--graph-tag-*`
      covers any `tag_<name>` class; `--graph-tag-main-*` overrides for the
@@ -76,7 +76,7 @@
   --graph-highlight: #f59e0b;
   --graph-highlight-soft-fill: color-mix(in srgb, #f59e0b 22%, var(--graph-node-fill));
   --graph-highlight-strong-fill: color-mix(in srgb, #f59e0b 40%, var(--graph-node-fill));
-  /* machines-demo#37 layer 1 — distinct from --graph-highlight (amber, used
+  /* Breakpoint indicator — distinct from --graph-highlight (amber, used
      for the running-machine cue) so users can tell "this state has a
      breakpoint" apart from "the machine is currently at this state" when
      both apply. Red palette by convention (gutter dots in major IDEs). */

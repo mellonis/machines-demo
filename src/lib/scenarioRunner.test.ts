@@ -57,8 +57,8 @@ describe('scenario: callable-subtree (walkToBlank wrapping writeMarker)', () => 
     expect(result.logs.map((l) => `[${l.kind}] ${l.text}`)).toEqual([
       "[step] step 1: [*='a'] → [K='a']/[R]",
       // iter 1's source state is the wrapper 'walkToBlank' (the
-      // call site) — its #debugRef is shared with the bare 'walkToBlank' via
-      // engine #150, so walkToBlank.after firing also fires here.
+      // call site) — the engine shares its #debugRef with the bare
+      // 'walkToBlank', so walkToBlank.after firing also fires here.
       '[pause] paused at state walkToBlank after applying command',
       "[step] step 2: [*='b'] → [K='b']/[R]",
       '[pause] paused at state walkToBlank after applying command',

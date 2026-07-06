@@ -147,7 +147,7 @@ describe('SnippetPanel', () => {
     vi.advanceTimersByTime(50);
     flushSync();
     expect(currentStep()).toBe(2);
-    // One more tick: player.forward() returns false → highlight clears (#108 parity).
+    // One more tick: player.forward() returns false → highlight clears (natural-end parity).
     vi.advanceTimersByTime(50);
     flushSync();
     expect(currentStep()).toBe(null);

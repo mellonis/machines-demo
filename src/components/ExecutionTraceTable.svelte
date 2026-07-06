@@ -6,7 +6,7 @@
     /**
      * Step number to highlight. `null` clears the highlight entirely —
      * used by SnippetPanel to mirror the graph's neutral state after
-     * playback finishes naturally (parallels #108).
+     * playback finishes naturally (parallels the graph-highlight clear).
      */
     frameIndex: number | null;
     graph: Snippet['graph'];

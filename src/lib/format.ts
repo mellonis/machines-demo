@@ -62,7 +62,7 @@ export type CommandsApplication = { stepNumber: number } | 'applied';
 
 /**
  * One log entry rendering an applied step in engine edge-label notation
- * (`[reads] → [writes]/[moves]`, machines-demo#69). Single-tape gets a
+ * (`[reads] → [writes]/[moves]`). Single-tape gets a
  * one-line header + inline notation; multi-tape gets a header line with
  * `- Tape N: …` rows per tape.
  *

@@ -40,7 +40,7 @@ export type WorkerRequest =
   | { type: 'resume'; step?: boolean; intervalMs?: number | null } // step?: true → advance one iteration, then re-pause; intervalMs: convey the current withPause at Continue time (spec §3 reads withPause at click, not at run-start)
   | { type: 'pause' } // click-pause from RUNNING_AUTO — worker cancels throttle and dispatches a synthetic `paused` from the next onStep
   | { type: 'setDebug'; on: boolean } // runtime-toggle debug-break pausing during a run
-  | { type: 'toggleBreakpoint'; stateId: number; kind: BreakpointKind }; // machines-demo#37: flip `state.debug.before` or `state.debug.after` on the State whose engine GraphNode.id matches `stateId`. Worker merges with the OTHER kind's current bit so toggling one doesn't clobber the other; resolves via `State.collectStates`. Main thread reflects the new state in the UI via the `breakpointToggled` response.
+  | { type: 'toggleBreakpoint'; stateId: number; kind: BreakpointKind }; // Flip `state.debug.before` or `state.debug.after` on the State whose engine GraphNode.id matches `stateId`. Worker merges with the OTHER kind's current bit so toggling one doesn't clobber the other; resolves via `State.collectStates`. Main thread reflects the new state in the UI via the `breakpointToggled` response.
 
 export type BreakpointKind = 'before' | 'after';
 
@@ -54,7 +54,7 @@ export type BuiltResponse = {
   halted: boolean;
   /**
    * Engine-v7 `Graph` snapshot for the assembled state graph, computed once
-   * at Build via `State.toGraph(initialState, tapeBlock)` (machines-demo#9).
+   * at Build via `State.toGraph(initialState, tapeBlock)`.
    * Main thread feeds this to `toMermaid(graph)` for SVG rendering. The
    * Graph type is JSON-serializable — safe to send across the worker
    * boundary. `null` when build failed (the `error` response is used in
@@ -62,7 +62,7 @@ export type BuiltResponse = {
    */
   graph: Graph;
   /**
-   * Breakpoints set by user code during `userFn` (machines-demo#78). One
+   * Breakpoints set by user code during `userFn`. One
    * entry per canonical bare-state id with at least one of `before` /
    * `after` set. Bundled in the `built` response (rather than emitted as
    * separate unsolicited `breakpointToggled` messages) so the main
@@ -88,7 +88,7 @@ export type SteppedResponse = {
   /**
    * Per-tape symbols read at each head BEFORE this step applied. Parallel to
    * `commands`; one entry per tape. Drives `[reads] → [writes]/[moves]`
-   * edge-label-style log rendering (machines-demo#69). `null` when
+   * edge-label-style log rendering. `null` when
    * `commands` is `null` (halted, no step ran).
    */
   reads: string[] | null;
@@ -96,8 +96,8 @@ export type SteppedResponse = {
    * Per-tape match kind for the firing alternative's selector at each head
    * position (`'wildcard'` iff the engine matched via `ifOtherSymbol` at
    * that position, `'literal'` otherwise). Parallel to `reads`; sourced
-   * from `MachineState.matchedTransition.matchKinds`
-   * (turing-machine-js#205). Drives the `[*='X']` wildcard read marker
+   * from `MachineState.matchedTransition.matchKinds`.
+   * Drives the `[*='X']` wildcard read marker
    * in the log. `null` when `commands` is `null` (halted, no step ran).
    */
   matchKinds: ('wildcard' | 'literal')[] | null;
@@ -105,14 +105,14 @@ export type SteppedResponse = {
   /**
    * Engine State.id of the state the machine is currently in AFTER this step
    * (i.e., the state that will fire on the next Step click). Drives current-
-   * state highlighting in the rendered graph (machines-demo#10). `null` at
+   * state highlighting in the rendered graph. `null` at
    * halt (no further step possible).
    */
   currentStateId: number | null;
   /**
    * Engine State.id of the state that will follow `currentStateId` on the
-   * next step. Drives `from + edge + to` triple highlight in the graph
-   * (machines-demo#10). `null` at halt or when `currentStateId` is `null`.
+   * next step. Drives `from + edge + to` triple highlight in the
+   * graph. `null` at halt or when `currentStateId` is `null`.
    */
   nextStateId: number | null;
   stepsApplied: number;
@@ -126,13 +126,13 @@ export type RanResponse = {
   /** Per-step, per-tape reads captured before each step. Parallel to `commands`. */
   reads: string[][];
   /** Per-step, per-tape match kinds captured before each step (parallel to
-   *  `reads`). Sourced from `MachineState.matchedTransition.matchKinds`
-   *  (turing-machine-js#205) — drives the `[*='X']` wildcard read marker. */
+   *  `reads`). Sourced from `MachineState.matchedTransition.matchKinds` —
+   *  drives the `[*='X']` wildcard read marker. */
   matchKinds: ('wildcard' | 'literal')[][];
   /**
    * Engine State.id of the final state at run end (typically the halt state).
    * Drives the snap-to-result current-state highlight in `RUNNING_CONTINUOUS`
-   * mode (machines-demo#10). `null` if the run produced no steps.
+   * mode. `null` if the run produced no steps.
    */
   currentStateId: number | null;
   startStep: number;
@@ -159,12 +159,12 @@ export type PausedResponse = {
   /** Per-step, per-tape reads captured before each step. Parallel to `commands`. */
   reads: string[][];
   /** Per-step, per-tape match kinds captured before each step (parallel to
-   *  `reads`). Sourced from `MachineState.matchedTransition.matchKinds`
-   *  (turing-machine-js#205) — drives the `[*='X']` wildcard read marker. */
+   *  `reads`). Sourced from `MachineState.matchedTransition.matchKinds` —
+   *  drives the `[*='X']` wildcard read marker. */
   matchKinds: ('wildcard' | 'literal')[][];
   /**
-   * Engine State.id at the moment of pause — m.state per the engine
-   * (machines-demo#10). The "you are here" anchor.
+   * Engine State.id at the moment of pause — m.state per the
+   * engine. The "you are here" anchor.
    */
   currentStateId: number | null;
   /**
@@ -193,7 +193,7 @@ export type PausedResponse = {
    *  wildcard marker in the pause-line's "for symbols: …" group so it
    *  matches the step-log line for the same iter. */
   currentMatchKinds: ('wildcard' | 'literal')[];
-  /** Pause descriptor (mirrors the engine's `m.pause`, engine #102).
+  /** Pause descriptor (mirrors the engine's `m.pause`).
    * - `side` — `'before'` / `'after'` for an engine breakpoint pause. ABSENT
    *   for a worker-synthesized boundary (a Step-button stop or a click-pause
    *   from RUNNING_AUTO), which has no before/after timing — formatPauseLine
@@ -215,7 +215,7 @@ export type PausedResponse = {
    *
    * Highlight projection was previously driven from this field (the
    * deleted §7' rule in `applyHighlight.ts`), but under the new engine
-   * timing (turing-machine-js#207, halt-imminent on AFTER side) the
+   * timing (halt-imminent on the AFTER side) the
    * standard §3 + §7 rules naturally show the right thing at the right
    * moment; this field is purely a wording cue now.
    */
@@ -240,21 +240,21 @@ export type IdleResponse = {
   /** Per-step, per-tape reads captured before each step. Parallel to `commands`. */
   reads: string[][];
   /** Per-step, per-tape match kinds captured before each step (parallel to
-   *  `reads`). Sourced from `MachineState.matchedTransition.matchKinds`
-   *  (turing-machine-js#205) — drives the `[*='X']` wildcard read marker. */
+   *  `reads`). Sourced from `MachineState.matchedTransition.matchKinds` —
+   *  drives the `[*='X']` wildcard read marker. */
   matchKinds: ('wildcard' | 'literal')[][];
   /**
    * Engine State.id of the state about to fire on the next iteration
    * (post-throttle resume) — i.e. m.state after the just-applied iter.
    * Drives the `from + edge + to` triple highlight per iter during
-   * `RUNNING_AUTO` (machines-demo#10), strong on FROM (= m.state, "you
+   * `RUNNING_AUTO`, strong on FROM (= m.state, "you
    * are here looking forward"). `null` if the run halted.
    */
   currentStateId: number | null;
   /**
    * Engine State.id of the state that will follow `currentStateId` on the
    * next iter. Drives the `to` end of the per-iter triple highlight in
-   * `RUNNING_AUTO` (machines-demo#10). `null` at halt or when
+   * `RUNNING_AUTO`. `null` at halt or when
    * `currentStateId` is `null`.
    */
   nextStateId: number | null;
@@ -264,13 +264,13 @@ export type BusyResponse = { type: 'busy' };
 
 /**
  * Echo of a `toggleBreakpoint` request after the worker mutates
- * `state.debug` (machines-demo#37 layer 1). `value` is the new state of the
+ * `state.debug`. `value` is the new state of the
  * breakpoint on the targeted `stateId` — `'on'` after toggling a previously-
  * absent breakpoint, `'off'` after toggling a previously-present one. The
  * main thread updates its `breakpointsByStateId` registry on receipt so the
  * indicator dot in the rendered graph reflects the engine's actual state.
  *
- * Code-set breakpoints (machines-demo#78 — user code in the worker doing
+ * Code-set breakpoints (user code in the worker doing
  * `state.debug = { before: true }` programmatically) do NOT flow through
  * this response. They're bundled in `BuiltResponse.codeSetBreakpoints`
  * and applied directly to the main-thread map after build, avoiding the

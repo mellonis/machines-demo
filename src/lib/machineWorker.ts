@@ -106,8 +106,8 @@ const _clearTimeout: typeof clearTimeout = globalThis.clearTimeout.bind(globalTh
  * Function constructor evaluates in global scope, escaping the parameter
  * shadow), and `(0, eval)('globalThis')`. `Promise` stays available — the
  * engine is synchronous so `await` is a no-op for stepping anyway, but
- * blocking it would make most JS unwriteable. For airtight isolation see
- * issue #18 (ShadowRealm).
+ * blocking it would make most JS unwriteable. Airtight isolation would
+ * need a ShadowRealm-based sandbox.
  */
 
 const SANDBOX_BLOCKED_GLOBALS = [
@@ -152,7 +152,7 @@ let pendingCommand: MachineYield | null = null;
 // Engine v7 Graph snapshot captured at build, retained so onPause can ask
 // "is this state a wrapper?" and skip dispatch — wrappers are structural
 // devices (call-stack push), not meaningful program points, so a breakpoint
-// on a shared #debugRef pauses only at the bare (machines-demo#37 layer 1).
+// on a shared #debugRef pauses only at the bare.
 let currentGraph: Graph | null = null;
 
 /** Resolve the display name for an engine State, collapsing wrappers to
@@ -177,8 +177,8 @@ function resolveDisplayName(stateId: number, fallback: string): string {
 let resumeResolve: (() => void) | null = null;
 
 // Structural view of both the engine `DebugSession` and `PostDebugSession`.
-// The worker drives the engine's native pause/step controls directly (engine
-// #102) rather than synthesizing pauses: Step → stepIn(), click-Pause →
+// The worker drives the engine's native pause/step controls
+// directly rather than synthesizing pauses: Step → stepIn(), click-Pause →
 // pause(), Continue → continue(). All pauses (breakpoint / step / manual) come
 // back through the single `pause` event.
 type SessionLike = {
@@ -205,10 +205,10 @@ let resumeAction: 'continue' | 'step' | 'stop' = 'continue';
 // Per-run buffer of commands captured by onStep. Drained on `paused` (sent
 // in the response), on `idle` per-iter (auto mode), and on `ran` (sent in
 // the response). `runReadsBuffer` is the parallel array of pre-step head
-// symbols (machines-demo#69) — same length, same per-step index.
+// symbols — same length, same per-step index.
 // `runMatchKindsBuffer` is the parallel array of per-tape match kinds
 // (`'wildcard' | 'literal'`) sourced from
-// `MachineState.matchedTransition.matchKinds` (turing-machine-js#205) so
+// `MachineState.matchedTransition.matchKinds` so
 // the log can render `[*='X']` for wildcard reads — same length, same
 // per-step index.
 let runCommandBuffer: Command[][] = [];
@@ -220,7 +220,7 @@ let runStartStep = 0;
 // At the moment a BEFORE-pause fires for iter K, this holds iter K-1's
 // state.id — i.e. the source of the transition that just brought us into
 // iter K's state. That's the FROM of the "just-fired" triple the demo
-// highlights on the graph (machines-demo#10). Cleared on reset / run-
+// highlights on the graph. Cleared on reset / run-
 // start so the very first iter's before-pause sees null → main thread
 // uses the synthetic `idle` sentinel as FROM.
 let prevYieldedStateId: number | null = null;
@@ -372,7 +372,7 @@ function step(): {
   }
   phase = { kind: 'built', halted };
   const nextCommands = pendingCommand ? commandsFromYield(pendingCommand) : null;
-  // Highlight data (machines-demo#10). After the step, `pendingCommand` (if
+  // Highlight data. After the step, `pendingCommand` (if
   // not halted) is the NEXT yield — its `state` is the state about to fire
   // on the next Step click. That's our `from`; nextStateId is computed via
   // engine `getNextState(getSymbol(tapeBlock))`.
@@ -515,7 +515,7 @@ async function run(
 
   // onIter: engine fires this awaited callback at end of every iter. With
   // Step / click-Pause / breakpoints all driven through the engine's pause
-  // controls (engine #102), the only thing left here is the RUNNING_AUTO
+  // controls, the only thing left here is the RUNNING_AUTO
   // throttle: drain the command buffer → `idle` (suspends the runner's
   // WORKER_TIMEOUT_MS) → setTimeout(intervalMs) → `busy`. Cancellable
   // mid-throttle via `cancelThrottle()` from the `pause` request handler.
@@ -554,7 +554,7 @@ async function run(
     }
   };
 
-  // v7 adoption: drive the run through DebugSession (engine #102) instead
+  // v7 adoption: drive the run through DebugSession instead
   // of `machine.run({onPause, onStep, onIter})`. The engine's v7 run() is
   // sync + callback-free; all observation moved into the session.
   //
@@ -653,10 +653,10 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
     if (req.type === 'build') {
       build(req.engine, req.code);
       const built = phase as Extract<WorkerPhase, { kind: 'built' }>;
-      // Compute the engine-v7 Graph snapshot once at Build (machines-demo#9).
+      // Compute the engine-v7 Graph snapshot once at Build.
       // JSON-serializable; safe across the worker boundary. Main thread feeds
       // this to `toMermaid(graph)` for SVG rendering and uses the per-edge
-      // `GraphTransition.id`s for future highlight + breakpoint work (#10, #37).
+      // `GraphTransition.id`s for future highlight + breakpoint work.
       // Retained in `currentGraph` so onPause can ask `isWrapper?` and skip
       // wrapper-entry pauses (see onPauseFn in run()).
       currentGraph = turing.State.toGraph(
@@ -664,7 +664,7 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
         machine!.tapeBlock as unknown as turing.TapeBlock,
       ) as Graph;
 
-      // machines-demo#78: mirror code-set state.debug writes into the UI.
+      // Mirror code-set state.debug writes into the UI.
       // User code in the worker may have set state.debug programmatically
       // during `userFn`. Scan the state map for non-empty bits and bundle
       // them in the `built` response (NOT as separate unsolicited
@@ -772,7 +772,7 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
     }
 
     if (req.type === 'toggleBreakpoint') {
-      // machines-demo#37 — UI right-click context menu toggles the
+      // UI right-click context menu toggles the
       // requested kind (`before` or `after`) on the State whose engine
       // GraphNode.id matches `stateId`. The OTHER kind's current bit is
       // preserved — toggling `after` while `before` is on must not lose
@@ -798,7 +798,7 @@ async function handleRequest(req: WorkerRequest): Promise<void> {
         });
         return;
       }
-      // haltState (turing-machine-js#207): `debug` is a single boolean,
+      // haltState: `debug` is a single boolean,
       // not a DebugConfig — the menu shows one "Pause" toggle for halt.
       // Branch out before reading per-side bits, since `boolean.before`
       // would be `undefined` and `mergeDebugKinds` would flip "on" every

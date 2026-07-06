@@ -21,10 +21,10 @@
   type Props = {
     graph: Graph | null;
     /** `from + edge + to` triple to highlight in the SVG. `null` clears any
-     *  active highlight. Driven by MachineView mode + pause-response data
-     *  (machines-demo#10). */
+     *  active highlight. Driven by MachineView mode + pause-response
+     *  data. */
     highlight?: GraphHighlight | null;
-    /** Monotonic per-event counter from the worker (machines-demo#10). Used
+    /** Monotonic per-event counter from the worker. Used
      *  as a reactivity tick: when two consecutive paused events have
      *  structurally identical highlights (Copy-tape step-mode looping on
      *  id:1), the $derived wouldn't re-run and this $effect wouldn't
@@ -38,7 +38,7 @@
      *  breakpoint right-click context menu is suppressed (no debugger
      *  flow in a prerecorded panel). Zoom / aim / pan / wheel-zoom stay
      *  available — the user still wants to look around big showcase
-     *  graphs (machines-demo#110). The imperative render pipeline is
+     *  graphs. The imperative render pipeline is
      *  unaffected. Default `false` preserves the full interactive
      *  behaviour for `MachineView`. */
     readOnly?: boolean;
@@ -55,8 +55,8 @@
      *  error in the main log (not just in this panel's own error slot).
      *  Optional — caller can omit if they don't need it. */
     onRenderError?: (message: string) => void;
-    /** Set of canonical bare ids with at least one active breakpoint kind
-     *  (machines-demo#37). Read by the indicator effect to render the
+    /** Set of canonical bare ids with at least one active breakpoint
+     *  kind. Read by the indicator effect to render the
      *  visual mark on toggled nodes; reactive via SvelteSet. Empty /
      *  omitted when the parent hasn't wired breakpoints yet. */
     breakpoints?: ReadonlySet<number>;
@@ -66,7 +66,7 @@
      *  `onToggleBreakpoint` is set. */
     breakpointKinds?: ReadonlyMap<number, { before: boolean; after: boolean }>;
     /** Called with the engine `GraphNode.id` + kind when the user picks a
-     *  context-menu item over a state node (machines-demo#37). Halt-marker
+     *  context-menu item over a state node. Halt-marker
      *  (negative ids) and the halt singleton (id 0) are filtered out before
      *  this fires — the consumer can assume `stateId` references a regular,
      *  bare, or wrapper State. Omitted when the parent doesn't want clicks
@@ -96,7 +96,7 @@
     onReady,
   }: Props = $props();
 
-  // Screen-reader-friendly summary of the graph (machines-demo#95 B1).
+  // Screen-reader-friendly summary of the graph.
   // The rendered SVG carries no text alternative; this is the parallel
   // structural view AT users get. Rendered into the `.sr-only` block
   // below — visible UI unchanged.
@@ -324,10 +324,10 @@
   // the SVG re-render when the source is byte-identical, so the same DOM
   // elements persist across cache-build re-fires — without this controller,
   // `addEventListener` calls stack up on the same `g.node` and a single
-  // user right-click would fire N menu handlers (machines-demo#37 follow-up).
+  // user right-click would fire N menu handlers.
   let clickListenersController: AbortController | null = null;
 
-  // Context-menu state (machines-demo#37). When set, the menu is open over
+  // Context-menu state. When set, the menu is open over
   // the state node identified by `menuStateId` at viewport coordinates
   // (menuX, menuY). Closing happens via outside-click, ESC, or item-pick.
   // The clamped position is computed after the menu mounts (we need to
@@ -411,7 +411,7 @@
     menuClampedY = y;
   });
 
-  // Strong-node id from the most recent PAUSED apply (machines-demo#10).
+  // Strong-node id from the most recent PAUSED apply.
   // The pulse condition is "paused on the same state as the previous
   // paused event" — idles never trigger or update this. Reset to null on
   // highlight-clear so a mode transition doesn't leave stale state matching
@@ -543,7 +543,7 @@
   }
 
   // Center an element inside the scrollable ancestor when it isn't sitting
-  // comfortably inside the viewport (machines-demo#110). "Comfortable" means
+  // comfortably inside the viewport. "Comfortable" means
   // fully inside the inner 80% of the body (10% inset on each side); a node
   // that drifts into the edge band or off-screen gets pulled back to the
   // center on that axis. Per-axis check is independent — a node fine
@@ -554,7 +554,7 @@
   // Previous policy (`scrollIntoViewIfNeeded`) only fired when the node was
   // FULLY outside the body — a node sitting at the edge with a sliver still
   // visible never triggered, so showcase snippet playback "looked frozen"
-  // for big graphs (#110).
+  // for big graphs.
   function centerIfNeeded(scroller: HTMLElement, el: Element, behavior: ScrollBehavior = 'smooth'): void {
     const target = computeCenterScroll(
       scroller.getBoundingClientRect(),
@@ -725,7 +725,7 @@
       // source state lives inside frame N, so the visible edge ends at the
       // in-frame marker rather than the outside real-halt singleton.
       // `idle` → synthetic entry sentinel. `w_N` → subgraph wrapper (the
-      // cluster IS user-facing for #10 frame-active border, but that lookup
+      // cluster IS user-facing for the frame-active border, but that lookup
       // uses clusterCache, not nodeCache).
       const m = el.id.match(/-flowchart-(s\d+|idle|c\d+|w_\d+)-/);
       if (!m) return;
@@ -737,13 +737,13 @@
         : null; // w_N skipped here — clusterCache handles those.
       if (key === null) return;
       if (!nodeCache.has(key)) nodeCache.set(key, el);
-      // machines-demo#37 — attach a contextmenu (right-click) listener for
+      // Attach a contextmenu (right-click) listener for
       // breakpoint-eligible nodes. Left-click stays native (text selection,
       // focus, etc); the menu opens at cursor coords with per-kind items.
       // Skip only the `'idle'` sentinel (no underlying State). Halt
       // singleton (id 0) and halt markers (negative ids) ARE clickable —
       // they all map to the haltState class via `bareIdOf`, surfacing the
-      // global breakpoint info in the menu (machines-demo#37 layer 2).
+      // global breakpoint info in the menu.
       if (!readOnly && onToggleBreakpoint && typeof key === 'number') {
         el.style.cursor = 'context-menu';
         el.classList.add('node-clickable');
@@ -769,8 +769,8 @@
       if (frameId === undefined) return;
       if (!clusterCache.has(frameId)) clusterCache.set(frameId, el);
     });
-    // Materialize highlight-color variants of mermaid's shared markers
-    // (machines-demo#10). Mermaid emits one `<marker>` per arrowhead shape
+    // Materialize highlight-color variants of mermaid's shared
+    // markers. Mermaid emits one `<marker>` per arrowhead shape
     // and colors them all from `#mg-N .marker { fill: lightgrey; ... }`, so
     // every arrowhead is grey regardless of its referencing edge's stroke.
     // `context-stroke` would fix this declaratively but isn't reliable
@@ -796,7 +796,7 @@
 
   // After each new render: pick a zoom that keeps ≥60% of the SVG's area
   // visible inside the body, then center the `idle` entry node so the user
-  // lands on the diagram's start (machines-demo#110).
+  // lands on the diagram's start.
   //
   // Why both passes share an effect:
   //   - The zoom adjustment changes `.svg-host`'s laid-out width / height,
@@ -911,7 +911,7 @@
 
   /**
    * Imperative API: scroll the synthetic `idle` entry node to the center of
-   * the body viewport (machines-demo#110). Called by `SnippetPanel.onReplay`
+   * the body viewport. Called by `SnippetPanel.onReplay`
    * so a Replay-clicked panel rewinds the scroll position to the same view
    * the user got on first mount, instead of resuming from wherever the last
    * frame's highlight had pushed the viewport. No-op when the SVG / cache
@@ -997,12 +997,12 @@
     onReady?.();
   });
 
-  // Breakpoint indicator effect (machines-demo#37 layer 1). Runs on
+  // Breakpoint indicator effect. Runs on
   // `breakpoints` change AND on `svg` change (cache repopulates on SVG
   // re-render). Delegates the rule logic to `applyIndicator`; the ops
   // object below is a thin DOM adapter that toggles `mg-breakpoint` per
-  // node. See the rules doc (now in `@turing-machine-js/visuals`):
-  // https://github.com/mellonis/turing-machine-js/blob/v7/packages/visuals/docs/graph-highlight-and-breakpoints.md §2 + §12.
+  // node. See the rules doc `docs/graph-highlight-and-breakpoints.md`
+  // shipped in `@turing-machine-js/visuals`, §2 + §12.
   $effect(() => {
     const bps = breakpoints;
     void svg;
@@ -1102,7 +1102,7 @@
         if (!el) return;
         // Delegates to `centerIfNeeded` (defined above) so a paused state
         // sitting in the edge band gets pulled back to the center
-        // (machines-demo#110) — the previous "fully outside" policy left
+        // — the previous "fully outside" policy left
         // partially-visible nodes alone, which read as a frozen viewport
         // on long subroutine chains. Manual offset math (vs
         // `Element.scrollIntoView`) avoids browser quirks around scrolling
@@ -1216,7 +1216,7 @@
   </header>
 
   {#if summary}
-    <!-- a11y: text alternative for the rendered SVG (machines-demo#95 B1).
+    <!-- a11y: text alternative for the rendered SVG.
          Always rendered when a graph exists — must remain available when
          visually collapsed, since the rendered SVG is the only path for
          sighted users and this is the only path for AT users. Derived
@@ -1309,7 +1309,7 @@
          other kind in the same gesture without re-opening. Dismiss
          channels are still: outside-click, Esc, or selecting another
          node (which opens a new menu at the new position). -->
-    <!-- For halt: a single "Pause" checkbox — turing-machine-js#207 collapsed
+    <!-- For halt: a single "Pause" checkbox — the engine collapsed
          haltState.debug to a boolean (one meaningful pause moment, fires on
          the AFTER side of the halt-triggering iter). The toggle still routes
          through the `before` kind name in the worker protocol for backward
@@ -1392,7 +1392,7 @@
   }
 
   /* Expanded ("modal") mode: the parent renders this component inside a
-     native <dialog> (machines-demo#9 → #95 B2). The dialog provides the
+     native <dialog>. The dialog provides the
      centered 80vw × 80vh box, focus trap, Escape, and ::backdrop dimmer;
      all this component does in expanded mode is fill its container and
      drop the inline 360px body cap so the graph uses the modal's full
@@ -1757,7 +1757,7 @@
     stroke: var(--graph-edge-dotted) !important;
   }
 
-  /* Highlight rules (machines-demo#10).
+  /* Highlight rules.
      Listed AFTER the tag + edge rules so source order wins on fill.
      `!important` still required on stroke / stroke-width to beat
      mermaid's per-id selectors injected into the SVG's own <style>
@@ -1812,7 +1812,7 @@
     transition: stroke 150ms ease, stroke-width 150ms ease;
   }
 
-  /* Breakpoint indicator (machines-demo#37 layer 1). A red stroke on the
+  /* Breakpoint indicator. A red stroke on the
      node's outer shape signals an active `state.debug.before = true`
      breakpoint. Decoupled from `--graph-highlight` (which is amber/orange
      for the running-machine cue) and from `--head` (the tape head marker)
@@ -1902,7 +1902,7 @@
     transition: opacity 150ms ease;
   }
 
-  /* Breakpoint context menu (machines-demo#37). Positioned fixed at the
+  /* Breakpoint context menu. Positioned fixed at the
      viewport coordinates the right-click reported (clamped by the
      `menuClampedX/Y` effect so it never spills off an edge). Floats above
      everything else via a high z-index; matches the demo's surface tokens
