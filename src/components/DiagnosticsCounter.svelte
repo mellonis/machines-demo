@@ -42,7 +42,7 @@
     align-items: center;
     gap: 3px;
     padding: 1px 6px;
-    font-family: var(--mono, ui-monospace, 'SF Mono', Consolas, monospace);
+    font-family: ui-monospace, 'SF Mono', Consolas, monospace;
     font-size: 11px;
     line-height: 1.4;
     color: var(--bg);
