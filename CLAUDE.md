@@ -100,7 +100,11 @@ src/
     └── diagnosticsCounter.test.ts    Vitest specs (happy-dom env) — empty / errors-only / mixed / hint-folded / replace-on-update (cites S-diag-...)
 
 e2e/
-└── cold-start.spec.ts          Playwright E2E — 4 cold-start scenarios (cites E-cold-start-...)
+├── cold-start.spec.ts          Playwright E2E — boot / step / run / pause / stop scenarios (cites E-cold-start-..., M-boot-...)
+├── abort.spec.ts               abort outcome + terminal highlight, both engines (cites E-abort-...)
+├── completions.spec.ts         member access / state.debug RHS / auto-import roundtrip (cites E-completions-...)
+├── diagnostics-counter.spec.ts counter pills fed by syntaxLinter + unboundLinter; pill clears when the code is fixed (cites E-diag-...)
+└── landing.spec.ts             `/` route — snippet panels, engine switch, deep link, scroll-triggered playback
 
 playwright.config.ts            Chromium project; webServer runs `npm run preview`
 
