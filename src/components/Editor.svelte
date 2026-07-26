@@ -11,6 +11,8 @@
   import { syntaxLinter } from '../lib/syntaxLinter.ts';
   import { saveCode } from '../lib/persist.ts';
   import { theme } from '../lib/theme.svelte.ts';
+  import { DiagnosticsCounter, diagnosticsCounterPlugin } from '../lib/diagnosticsCounter.svelte.ts';
+  import DiagnosticsCounterComponent from './DiagnosticsCounter.svelte';
   import IconButton from './IconButton.svelte';
   import type { Engine } from '../lib/types.ts';
 
@@ -30,6 +32,8 @@
     saveCode(engine, code);
   });
 
+  const counter = new DiagnosticsCounter();
+
   const lang = javascript();
   // Bundle oneDark only when the *resolved* theme is dark; the light theme
   // falls back to CodeMirror's default highlighting paired with --editor-bg.
@@ -38,7 +42,14 @@
   // page renders dark.
   const extensions = $derived.by(() => {
     const env: Env = { engine, schema: getSchema(engine) };
-    const base = [...completionExtensions(engine), syntaxLinter, argCountLinter(env), crossRefLinter(env), unboundLinter(env)];
+    const base = [
+      ...completionExtensions(engine),
+      syntaxLinter,
+      argCountLinter(env),
+      crossRefLinter(env),
+      unboundLinter(env),
+      diagnosticsCounterPlugin(counter),
+    ];
     return theme.resolved === 'dark' ? [oneDark, ...base] : base;
   });
 </script>
@@ -52,6 +63,7 @@
     {lang}
     {extensions}
   />
+  <DiagnosticsCounterComponent {counter} />
 </div>
 
 <style>

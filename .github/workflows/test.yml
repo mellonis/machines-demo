@@ -58,7 +58,8 @@ jobs:
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
-      - run: npm run build
+      # `test:e2e` builds first — vite preview serves dist/ as-is and never
+      # rebuilds, so an explicit build step here would be redundant.
       - run: npm run test:e2e
       - name: Upload test report
         if: failure()

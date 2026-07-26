@@ -28,8 +28,8 @@ npm run lint           # ESLint flat config
 npm test               # Vitest one-shot (runner / helper tests)
 npm run test:watch     # Vitest watch mode
 npm run test:coverage  # Vitest with v8 coverage; output in coverage/
-npm run test:e2e       # Playwright E2E (Chromium; runs `vite preview` automatically)
-npm run test:e2e:ui    # Playwright interactive mode for local debugging
+npm run test:e2e       # Playwright E2E (Chromium; builds, then runs `vite preview` automatically)
+npm run test:e2e:ui    # Playwright interactive mode for local debugging (builds first)
 ```
 
 Static bundle emitted to `dist/`. Serve with any static host. The build references hashed assets, so far-future caching is safe.
@@ -94,7 +94,8 @@ src/
 │   ├── Toolbar.test.ts         # Vitest suite for Toolbar — 5 topic groups
 │   ├── Editor.svelte           # CodeMirror wrapper + localStorage persist
 │   ├── Log.svelte              # entries list (desktop) / latest line (mobile)
-│   └── IconButton.svelte       # icon + optional label
+│   ├── IconButton.svelte       # icon + optional label
+│   └── DiagnosticsCounter.svelte  # E / W / I pill overlay in the editor's bottom-right; each pill hides at count 0
 └── lib/
     ├── types.ts                # Engine, Command, Alphabets, WorkerRequest/Response (TapeSnapshot + Graph imported from @turing-machine-js/{visuals,machine})
     ├── caps.ts                 # numeric caps: VIEWPORT_WIDTH, MAX_STEPS, WORKER_TIMEOUT_MS, MAX_TAPES
@@ -113,7 +114,9 @@ src/
     │   ├── schema/               # typed const describing engine + post API surface
     │   ├── scan/                 # Lezer walker — infers user-local types + tracks imports destructure
     │   ├── contexts/             # 5 CompletionSource factories (memberAccess, debugAssignment, optionsBag, destructureBag, namespaceIdentifier)
-    │   └── apply/                # auto-import — inserts undestructured names into the top `const {…} = imports;` block
+    │   ├── apply/                # auto-import — inserts undestructured names into the top `const {…} = imports;` block
+    │   ├── hints/                # signature help — tooltip describing the active argument of the enclosing call
+    │   └── lint/                 # schema-driven linters — arg count, Post cross-references, unbound identifiers
     ├── syntaxLinter.ts         # Lezer-based syntax-error markers
     ├── persist.ts              # localStorage helpers per engine
     ├── tapeSnapshot.ts         # serialize/parse tape-block snapshots for copy+paste
@@ -122,11 +125,15 @@ src/
     ├── format.ts               # LogEntry assemblers (commandsEntry / tapesEntry); per-step string rendering from @turing-machine-js/visuals
     ├── lessonMarkdown.ts       # tiny markdown subset (paragraphs / bullets / inline code) for SnippetPanel lesson prose
     ├── icons.ts                # Tabler icon namespace
-    └── theme.svelte.ts         # theme (light / dark) state + matchMedia watcher
+    ├── theme.svelte.ts         # theme (light / dark) state + matchMedia watcher
+    ├── diagnosticsCounter.svelte.ts  # DiagnosticsCounter class (runes counts by severity) + ViewPlugin that retallies per transaction
+    └── diagnosticsCounter.test.ts    # Vitest suite for DiagnosticsCounter
 
 e2e/
+├── abort.spec.ts                 # Playwright E2E — abort outcome + terminal highlight, both engines
 ├── cold-start.spec.ts            # Playwright E2E — cold-start scenarios for engine pages
 ├── completions.spec.ts           # Playwright E2E — smart completions roundtrip
+├── diagnostics-counter.spec.ts   # Playwright E2E — counter pills fed by real lint sources; pill clears when the code is fixed
 └── landing.spec.ts               # Playwright E2E — landing page panels + engine switch + deep-link to editor
 
 playwright.config.ts              # Chromium project; webServer = vite preview
