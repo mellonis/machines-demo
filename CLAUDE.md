@@ -17,6 +17,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `npm run test:e2e` — Playwright E2E (Chromium; tests in `e2e/`). Runs `npm run build` first, then `vite preview` via `playwright.config.ts`'s `webServer`. **The build step is load-bearing:** `vite preview` serves `dist/` exactly as it finds it and never rebuilds, so without it the suite silently tests a stale bundle — passing on deleted code or failing on working code. Putting the build in the npm script rather than `webServer.command` is deliberate: `reuseExistingServer` is true outside CI, so a leftover preview server would skip the command entirely.
 - `npm run test:e2e:ui` — Playwright interactive mode for local debugging (builds first, same reason)
 
+## Dependency notes
+
+**`typescript` is held at `^6` on purpose — do not bump it to 7 yet.** TypeScript 7 (the native port) changed the shape of the published module: it no longer exposes a CommonJS `default`. `svelte-check` reads `typescript.default.sys`, so it throws `Cannot read properties of undefined (reading 'useCaseSensitiveFileNames')` at startup on TS 7 — which breaks both `npm run check` and `npm run build`, since the build begins with `svelte-check`. This is upstream in `svelte-check` (4.7.3, the current latest, has no TS 7 support). Re-attempt once a `svelte-check` release advertises it; everything else in the toolchain tracks latest.
+
+Bumping `@playwright/test` requires a matching browser download — run `npx playwright install chromium` after the install, or the suite fails with `Executable doesn't exist`. CI does this in its own step, keyed on the `package-lock.json` hash, so it self-heals there.
+
 ## Architecture
 
 ```
