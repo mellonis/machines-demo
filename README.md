@@ -28,8 +28,8 @@ npm run lint           # ESLint flat config
 npm test               # Vitest one-shot (runner / helper tests)
 npm run test:watch     # Vitest watch mode
 npm run test:coverage  # Vitest with v8 coverage; output in coverage/
-npm run test:e2e       # Playwright E2E (Chromium; runs `vite preview` automatically)
-npm run test:e2e:ui    # Playwright interactive mode for local debugging
+npm run test:e2e       # Playwright E2E (Chromium; builds, then runs `vite preview` automatically)
+npm run test:e2e:ui    # Playwright interactive mode for local debugging (builds first)
 ```
 
 Static bundle emitted to `dist/`. Serve with any static host. The build references hashed assets, so far-future caching is safe.

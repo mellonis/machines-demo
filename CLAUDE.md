@@ -14,8 +14,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `npm test` — Vitest one-shot. Runner / helper tests run in node; component tests opt into happy-dom via the `// @vitest-environment happy-dom` per-file pragma. `vitest.setup.ts` registers `@testing-library/jest-dom` matchers globally.
 - `npm run test:watch` — Vitest watch mode
 - `npm run test:coverage` — Vitest with v8 coverage; output in `coverage/` (gitignored)
-- `npm run test:e2e` — Playwright E2E (Chromium; runs `vite preview` automatically; tests in `e2e/`)
-- `npm run test:e2e:ui` — Playwright interactive mode for local debugging
+- `npm run test:e2e` — Playwright E2E (Chromium; tests in `e2e/`). Runs `npm run build` first, then `vite preview` via `playwright.config.ts`'s `webServer`. **The build step is load-bearing:** `vite preview` serves `dist/` exactly as it finds it and never rebuilds, so without it the suite silently tests a stale bundle — passing on deleted code or failing on working code. Putting the build in the npm script rather than `webServer.command` is deliberate: `reuseExistingServer` is true outside CI, so a leftover preview server would skip the command entirely.
+- `npm run test:e2e:ui` — Playwright interactive mode for local debugging (builds first, same reason)
 
 ## Architecture
 
