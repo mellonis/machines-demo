@@ -27,14 +27,25 @@ export function computeUnboundDiagnostics(state: EditorState, env: Env): Diagnos
 
   // `rawLocals` only carries top-level `const`/`let` and import destructures
   // (the completions scanner's scope). It misses bindings introduced by
-  // for / for-of / for-in headers, top-level block-scoped declarations, and
-  // hoisted function declarations — so a bare `for (let i ...)` loop variable
-  // would be flagged as undefined. Pre-pass for every top-level
-  // `VariableDefinition` name (forward refs and hoisting are both covered;
-  // document order is irrelevant) and treat them as bound. Collection is
-  // scoped to `funcDepth 0` — the same scope the VariableName check runs in —
-  // so a name bound only inside a function body (a param or inner local) does
-  // NOT suppress a genuine top-level undefined use of the same name.
+  // for / for-of / for-in headers and by top-level block-scoped declarations,
+  // so a bare `for (let i ...)` loop variable would be flagged as undefined.
+  // Pre-pass collecting every `VariableDefinition` name at depth 0 and treat
+  // those as bound; because it walks the whole tree up front, document order is
+  // irrelevant — forward references and `var` hoisting fall out for free.
+  //
+  // Collection is scoped to the same depth the VariableName check runs at, so a
+  // name bound only inside a function body (a param or an inner local) does NOT
+  // suppress a genuine top-level undefined use of the same name.
+  //
+  // Two consequences of that shape are worth knowing:
+  //  - Block scoping is flattened. A `const x` inside any top-level block marks
+  //    `x` bound for the whole file, so a genuinely undefined use of `x`
+  //    elsewhere goes unreported. Deliberate — this linter errs toward false
+  //    negatives rather than crying wolf on valid code.
+  //  - Function-declaration names are NOT collected: entering a
+  //    `FunctionDeclaration` bumps the depth before the walk reaches the node
+  //    carrying its name, so a top-level call to a hoisted `function foo() {}`
+  //    is still flagged. Fixable by reading the name before the bump.
   const definedNames = new Set<string>();
   let collectDepth = 0;
   tree.iterate({
