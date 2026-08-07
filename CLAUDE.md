@@ -23,6 +23,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Bumping `@playwright/test` requires a matching browser download — run `npx playwright install chromium` after the install, or the suite fails with `Executable doesn't exist`. CI does this in its own step, keyed on the `package-lock.json` hash, so it self-heals there.
 
+**`@types/node`'s major tracks the Node version CI runs on** (`NODE_VERSION` in `.github/workflows/`), not npm's latest — the types should describe the runtime the suite actually tests, not advertise APIs from a newer Node. Currently both are 24 (active LTS). When CI moves to a new Node line, bump the types major in the same change. This policy applies across the sibling repos (turing-machine-js, post-machine-js use the same Node 24 CI).
+
 ## Architecture
 
 ```
