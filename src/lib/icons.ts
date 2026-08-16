@@ -21,6 +21,7 @@ import resetCode from '@tabler/icons/outline/arrow-back-up.svg?raw';
 import right from '@tabler/icons/outline/arrow-narrow-right.svg?raw';
 import run from '@tabler/icons/outline/player-play.svg?raw';
 import saveFloppy from '@tabler/icons/outline/device-floppy.svg?raw';
+import settingsGear from '@tabler/icons/outline/settings.svg?raw';
 import stay from '@tabler/icons/outline/keyframe-align-horizontal.svg?raw';
 import step from '@tabler/icons/outline/player-skip-forward.svg?raw';
 import stop from '@tabler/icons/outline/player-stop.svg?raw';
@@ -56,6 +57,7 @@ export const icons = {
   right,
   run,
   saveFloppy,
+  settingsGear,
   stay,
   step,
   stop,

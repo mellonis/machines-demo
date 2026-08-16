@@ -1,4 +1,4 @@
-import { MAX_STEPS, WORKER_TIMEOUT_MS } from './caps.ts';
+import { getSetting } from './settings.ts';
 import {
   type BreakpointKind,
   type BreakpointToggledResponse,
@@ -111,6 +111,9 @@ export class MachineRunner {
   private startRunTimer(): void {
     if (!this.runPending) return;
     if (this.runPending.timeoutId) clearTimeout(this.runPending.timeoutId);
+    // Read at schedule time so a settings change applies from the next
+    // request segment onward.
+    const timeoutMs = getSetting('workerTimeoutMs');
     this.runPending.timeoutId = setTimeout(() => {
       const p = this.runPending;
       this.runPending = null;
@@ -118,8 +121,8 @@ export class MachineRunner {
         this.worker.terminate();
         this.worker = null;
       }
-      p?.reject(new Error(`timeout after ${WORKER_TIMEOUT_MS}ms — worker terminated (likely infinite loop)`));
-    }, WORKER_TIMEOUT_MS);
+      p?.reject(new Error(`timeout after ${timeoutMs}ms — worker terminated (likely infinite loop)`));
+    }, timeoutMs);
   }
 
   private stopRunTimer(): void {
@@ -209,14 +212,15 @@ export class MachineRunner {
     if (this.simplePending || this.runPending) throw new Error('previous request still pending');
 
     return new Promise<WorkerResponse>((resolve, reject) => {
+      const timeoutMs = getSetting('workerTimeoutMs');
       const timeoutId = setTimeout(() => {
         this.simplePending = null;
         if (this.worker) {
           this.worker.terminate();
           this.worker = null;
         }
-        reject(new Error(`timeout after ${WORKER_TIMEOUT_MS}ms — worker terminated (likely infinite loop)`));
-      }, WORKER_TIMEOUT_MS);
+        reject(new Error(`timeout after ${timeoutMs}ms — worker terminated (likely infinite loop)`));
+      }, timeoutMs);
       this.simplePending = { resolve, reject, timeoutId };
       this.worker!.postMessage(msg);
     });
@@ -273,7 +277,7 @@ export class MachineRunner {
       this.startRunTimer();
       this.worker!.postMessage({
         type: 'run',
-        maxSteps: opts.maxSteps ?? MAX_STEPS,
+        maxSteps: opts.maxSteps ?? getSetting('maxSteps'),
         debug: opts.debug ?? false,
         step: opts.step ?? false,
         intervalMs: opts.intervalMs ?? null,

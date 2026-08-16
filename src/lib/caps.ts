@@ -13,12 +13,14 @@ export const VIEWPORT_WIDTH = 23;
 
 /** Step backstop: `runToEnd` stops here even if the machine hasn't halted,
  *  setting `truncated: true` on the `ran` response. Complements
- *  `WORKER_TIMEOUT_MS` (steps vs. wall-clock). */
+ *  `WORKER_TIMEOUT_MS` (steps vs. wall-clock). Default only — user-tunable
+ *  via the settings panel (`lib/settings.ts`), Infinity allowed. */
 export const MAX_STEPS = 100_000;
 
 /** Wall-clock backstop: `MachineRunner` kills the worker if a single request
  *  doesn't reply within this window (handles infinite loops in user code that
- *  never yield, beyond what `MAX_STEPS` catches). */
+ *  never yield, beyond what `MAX_STEPS` catches). Default only — user-tunable
+ *  via the settings panel (`lib/settings.ts`). */
 export const WORKER_TIMEOUT_MS = 5_000;
 
 /** UI-side cap on tape count. `CARET_COLORS` (in `MachineView.svelte`) must
@@ -40,7 +42,8 @@ export const BELT_ANIMATION_MIN_INTERVAL_MS = 400;
 /** Render-view cap: `Log.svelte` only ever renders this many entries.
  *  Anything older lives in the LogStore's non-reactive buffer and is
  *  summarized by a synthetic overflow header. Bounds the DOM cost of a
- *  large-trace flush; may become user-configurable in the future. */
+ *  large-trace flush. Default only — user-tunable via the settings panel
+ *  (`lib/settings.ts`). */
 export const LOG_RENDER_CAP = 5000;
 
 /** Flush interval for the LogStore's buffer-to-view recompute. `report` /

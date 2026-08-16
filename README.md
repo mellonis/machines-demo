@@ -95,10 +95,12 @@ src/
 │   ├── Editor.svelte           # CodeMirror wrapper + localStorage persist
 │   ├── Log.svelte              # entries list (desktop) / latest line (mobile)
 │   ├── IconButton.svelte       # icon + optional label
-│   └── DiagnosticsCounter.svelte  # E / W / I pill overlay in the editor's bottom-right; each pill hides at count 0
+│   ├── DiagnosticsCounter.svelte  # E / W / I pill overlay in the editor's bottom-right; each pill hides at count 0
+│   └── SettingsPanel.svelte    # header gear — modal exposing the tunable caps (max run steps / worker timeout / log render cap)
 └── lib/
     ├── types.ts                # Engine, Command, Alphabets, WorkerRequest/Response (TapeSnapshot + Graph imported from @turing-machine-js/{visuals,machine})
     ├── caps.ts                 # numeric caps: VIEWPORT_WIDTH, MAX_STEPS, WORKER_TIMEOUT_MS, MAX_TAPES
+    ├── settings.ts             # user-tunable caps over localStorage — validated overrides of the caps.ts defaults
     ├── machineRunner.ts        # main-thread worker wrapper; per-segment timeout; injected workerFactory
     ├── machineRunner.test.ts   # Vitest suite for MachineRunner — protocol-shape / timer / pending / error
     ├── machineWorker.ts        # spawns user code via new Function inside worker

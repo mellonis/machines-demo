@@ -45,10 +45,14 @@ src/
 │   ├── Editor.svelte        CodeMirror 6 wrapper + reset overlay
 │   ├── Log.svelte           log entries (desktop)
 │   ├── IconButton.svelte    shared corner-overlay icon button (reset / clear)
-│   └── DiagnosticsCounter.svelte  three-pill overlay (#106) — E / W / I pills, each hidden when count is 0; bottom-right absolute-positioned, click-through (pointer-events: none) in Phase 1. Colors from --diag-error / --diag-warning / --diag-info palette tokens.
+│   ├── DiagnosticsCounter.svelte  three-pill overlay (#106) — E / W / I pills, each hidden when count is 0; bottom-right absolute-positioned, click-through (pointer-events: none) in Phase 1. Colors from --diag-error / --diag-warning / --diag-info palette tokens.
+│   ├── SettingsPanel.svelte  gear in the header (#65) — native `<dialog>` modal exposing the three tunable caps (max run steps / worker timeout / log render cap) with per-field validation, inline error, and reset-to-default; valid input persists immediately via lib/settings.ts
+│   └── SettingsPanel.test.ts Vitest suite for SettingsPanel — open / valid-persists / invalid-error / infinity / reset (cites C-settings-...)
 └── lib/
     ├── types.ts                Engine, Command, Alphabets, WorkerRequest/Response (TapeSnapshot + Graph imported from @turing-machine-js/{visuals,machine})
     ├── caps.ts                 numeric caps: VIEWPORT_WIDTH, MAX_STEPS, WORKER_TIMEOUT_MS, MAX_TAPES
+    ├── settings.ts             user-tunable caps (#65) — SETTING_SPECS (defaults from caps.ts + min/max; maxSteps also accepts Infinity), read-through getSetting / write-through setSetting / resetSetting / parseSettingValue over `machines-demo:settings:<key>`; plain TS (no runes) so node-env suites import it
+    ├── settings.test.ts        Vitest suite for settings — defaults / roundtrip / invalid-stored-falls-back / infinity / reset / parse (cites S-settings-...)
     ├── machineRunner.ts        main-thread worker wrapper; WORKER_TIMEOUT_MS per-segment cap; injected workerFactory
     ├── machineRunner.test.ts   Vitest suite for MachineRunner — protocol-shape / timer / pending / error categories (cites R-... / S-... scenario IDs)
     ├── machineWorker.ts        spawns user code via new Function inside worker; imports pure logic from workerHelpers.ts
@@ -112,7 +116,8 @@ e2e/
 ├── cold-start.spec.ts          boot / step / run / pause / stop scenarios (cites E-cold-start-..., M-boot-...)
 ├── completions.spec.ts         member access / state.debug RHS / auto-import roundtrip (cites E-completions-...)
 ├── diagnostics-counter.spec.ts counter pills fed by syntaxLinter + unboundLinter; pill clears when the code is fixed (cites E-diag-...)
-└── landing.spec.ts             `/` route — snippet panels, engine switch, deep link, scroll-triggered playback
+├── landing.spec.ts             `/` route — snippet panels, engine switch, deep link, scroll-triggered playback
+└── settings.spec.ts            settings panel — persist across reload, invalid input dropped, lowered maxSteps truncates a real run (cites E-settings-...)
 
 playwright.config.ts            Chromium project; webServer runs `npm run preview`
 
@@ -177,6 +182,8 @@ The main thread converts each `TapeSnapshot` to a `turing.Tape` once via `_build
 - `WORKER_TIMEOUT_MS = 5_000` — wall-clock cap on a single worker request **segment**. For `build` / `step` / `run`-without-pause it's a round-trip cap. For `run` with paused/resume cycles it's per-segment: timer suspends on each `paused` (user is inspecting; no clock), restarts on `resume`-send, killed on `ran`/`error`. The `MachineRunner` schedules a `setTimeout` and kills the worker (terminate + respawn next request) if any segment exceeds it.
 - `VIEWPORT_WIDTH = 23` — see Tape section below.
 
+`MAX_STEPS`, `WORKER_TIMEOUT_MS`, and `LOG_RENDER_CAP` are **defaults**, user-tunable via the header settings panel (#65, `SettingsPanel.svelte` + `lib/settings.ts` — `machines-demo:settings:<key>`, engine-agnostic). Consumers read at use time (`getSetting`): the runner resolves `maxSteps` when posting a `run` request and the timeout when scheduling each segment timer; the LogStore reads the render cap at each flush. `maxSteps` alone also accepts `Infinity` (input `Infinity` / `∞`) — an uncapped run stays bounded by the wall-clock timeout, whereas an Infinity timeout would disable the watchdog and an Infinity log cap would unbound the DOM, so those two stay strict-integer. Invalid stored values fall back to the default (no clamping).
+
 Tape derivation in `machineWorker.ts` prefers `tapeBlock.tapes` so a user adapting the single-tape default snippet to multi-tape doesn't silently see only tape 0.
 
 ## Tape (the belt)
@@ -227,7 +234,7 @@ A `.head-thread` div sits behind the stack as the first child of `.tapes-stack` 
 
 ## Conventions
 
-- **localStorage** keys follow `machines-demo:<engine>:<key>` hierarchy (non-engine key `machines-demo:theme` is the only exception): `code` persists editor contents, `example` the selected bundled example id, `snippets` the user snippet map (keyed by UUID → `{ title, code, savedAt }`). The currently loaded snippet's UUID is **not** stored here — it lives in the URL (`?snippet=<uuid>`) so it's bookmarkable / shareable. (Via `lib/persist.ts`, errors swallowed.)
+- **localStorage** keys follow `machines-demo:<engine>:<key>` hierarchy (non-engine keys: `machines-demo:theme`, and `machines-demo:settings:<key>` for the app-wide caps — see `lib/settings.ts`): `code` persists editor contents, `example` the selected bundled example id, `snippets` the user snippet map (keyed by UUID → `{ title, code, savedAt }`). The currently loaded snippet's UUID is **not** stored here — it lives in the URL (`?snippet=<uuid>`) so it's bookmarkable / shareable. (Via `lib/persist.ts`, errors swallowed.)
 - **`log.report(text, kind?)`** in MachineView is the single log entry point — appends to the LogStore buffer and schedules a 16ms flush. `log.reportSeparator()` pushes a `{separator: true}` entry that `Log.svelte` renders as an `<hr>`; called before each Build / first-Step / Run so distinct sessions read as visually grouped. The mobile-status `latestEntry $derived` (now `$derived(log.latest)`) skips separator and overflow-header entries. `LogKind` is `error | warn | ok | pause | abort`; `abort` (crimson, DASHED left stripe — the dash matches the graph's abort sentinel node) marks the aborted-run terminal line and its `↳ <frame>` backtrace lines. HALTED presentation is outcome-flavored: MachineView keeps `terminalOutcome` / `terminalStateId` from the `ran` response, and `deriveGraphHighlight` keeps a terminal highlight (final state → abort node, `toId: -1`) alive in HALTED mode after an abort — a classical halt keeps no highlight, errors clear the flavor.
 - **CSS nesting** is used throughout (native, no preprocessor) — Vite's CSS pipeline handles it; supported by all evergreen browsers. Keep nesting shallow (≤2 levels) to preserve specificity readability.
 - **No UI substitution of alphabet symbols.** The user picks the blank glyph in their alphabet; the UI renders the literal symbol. CSS classes (`Tape.svelte#.cell.blank`, `ControlPanel.svelte#.cp-btn.blank`) provide visual hints (dim border / opacity) so blank cells remain recognisable regardless of which character was chosen — no character is reserved for "blank visualization", so no alphabet glyph collides with one.

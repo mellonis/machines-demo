@@ -1105,4 +1105,73 @@ describe('MachineRunner', () => {
       expect((caught as Error).message).toMatch(/^worker error: worker crashed/);
     });
   });
+
+  describe('settings overrides', () => {
+    // Node env has no localStorage — install a minimal stub so the settings
+    // module (read-through at use time) sees the overrides.
+    beforeEach(() => {
+      const store = new Map<string, string>();
+      globalThis.localStorage = {
+        getItem: (k: string) => store.get(k) ?? null,
+        setItem: (k: string, v: string) => void store.set(k, v),
+        removeItem: (k: string) => void store.delete(k),
+        clear: () => store.clear(),
+        key: () => null,
+        get length() {
+          return store.size;
+        },
+      } as Storage;
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      Reflect.deleteProperty(globalThis, 'localStorage');
+    });
+
+    it('R-settings-maxsteps: bare run() posts the settings maxSteps override', async () => {
+      localStorage.setItem('machines-demo:settings:maxSteps', '500');
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const buildPromise = runner.build('// user code');
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
+      await buildPromise;
+
+      void runner.run().catch(() => {});
+      expect(current().last).toMatchObject({ type: 'run', maxSteps: 500 });
+    });
+
+    it('R-settings-simple-timeout: build timeout fires at the settings workerTimeoutMs override', async () => {
+      localStorage.setItem('machines-demo:settings:workerTimeoutMs', '1000');
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const buildPromise = runner.build('// user code');
+      const assertion = expect(buildPromise).rejects.toThrow(
+        'timeout after 1000ms — worker terminated (likely infinite loop)',
+      );
+      await vi.advanceTimersByTimeAsync(1000);
+      await assertion;
+      expect(current().terminated).toBe(true);
+    });
+
+    it('R-settings-run-timeout: run timer fires at the settings workerTimeoutMs override', async () => {
+      localStorage.setItem('machines-demo:settings:workerTimeoutMs', '1000');
+      const { factory, current } = makeFakeFactory();
+      const runner = new MachineRunner('turing', factory);
+
+      const buildPromise = runner.build('// user code');
+      current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
+      await buildPromise;
+
+      const runPromise = runner.run();
+      const assertion = expect(runPromise).rejects.toThrow(
+        'timeout after 1000ms — worker terminated (likely infinite loop)',
+      );
+      await vi.advanceTimersByTimeAsync(1000);
+      await assertion;
+      expect(current().terminated).toBe(true);
+    });
+  });
 });
