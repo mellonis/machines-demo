@@ -25,6 +25,7 @@
     snippets: Snippets;
     loadedSnippetId: string | null;
     dirty: boolean;
+    staleBuild: boolean;
     onBuild: () => void;
     onStep: () => void;
     onRun: () => void;
@@ -51,6 +52,7 @@
     snippets,
     loadedSnippetId,
     dirty,
+    staleBuild,
     onBuild,
     onStep,
     onRun,
@@ -427,7 +429,13 @@
     </dialog>
   </div>
 
-  <button type="button" disabled={loadDisabled} onclick={onBuild}>
+  <button
+    type="button"
+    class:stale={staleBuild}
+    disabled={loadDisabled}
+    title={staleBuild ? 'code changed since last Build' : undefined}
+    onclick={onBuild}
+  >
     {@html icons.build}<span class="btn-label">Build</span>
   </button>
   <button type="button" disabled={stepDisabled} onclick={onStep}>
@@ -541,7 +549,11 @@
     padding: 6px 8px;
   }
 
-  .toolbar .save-menu .icon-only.dirty {
+  /* Accent dot shared by the save button's snippet-dirty state and the
+     Build button's stale-build state — same visual language: "this control
+     has unsaved/unbuilt editor changes behind it". */
+  .toolbar .save-menu .icon-only.dirty,
+  .toolbar button.stale {
     position: relative;
 
     &::after {

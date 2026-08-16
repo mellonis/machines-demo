@@ -155,6 +155,8 @@
   let pendingOp = $state<'load' | 'run' | null>(null);
   let mirrorMachine: turing.TuringMachine | null = null;
   let mirrorTapeBlock: turing.TapeBlock | null = null;
+  // Source of the last successful build; feeds the `staleBuild` derivation.
+  let builtSource = $state<string | null>(null);
   let codeChangedWarned = false;
   let stopRequested = $state(false);
   let withPause = $state(false);
@@ -313,6 +315,13 @@
   });
   const dirty = $derived(sourceCode !== null && code !== sourceCode);
   const resetVisible = $derived(dirty);
+  // Editor text differs from the last SUCCESSFULLY built source — edits,
+  // snippet loads, and example loads all flow through `code`, so no
+  // per-cause wiring. Any textual difference counts (same policy as
+  // `dirty`). A failed Build leaves `builtSource` untouched: the previous
+  // build is still the machine behind the graph/tape view, so the Build
+  // button keeps its stale accent until a build succeeds.
+  const staleBuild = $derived(builtSource !== null && code !== builtSource);
   const resetTitle = $derived(
     loadedSnippetId !== null && loadedSnippetId in snippets
       ? `Reset to "${snippets[loadedSnippetId].title}"`
@@ -496,6 +505,7 @@
     try {
       const res = await runner.build(source);
       workerLive = true;
+      builtSource = source;
       alphabets = res.alphabets;
       lastSnapshots = res.tapes;
       halted = res.halted;
@@ -1193,6 +1203,7 @@
       {snippets}
       {loadedSnippetId}
       {dirty}
+      {staleBuild}
       {onSaveSnippet}
       {onSaveChanges}
       {onLoadSnippet}
