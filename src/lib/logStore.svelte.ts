@@ -1,5 +1,6 @@
 import type { LogEntry, LogKind } from './log.ts';
-import { LOG_FLUSH_INTERVAL_MS, LOG_RENDER_CAP } from './caps.ts';
+import { LOG_FLUSH_INTERVAL_MS } from './caps.ts';
+import { getSetting } from './settings.ts';
 
 export class LogStore {
   #buffer: LogEntry[] = [];
@@ -76,10 +77,12 @@ export class LogStore {
   }
 
   #flush(): void {
-    const overflow = this.#buffer.length - LOG_RENDER_CAP;
+    // Read at flush time so a settings change applies on the next log update.
+    const cap = getSetting('logRenderCap');
+    const overflow = this.#buffer.length - cap;
     if (overflow > 0) {
       const header: LogEntry = { text: '', overflow: true, hiddenCount: overflow };
-      this.entries = [header, ...this.#buffer.slice(-LOG_RENDER_CAP)];
+      this.entries = [header, ...this.#buffer.slice(-cap)];
     } else {
       this.entries = [...this.#buffer];
     }

@@ -3,6 +3,7 @@
   import { turingVersion, postVersion, visualsVersion, appVersion } from 'virtual:lib-versions';
   import Landing from './components/Landing.svelte';
   import MachineView from './components/MachineView.svelte';
+  import SettingsPanel from './components/SettingsPanel.svelte';
   import { icons } from './lib/icons.ts';
   import { legacyMachineRewrite, readRouteFromUrl } from './lib/routing.ts';
   import { theme } from './lib/theme.svelte.ts';
@@ -94,6 +95,7 @@
   >
     {@html themeIcon}
   </button>
+  <SettingsPanel />
 </header>
 
 <main>

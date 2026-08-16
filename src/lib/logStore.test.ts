@@ -44,6 +44,36 @@ describe('LogStore', () => {
       expect(log.entries[LOG_RENDER_CAP]).toEqual({ text: `entry ${LOG_RENDER_CAP + 99}` });
     });
 
+    it('R-logstore-cap-setting: the settings logRenderCap override bounds the flushed view', () => {
+      // Node env has no localStorage — install a minimal stub carrying the
+      // override so the settings module (read-through at flush time) sees it.
+      // 100 is the spec's min — any smaller override would (correctly) fall
+      // back to the default.
+      const store = new Map<string, string>([['machines-demo:settings:logRenderCap', '100']]);
+      globalThis.localStorage = {
+        getItem: (k: string) => store.get(k) ?? null,
+        setItem: (k: string, v: string) => void store.set(k, v),
+        removeItem: (k: string) => void store.delete(k),
+        clear: () => store.clear(),
+        key: () => null,
+        get length() {
+          return store.size;
+        },
+      } as Storage;
+      try {
+        const log = new LogStore();
+        log.appendBatch(Array.from({ length: 103 }, (_, i) => ({ text: `entry ${i}` })));
+        vi.advanceTimersByTime(LOG_FLUSH_INTERVAL_MS);
+
+        expect(log.entries.length).toBe(101);
+        expect(log.entries[0]).toEqual({ text: '', overflow: true, hiddenCount: 3 });
+        expect(log.entries[1]).toEqual({ text: 'entry 3' });
+        expect(log.entries[100]).toEqual({ text: 'entry 102' });
+      } finally {
+        Reflect.deleteProperty(globalThis, 'localStorage');
+      }
+    });
+
     it('R-logstore-cap-boundary: exactly CAP → no header; CAP+1 → header hiddenCount=1', () => {
       const a = new LogStore();
       a.appendBatch(Array.from({ length: LOG_RENDER_CAP }, (_, i) => ({ text: `${i}` })));
