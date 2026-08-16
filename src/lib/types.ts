@@ -319,6 +319,23 @@ export type BreakpointToggledResponse = {
   value: 'on' | 'off';
 };
 
+/**
+ * Periodic progress heartbeat the worker posts from inside its run loop
+ * (time-gated, ~every PROGRESS_INTERVAL_MS). The main thread is free while
+ * the worker computes, so these arrive even when the worker never gets to
+ * answer the run — which is exactly their purpose: when the worker is
+ * terminated mid-run (watchdog timeout or hand Stop), the last heartbeat is
+ * the only record of where the machine got to. Doesn't complete the run
+ * Promise; the runner just stashes the latest one.
+ */
+export type ProgressResponse = {
+  type: 'progress';
+  tapes: TapeSnapshot[];
+  stepsApplied: number;
+  /** Display name of the state the last applied step landed in. */
+  stateName: string | null;
+};
+
 export type ErrorResponse = {
   type: 'error';
   message: string;
@@ -340,4 +357,5 @@ export type WorkerResponse =
   | IdleResponse
   | BusyResponse
   | BreakpointToggledResponse
+  | ProgressResponse
   | ErrorResponse;

@@ -6,6 +6,7 @@ import {
   type Engine,
   type IdleResponse,
   type PausedResponse,
+  type ProgressResponse,
   type RanResponse,
   type SteppedResponse,
   type WorkerRequest,
@@ -26,6 +27,24 @@ export class WorkerError extends Error {
     super(message);
     this.name = 'WorkerError';
     this.tapes = tapes;
+  }
+}
+
+/**
+ * Thrown when a run segment exceeds the watchdog timeout and the worker is
+ * terminated. A killed worker never answers, so `tapes` comes from the last
+ * `progress` heartbeat the worker posted during the run (`null` when none
+ * arrived) — steps applied after that heartbeat are lost with the worker.
+ */
+export class WorkerTimeoutError extends WorkerError {
+  readonly stepsApplied: number | null;
+  readonly stateName: string | null;
+
+  constructor(message: string, progress: ProgressResponse | null) {
+    super(message, progress?.tapes ?? null);
+    this.name = 'WorkerTimeoutError';
+    this.stepsApplied = progress?.stepsApplied ?? null;
+    this.stateName = progress?.stateName ?? null;
   }
 }
 
@@ -79,6 +98,19 @@ export class MachineRunner {
    */
   onUncorrelatedError: ((message: string) => void) | null = null;
 
+  /**
+   * Last `progress` heartbeat received during the current (or just-killed)
+   * run. Non-null only while a run is in flight or after it was terminated
+   * mid-run — cleared at each `run()` start and on clean `ran` completion.
+   * Deliberately survives `terminate()`: the hand-Stop path reads it after
+   * killing the worker to restore the tape view to the last known state.
+   */
+  private lastRunProgress: ProgressResponse | null = null;
+
+  get lastProgress(): ProgressResponse | null {
+    return this.lastRunProgress;
+  }
+
   constructor(engine: Engine, workerFactory: WorkerFactory) {
     this.engine = engine;
     this.workerFactory = workerFactory;
@@ -121,7 +153,10 @@ export class MachineRunner {
         this.worker.terminate();
         this.worker = null;
       }
-      p?.reject(new Error(`timeout after ${timeoutMs}ms — worker terminated (likely infinite loop)`));
+      p?.reject(new WorkerTimeoutError(
+        `timeout after ${timeoutMs}ms — worker terminated (likely infinite loop)`,
+        this.lastRunProgress,
+      ));
     }, timeoutMs);
   }
 
@@ -156,6 +191,15 @@ export class MachineRunner {
       this.startRunTimer();
       return;
     }
+    if (data.type === 'progress') {
+      // Heartbeat from inside the worker's run loop — stash the latest so a
+      // termination (watchdog / hand Stop) can restore the last known state.
+      // Gated on a pending run: a heartbeat can't outlive its run because
+      // every path that clears `runPending` synchronously precedes any
+      // further message dispatch.
+      if (this.runPending) this.lastRunProgress = data;
+      return;
+    }
     if (data.type === 'breakpointToggled') {
       // Side-channel echo — doesn't complete any pending Promise, just
       // signals the UI to update its indicator state. May arrive at any
@@ -167,6 +211,7 @@ export class MachineRunner {
     if (data.type === 'ran') {
       const p = this.runPending;
       this.runPending = null;
+      this.lastRunProgress = null;
       if (!p) return;
       if (p.timeoutId) clearTimeout(p.timeoutId);
       p.resolveRan(data);
@@ -266,6 +311,7 @@ export class MachineRunner {
     if (!this.worker) throw new Error('worker not spawned — call build() first');
     if (this.simplePending || this.runPending) throw new Error('previous request still pending');
 
+    this.lastRunProgress = null;
     return new Promise<RanResponse>((resolveRan, reject) => {
       this.runPending = {
         resolveRan,

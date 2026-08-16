@@ -8,10 +8,10 @@
   import MachineGraph from './MachineGraph.svelte';
   import { LogStore } from '../lib/logStore.svelte.ts';
   import MachineWorker from '../lib/machineWorker.ts?worker';
-  import { MachineRunner, WorkerError } from '../lib/machineRunner.ts';
+  import { MachineRunner, WorkerError, WorkerTimeoutError } from '../lib/machineRunner.ts';
   import * as turing from '@turing-machine-js/machine';
   import { BELT_ANIMATION_MIN_INTERVAL_MS, MAX_TAPES, VIEWPORT_WIDTH } from '../lib/caps.ts';
-  import { type Alphabets, type BreakpointKind, type Command, type Engine, type IdleResponse, type PausedResponse, type RanResponse } from '../lib/types.ts';
+  import { type Alphabets, type BreakpointKind, type Command, type Engine, type IdleResponse, type PausedResponse, type ProgressResponse, type RanResponse } from '../lib/types.ts';
   import type { Graph } from '@turing-machine-js/machine';
   import { bareIdOf, type GraphHighlight, type TapeSnapshot } from '@turing-machine-js/visuals';
   import { parseInterval } from '../lib/interval.ts';
@@ -371,19 +371,53 @@
     return window.matchMedia('(max-width: 719px)').matches;
   }
 
+  // Restore the tape view from the last progress heartbeat after the worker
+  // was terminated mid-run (watchdog timeout, hand Stop) — a killed worker
+  // never answers, so the heartbeat is the only record of where the machine
+  // got to. No-op when the heartbeat is missing or not ahead of what's
+  // already rendered: RUNNING_AUTO renders per-iter and a pause syncs exact
+  // tapes, so restoring there would regress the display to an older snapshot.
+  // Logs which step the restored view reflects — steps applied after the
+  // heartbeat are lost with the worker.
+  function restoreFromProgress(progress: ProgressResponse | null): void {
+    if (!progress || progress.tapes.length === 0) return;
+    if (progress.stepsApplied <= stepsApplied) return;
+    stepsApplied = progress.stepsApplied;
+    const tapesAtHeartbeat = progress.tapes;
+    // Queue behind any in-flight render chain, same as the pause/halt snaps.
+    renderChain = renderChain.then(() => {
+      lastSnapshots = tapesAtHeartbeat;
+      _buildMirrorMachine(tapesAtHeartbeat, alphabets);
+      setAllFromMirror();
+    });
+    const at = progress.stateName !== null ? ` at '${progress.stateName}'` : '';
+    log.report(
+      `tape shows step ${progress.stepsApplied}${at} — last snapshot before termination`,
+    );
+  }
+
   function failHalted(err: unknown): void {
     if (stopRequested) {
       stopRequested = false;
       return;
     }
     const msg = err instanceof Error ? err.message : String(err);
-    // Worker errored mid-step / mid-run. If it shipped a partial tape state,
-    // sync the mirror + display to it so the user sees where execution stuck
-    // (otherwise we'd strand them on the loaded tape).
-    if (err instanceof WorkerError && err.tapes && err.tapes.length > 0) {
-      // Queue mirror rebuild behind any in-flight RUNNING_AUTO render chain so
-      // the partial tape state lands after the last animated iter — otherwise
-      // a stale render could overwrite the error snap.
+    log.report(`error: ${msg}`, 'error');
+    if (err instanceof WorkerTimeoutError) {
+      // Watchdog killed the worker mid-run — no reply ever came, so fall
+      // back to the last progress heartbeat it posted from the run loop.
+      restoreFromProgress(
+        err.tapes && err.tapes.length > 0
+          ? { type: 'progress', tapes: err.tapes, stepsApplied: err.stepsApplied ?? 0, stateName: err.stateName }
+          : null,
+      );
+    } else if (err instanceof WorkerError && err.tapes && err.tapes.length > 0) {
+      // Worker errored mid-step / mid-run and shipped a partial tape state:
+      // sync the mirror + display to it so the user sees where execution
+      // stuck (otherwise we'd strand them on the loaded tape). Queue the
+      // mirror rebuild behind any in-flight RUNNING_AUTO render chain so
+      // the partial tape state lands after the last animated iter —
+      // otherwise a stale render could overwrite the error snap.
       const tapesAtError = err.tapes;
       renderChain = renderChain.then(() => {
         lastSnapshots = tapesAtError;
@@ -391,7 +425,6 @@
         setAllFromMirror();
       });
     }
-    log.report(`error: ${msg}`, 'error');
     halted = true;
     // Errors keep their own presentation; make sure a stale abort flavor
     // from a prior run doesn't ride along into this HALTED state.
@@ -588,11 +621,11 @@
   }
 
   function stopMachine(): void {
-    if (
+    const wasRunning =
       executionMode === 'RUNNING_PAUSED' ||
       executionMode === 'RUNNING_AUTO' ||
-      executionMode === 'RUNNING_CONTINUOUS'
-    ) {
+      executionMode === 'RUNNING_CONTINUOUS';
+    if (wasRunning) {
       // Pending run Promise will reject when we terminate; failHalted in the
       // caller's catch is suppressed via stopRequested. We don't clear
       // workerLive — Run/Step from HALTED reload-from-code (same as halt-via-
@@ -602,6 +635,11 @@
     }
     executionMode = 'HALTED';
     log.report('stopped', 'warn');
+    // Hand Stop terminated the worker without a reply; the runner keeps the
+    // last progress heartbeat across terminate() for exactly this read. The
+    // restore no-ops for RUNNING_AUTO / RUNNING_PAUSED stops, whose displays
+    // are already at or past the heartbeat.
+    if (wasRunning) restoreFromProgress(runner.lastProgress);
   }
 
   function reflectToActivePanel(commands: Command[] | null): void {

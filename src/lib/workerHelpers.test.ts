@@ -8,6 +8,7 @@ import {
   snapshotTapes,
   snapshotAlphabets,
   expectPhase,
+  createProgressGate,
   type MachineYield,
   type TapeLike,
 } from './workerHelpers';
@@ -226,6 +227,29 @@ describe('workerHelpers', () => {
     it('R-phase-guard-message-format: error message reads `worker phase X, expected Y|Z`', () => {
       expect(() => expectPhase('idle', ['built', 'paused']))
         .toThrow('worker phase idle, expected built|paused');
+    });
+  });
+
+  describe('progress-gate', () => {
+    it('R-progress-gate-holds-first-interval: stays closed until one full interval from creation', () => {
+      let now = 1000;
+      const gate = createProgressGate(250, () => now);
+      expect(gate()).toBe(false);
+      now = 1249;
+      expect(gate()).toBe(false);
+      now = 1250;
+      expect(gate()).toBe(true);
+    });
+
+    it('R-progress-gate-rearms: after opening, closed again until another interval elapses', () => {
+      let now = 0;
+      const gate = createProgressGate(250, () => now);
+      now = 300;
+      expect(gate()).toBe(true);
+      now = 549;
+      expect(gate()).toBe(false);
+      now = 550;
+      expect(gate()).toBe(true);
     });
   });
 

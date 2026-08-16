@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { MAX_STEPS, WORKER_TIMEOUT_MS } from './caps';
-import { MachineRunner, WorkerError } from './machineRunner';
+import { MachineRunner, WorkerError, WorkerTimeoutError } from './machineRunner';
 import { type PausedResponse } from './types';
 import { makeFakeFactory } from './testUtils';
 
@@ -1172,6 +1172,138 @@ describe('MachineRunner', () => {
       await vi.advanceTimersByTimeAsync(1000);
       await assertion;
       expect(current().terminated).toBe(true);
+    });
+  });
+
+  describe('progress', () => {
+    const RAN = {
+      type: 'ran' as const,
+      tapes: [],
+      truncated: false,
+      outcome: 'halted' as const,
+      finalStateName: null,
+      finalStateId: null,
+      backtrace: [],
+      commands: [],
+      reads: [],
+      matchKinds: [],
+      currentStateId: null,
+      startStep: 0,
+      stepsApplied: 5,
+    };
+
+    const PROGRESS = {
+      type: 'progress' as const,
+      tapes: [{ symbols: ['a', 'b'], position: 1 }],
+      stepsApplied: 42,
+      stateName: 'q1',
+    };
+
+    async function builtRunner() {
+      const made = makeFakeFactory();
+      const runner = new MachineRunner('turing', made.factory);
+      const buildPromise = runner.build('// user code');
+      made.current().respond({ type: 'built', tapes: [], alphabets: [], halted: false, graph: { initialId: 0, alphabets: [], nodes: {} } });
+      await buildPromise;
+      return { runner, ...made };
+    }
+
+    it('R-progress-stash: a progress message during a run is stashed on lastProgress and does not complete the run', async () => {
+      const { runner, current } = await builtRunner();
+
+      const runPromise = runner.run({});
+      expect(runner.lastProgress).toBeNull();
+      current().respond(PROGRESS);
+      expect(runner.lastProgress).toEqual(PROGRESS);
+
+      // Run is still pending — only ran/error complete it.
+      current().respond(RAN);
+      await expect(runPromise).resolves.toEqual(RAN);
+    });
+
+    it('R-progress-timeout-carries-progress: a run timeout after progress rejects with WorkerTimeoutError carrying the progress tapes, stepsApplied and stateName', async () => {
+      vi.useFakeTimers();
+      try {
+        const { runner, current } = await builtRunner();
+
+        const runPromise = runner.run({});
+        current().respond(PROGRESS);
+
+        let caught: unknown;
+        const assertion = runPromise.catch((e: unknown) => { caught = e; });
+        await vi.advanceTimersByTimeAsync(WORKER_TIMEOUT_MS);
+        await assertion;
+
+        expect(caught).toBeInstanceOf(WorkerTimeoutError);
+        expect(caught).toBeInstanceOf(WorkerError);
+        const err = caught as WorkerTimeoutError;
+        expect(err.message).toBe(
+          `timeout after ${WORKER_TIMEOUT_MS}ms — worker terminated (likely infinite loop)`,
+        );
+        expect(err.tapes).toEqual(PROGRESS.tapes);
+        expect(err.stepsApplied).toBe(42);
+        expect(err.stateName).toBe('q1');
+        expect(current().terminated).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('R-progress-timeout-without-progress: a run timeout with no progress received rejects with null tapes/stepsApplied/stateName', async () => {
+      vi.useFakeTimers();
+      try {
+        const { runner } = await builtRunner();
+
+        const runPromise = runner.run({});
+        let caught: unknown;
+        const assertion = runPromise.catch((e: unknown) => { caught = e; });
+        await vi.advanceTimersByTimeAsync(WORKER_TIMEOUT_MS);
+        await assertion;
+
+        expect(caught).toBeInstanceOf(WorkerTimeoutError);
+        const err = caught as WorkerTimeoutError;
+        expect(err.tapes).toBeNull();
+        expect(err.stepsApplied).toBeNull();
+        expect(err.stateName).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('R-progress-survives-terminate: lastProgress stays readable after terminate() so the Stop path can restore the tape view', async () => {
+      const { runner, current } = await builtRunner();
+
+      const runPromise = runner.run({});
+      current().respond(PROGRESS);
+      const rejection = expect(runPromise).rejects.toThrow('runner terminated');
+      runner.terminate();
+      await rejection;
+
+      expect(runner.lastProgress).toEqual(PROGRESS);
+    });
+
+    it('R-progress-cleared-on-new-run: a new run() resets lastProgress to null', async () => {
+      const { runner, current } = await builtRunner();
+
+      const firstRun = runner.run({});
+      current().respond(PROGRESS);
+      current().respond(RAN);
+      await firstRun;
+      // A clean completion also drops the stash — lastProgress non-null means
+      // "a run is in flight or was killed mid-run".
+      expect(runner.lastProgress).toBeNull();
+
+      const secondRun = runner.run({});
+      expect(runner.lastProgress).toBeNull();
+      current().respond(RAN);
+      await secondRun;
+    });
+
+    it('R-progress-ignored-without-pending-run: a progress message with no pending run is dropped', async () => {
+      const { runner, current } = await builtRunner();
+
+      current().respond(PROGRESS);
+      expect(runner.lastProgress).toBeNull();
     });
   });
 });

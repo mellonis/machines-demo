@@ -21,11 +21,12 @@ import {
   snapshotTapes,
   snapshotAlphabets,
   expectPhase,
+  createProgressGate,
   type MachineYield,
 } from './workerHelpers';
 import { computeImminentHalt } from './imminentHalt';
 
-import { MAX_STEPS, MAX_TAPES } from './caps.ts';
+import { MAX_STEPS, MAX_TAPES, PROGRESS_INTERVAL_MS } from './caps.ts';
 import type { Graph } from '@turing-machine-js/machine';
 import {
   type Command,
@@ -610,6 +611,15 @@ async function run(
   // yields have no such field — stays null there.
   let lastPostPath: string | null = null;
 
+  // Progress heartbeat: post the tape state + step count from inside the run
+  // loop so the main thread has a last-known state to restore when this
+  // worker is terminated without ever answering (watchdog timeout on a
+  // continuous run, hand Stop). postMessage clones synchronously and the
+  // main thread is free during the run, so heartbeats arrive even while the
+  // loop never yields. Time-gated so a million-step run costs a handful of
+  // snapshots, not one per step.
+  const progressGate = createProgressGate(PROGRESS_INTERVAL_MS, Date.now);
+
   ses.on('step', (m: MachineYield) => {
     runCommandBuffer.push(commandsFromYield(m));
     runReadsBuffer.push(readsFromYield(m));
@@ -626,6 +636,18 @@ async function run(
     // FROM of the just-fired triple.
     prevYieldedStateId = m.state.id;
     stepsApplied += 1;
+    if (progressGate()) {
+      // The lean step yield carries no state name; the graph node's name is
+      // the same source `toMermaid` labels use, wrapper-collapsed as usual.
+      const nodeName = currentGraph?.nodes[m.state.id]?.name ?? '';
+      const displayName = resolveDisplayName(m.state.id, nodeName);
+      send({
+        type: 'progress',
+        tapes: snapshotTapes(tapes),
+        stepsApplied,
+        stateName: displayName !== '' ? displayName : null,
+      });
+    }
   });
   ses.on('halt', (r) => { runResult = r; });
   ses.on('abort', (r) => { runResult = r; });

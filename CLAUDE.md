@@ -50,14 +50,14 @@ src/
 │   └── SettingsPanel.test.ts Vitest suite for SettingsPanel — open / valid-persists / invalid-error / infinity / reset (cites C-settings-...)
 └── lib/
     ├── types.ts                Engine, Command, Alphabets, WorkerRequest/Response (TapeSnapshot + Graph imported from @turing-machine-js/{visuals,machine})
-    ├── caps.ts                 numeric caps: VIEWPORT_WIDTH, MAX_STEPS, WORKER_TIMEOUT_MS, MAX_TAPES
+    ├── caps.ts                 numeric caps: VIEWPORT_WIDTH, MAX_STEPS, WORKER_TIMEOUT_MS, MAX_TAPES, PROGRESS_INTERVAL_MS
     ├── settings.ts             user-tunable caps (#65) — SETTING_SPECS (defaults from caps.ts + min/max; maxSteps also accepts Infinity), read-through getSetting / write-through setSetting / resetSetting / parseSettingValue over `machines-demo:settings:<key>`; plain TS (no runes) so node-env suites import it
     ├── settings.test.ts        Vitest suite for settings — defaults / roundtrip / invalid-stored-falls-back / infinity / reset / parse (cites S-settings-...)
-    ├── machineRunner.ts        main-thread worker wrapper; WORKER_TIMEOUT_MS per-segment cap; injected workerFactory
-    ├── machineRunner.test.ts   Vitest suite for MachineRunner — protocol-shape / timer / pending / error categories (cites R-... / S-... scenario IDs)
+    ├── machineRunner.ts        main-thread worker wrapper; WORKER_TIMEOUT_MS per-segment cap; injected workerFactory; stashes the run-loop progress heartbeat (lastProgress, kept across terminate) and rejects run timeouts with WorkerTimeoutError carrying it
+    ├── machineRunner.test.ts   Vitest suite for MachineRunner — protocol-shape / timer / pending / error / progress categories (cites R-... / S-... scenario IDs)
     ├── machineWorker.ts        spawns user code via new Function inside worker; imports pure logic from workerHelpers.ts
-    ├── workerHelpers.ts        pure helpers extracted from machineWorker — movementCode, commandsFromYield, snapshot*, expectPhase
-    ├── workerHelpers.test.ts   Vitest suite for workerHelpers — 5 topic groups (movement-code, commands, snapshot, phase-guard, step-arm)
+    ├── workerHelpers.ts        pure helpers extracted from machineWorker — movementCode, commandsFromYield, snapshot*, expectPhase, createProgressGate
+    ├── workerHelpers.test.ts   Vitest suite for workerHelpers — 6 topic groups (movement-code, commands, snapshot, phase-guard, step-arm, progress-gate)
     ├── testUtils.ts            FakeWorker + makeFakeFactory test helpers
     ├── log.ts                  log-entry types + helpers shared by Log.svelte
     ├── logStore.svelte.ts      per-MachineView log store — non-reactive #buffer + setTimeout-throttled $state view, LOG_RENDER_CAP slice with synthetic overflow header, buffer-sourced reactive `latest` getter
@@ -118,7 +118,8 @@ e2e/
 ├── diagnostics-counter.spec.ts counter pills fed by syntaxLinter + unboundLinter; pill clears when the code is fixed (cites E-diag-...)
 ├── landing.spec.ts             `/` route — snippet panels, engine switch, deep link, scroll-triggered playback
 ├── settings.spec.ts            settings panel — persist across reload, invalid input dropped, lowered maxSteps truncates a real run (cites E-settings-...)
-└── stale-build.spec.ts         stale-build notice — edit / example load shows the Build dot, successful Build clears it, failed Build keeps it (cites E-stale-build-...)
+├── stale-build.spec.ts         stale-build notice — edit / example load shows the Build dot, successful Build clears it, failed Build keeps it (cites E-stale-build-...)
+└── worker-termination.spec.ts  progress restore after worker termination — watchdog timeout and hand Stop restore the last heartbeat, auto-run Stop doesn't regress (cites E-term-...)
 
 playwright.config.ts            Chromium project; webServer runs `npm run preview`
 
@@ -158,6 +159,7 @@ All shapes are TS discriminated unions in `src/lib/types.ts`. Single canonical `
 | `{ type: 'setDebug', on }` | (no response — fire-and-forget; flips worker-side `debugEnabled` flag) |
 | `{ type: 'toggleBreakpoint', stateId, kind }` | `{ type: 'breakpointToggled', stateId, kind, value: 'on' \| 'off' }` (echo after the worker mutates `state.debug`) |
 | (none — auto-mode throttle gate) | `{ type: 'idle' }` / `{ type: 'busy' }` (sent by `onIter` during RUNNING_AUTO to signal whether the throttle is open) |
+| (none — run-loop heartbeat) | `{ type: 'progress', tapes, stepsApplied, stateName }` (time-gated every `PROGRESS_INTERVAL_MS` from the session's `step` listener during runs; the runner stashes the latest — `lastProgress`, kept across `terminate()` — so a worker termination that never gets a reply, watchdog timeout or hand Stop, can restore the tape view to the last known state. Timeout rejections carry it as `WorkerTimeoutError`; `MachineView` restores only when the heartbeat is ahead of what's rendered, so RUNNING_AUTO / paused displays never regress) |
 
 **Bidirectional breakpoints (machines-demo#37, #78).** Two paths set `state.debug`:
 
@@ -180,6 +182,7 @@ The main thread converts each `TapeSnapshot` to a `turing.Tape` once via `_build
 
 **Caps** (all in `lib/caps.ts`):
 - `MAX_TAPES = 5` — multi-tape limit; the worker rejects loads with more tapes than the caret palette can color.
+- `PROGRESS_INTERVAL_MS = 250` — cadence of the worker's run-loop `progress` heartbeats (see the worker-contract row above). Bounds the tape-snapshot cost while keeping a termination's restored view at most this stale; must stay well under the `workerTimeoutMs` settings floor (1 s).
 - `MAX_STEPS = 100_000` — `run`-mode hard cap; if `runToEnd` reaches it before the machine halts, the response sets `truncated: true`. Same backstop as `WORKER_TIMEOUT_MS` but counts steps instead of wall-clock time, so a tight loop that never yields still terminates eventually.
 - `WORKER_TIMEOUT_MS = 5_000` — wall-clock cap on a single worker request **segment**. For `build` / `step` / `run`-without-pause it's a round-trip cap. For `run` with paused/resume cycles it's per-segment: timer suspends on each `paused` (user is inspecting; no clock), restarts on `resume`-send, killed on `ran`/`error`. The `MachineRunner` schedules a `setTimeout` and kills the worker (terminate + respawn next request) if any segment exceeds it.
 - `VIEWPORT_WIDTH = 23` — see Tape section below.

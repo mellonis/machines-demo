@@ -99,7 +99,7 @@ src/
 │   └── SettingsPanel.svelte    # header gear — modal exposing the tunable caps (max run steps / worker timeout / log render cap)
 └── lib/
     ├── types.ts                # Engine, Command, Alphabets, WorkerRequest/Response (TapeSnapshot + Graph imported from @turing-machine-js/{visuals,machine})
-    ├── caps.ts                 # numeric caps: VIEWPORT_WIDTH, MAX_STEPS, WORKER_TIMEOUT_MS, MAX_TAPES
+    ├── caps.ts                 # numeric caps: VIEWPORT_WIDTH, MAX_STEPS, WORKER_TIMEOUT_MS, MAX_TAPES, PROGRESS_INTERVAL_MS
     ├── settings.ts             # user-tunable caps over localStorage — validated overrides of the caps.ts defaults
     ├── machineRunner.ts        # main-thread worker wrapper; per-segment timeout; injected workerFactory
     ├── machineRunner.test.ts   # Vitest suite for MachineRunner — protocol-shape / timer / pending / error
@@ -136,7 +136,10 @@ e2e/
 ├── cold-start.spec.ts            # Playwright E2E — cold-start scenarios for engine pages
 ├── completions.spec.ts           # Playwright E2E — smart completions roundtrip
 ├── diagnostics-counter.spec.ts   # Playwright E2E — counter pills fed by real lint sources; pill clears when the code is fixed
-└── landing.spec.ts               # Playwright E2E — landing page panels + engine switch + deep-link to editor
+├── landing.spec.ts               # Playwright E2E — landing page panels + engine switch + deep-link to editor
+├── settings.spec.ts              # Playwright E2E — settings persistence + a lowered step cap bounding a real run
+├── stale-build.spec.ts           # Playwright E2E — stale-build notice on the Build button
+└── worker-termination.spec.ts    # Playwright E2E — tape restore from the last progress heartbeat after timeout / hand Stop
 
 playwright.config.ts              # Chromium project; webServer = vite preview
 ```

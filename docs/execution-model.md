@@ -290,12 +290,12 @@ A Run with `debug=on` and user-authored `state.debug` triggers a sequence of pau
 
 Stop is visible while in RUNNING_AUTO, RUNNING_CONTINUOUS, and RUNNING_PAUSED.
 
-- `S-stop-auto` / `S-stop-cont` — main thread calls `runner.terminate()`. Worker is killed; `runner.run()` rejects with `runner terminated`. `failHalted` runs: rebuild mirror from worker's last-known tape state (or zeroed state if none), → HALTED with `stopped` log entry.
-- `S-stop-paused` — same as above, but `stopRequested` is set on the runner first so `failHalted` is **suppressed** when the rejected Promise surfaces (the rejection is the expected outcome of Stop, not an error). → HALTED with `stopped` log entry only — no error log.
+- `S-stop-auto` / `S-stop-cont` / `S-stop-paused` — main thread sets `stopRequested`, then calls `runner.terminate()`. Worker is killed; `runner.run()` rejects with `runner terminated`; `failHalted` is **suppressed** via `stopRequested` (the rejection is the expected outcome of Stop, not an error). → HALTED with `stopped` log entry — no error log.
+- After the `stopped` entry, `stopMachine` reads the runner's last `progress` heartbeat (the worker posts one from its run loop every `PROGRESS_INTERVAL_MS`; the runner keeps the latest across `terminate()`). When the heartbeat is **ahead** of what's rendered — the RUNNING_CONTINUOUS case, whose display never advanced past the build state — the mirror is rebuilt from it and a `tape shows step N at '<state>' — last snapshot before termination` entry is logged. For RUNNING_AUTO / RUNNING_PAUSED stops the display is already at or past the heartbeat and the restore no-ops.
 
 **Log entries**
 - `stopped`
-- (state mirror snapshot in matrix view)
+- `tape shows step N at '<state>' — last snapshot before termination` (continuous-run stops only)
 
 **Edge case.** A Stop click that races with run completion: worker may have already sent `ran` when `terminate()` is called. The runner's `runPending` slot has been cleared; `terminate()` is a no-op on the runner side. The HALTED transition still happens via the normal completion path, with a `halted after N step(s)` log entry instead of `stopped`. No user-visible bug.
 
@@ -354,11 +354,12 @@ A run that doesn't halt naturally hits `MAX_STEPS = 100_000` inside the worker's
 
 `WORKER_TIMEOUT_MS = 5_000` caps wall-clock time on each worker request **segment**. For `build` / `step` / `run`-without-pause it's a round-trip cap; for `run` with paused / resume cycles it's per-segment (suspends on `paused`, restarts on `resume`-send).
 
-- `S-timeout-auto` / `S-timeout-cont` — segment exceeds 5 s. Runner kills the worker (terminate) and rejects with `timeout after 5000ms — worker terminated (likely infinite loop)`. → HALTED with timeout log.
+- `S-timeout-auto` / `S-timeout-cont` — segment exceeds 5 s. Runner kills the worker (terminate) and rejects with a `WorkerTimeoutError` (`timeout after 5000ms — worker terminated (likely infinite loop)`) carrying the last `progress` heartbeat the worker posted from its run loop (every `PROGRESS_INTERVAL_MS`; a killed worker never answers, so the heartbeat is the only record of where the machine got to). → HALTED with timeout log; `failHalted` restores the mirror from the heartbeat when it's ahead of what's rendered — the continuous-run case, whose display never advanced past the build state — and logs which step the restored view reflects. Steps applied after the heartbeat are lost with the worker.
 - `S-timeout-paused` — only fires if the user clicks Continue or Step and the **resumed** segment exceeds 5 s. A paused state is not subject to timeout.
 
 **Log entries**
 - `timeout after 5000ms — worker terminated (likely infinite loop)`
+- `tape shows step N at '<state>' — last snapshot before termination` (when a heartbeat ahead of the display exists)
 
 **Edge case.** Today's API doesn't expose any callback hook to user code — `state.debug.before` / `state.debug.after` are filter values (`true | string[] | null`), not user-supplied functions, and the worker's `DebugSession` listeners (`step` / `pause`) wrap the run on the demo side. So a "stall via async user callback" isn't reachable in the current surface. The per-segment cap defends against the cases that *are* reachable: infinite loops in user code, hung worker-side Promises, and any future API surface that might let user-supplied async logic interpose.
 
