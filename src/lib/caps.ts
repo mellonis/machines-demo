@@ -27,6 +27,15 @@ export const WORKER_TIMEOUT_MS = 5_000;
  *  have at least this many entries; the worker rejects loads with more. */
 export const MAX_TAPES = 5;
 
+/** Cadence of the worker's `progress` heartbeats during a run (time-gated in
+ *  the per-step session listener). Bounds the tape-snapshot cost while
+ *  keeping the last-known state fresh enough that a worker termination
+ *  (watchdog timeout or hand Stop) loses at most this much progress from the
+ *  restored tape view. Must stay well under the `workerTimeoutMs` floor
+ *  (`lib/settings.ts`) so a timed-out continuous run has heartbeats to
+ *  restore from. */
+export const PROGRESS_INTERVAL_MS = 250;
+
 /** Belt-slide threshold for RUNNING_AUTO rendering: when the user picks an
  *  auto interval shorter than this, `MachineView.svelte#renderFromMirror`
  *  calls into `Tape.svelte#setFromTape` with `animate=false` so the animations

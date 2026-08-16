@@ -108,3 +108,20 @@ export function expectPhase(currentKind: WorkerPhaseKind, allowed: WorkerPhaseKi
   }
 }
 
+// --- Progress heartbeat gate ---
+
+/** Time-gate for the run loop's `progress` heartbeats: returns a predicate
+ *  that opens once per `intervalMs` of `now()` time, starting one full
+ *  interval after creation (run-start tape state is already on screen from
+ *  the build, so an immediate heartbeat would be redundant). Injected clock
+ *  keeps it pure for tests; the worker passes `Date.now`. */
+export function createProgressGate(intervalMs: number, now: () => number): () => boolean {
+  let lastSentAt = now();
+  return () => {
+    const t = now();
+    if (t - lastSentAt < intervalMs) return false;
+    lastSentAt = t;
+    return true;
+  };
+}
+
