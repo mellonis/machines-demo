@@ -41,7 +41,7 @@ src/
 │   ├── Tape.svelte          single horizontal belt (renders a turing.Tape)
 │   ├── ControlPanel.svelte  L/S/R + alphabet chips + Apply
 │   ├── Toolbar.svelte       Build/Step/Run/Stop + with-pause + examples menu
-│   ├── Toolbar.test.ts      Vitest suite for Toolbar — runLabel / disabled / visibility / interval / callbacks (cites C-toolbar-...)
+│   ├── Toolbar.test.ts      Vitest suite for Toolbar — runLabel / disabled / visibility / interval / callbacks / stale-build (cites C-toolbar-...)
 │   ├── Editor.svelte        CodeMirror 6 wrapper + reset overlay
 │   ├── Log.svelte           log entries (desktop)
 │   ├── IconButton.svelte    shared corner-overlay icon button (reset / clear)
@@ -117,7 +117,8 @@ e2e/
 ├── completions.spec.ts         member access / state.debug RHS / auto-import roundtrip (cites E-completions-...)
 ├── diagnostics-counter.spec.ts counter pills fed by syntaxLinter + unboundLinter; pill clears when the code is fixed (cites E-diag-...)
 ├── landing.spec.ts             `/` route — snippet panels, engine switch, deep link, scroll-triggered playback
-└── settings.spec.ts            settings panel — persist across reload, invalid input dropped, lowered maxSteps truncates a real run (cites E-settings-...)
+├── settings.spec.ts            settings panel — persist across reload, invalid input dropped, lowered maxSteps truncates a real run (cites E-settings-...)
+└── stale-build.spec.ts         stale-build notice — edit / example load shows the Build dot, successful Build clears it, failed Build keeps it (cites E-stale-build-...)
 
 playwright.config.ts            Chromium project; webServer runs `npm run preview`
 
@@ -135,6 +136,7 @@ playwright.config.ts            Chromium project; webServer runs `npm run previe
 - `log` — a per-instance `LogStore` (`lib/logStore.svelte.ts`); owns the unbounded non-reactive `#buffer` and the throttled `entries: $state<LogEntry[]>` view (`setTimeout(_, 16)` coalesce + `LOG_RENDER_CAP = 5000` slice with synthetic overflow header). `log.latest` is the buffer-sourced, reactive (via internal `#version` counter) getter used for mobile status — synchronous on every `report()`, no 16ms lag.
 - `selectedExampleId`, `snippets`, `loadedSnippetId` — all `$state`. `loadedSnippetId` is the UUID of the currently loaded user snippet (or `null` for a bundled example); drives `sourceCode`, `dirty`, and `resetVisible` ($derived). See the *Snippets* section below.
 - `pendingOp: 'load' | 'run' | null` and `stepInFlight: boolean` — concurrency guards
+- `builtSource` (`$state`) — source of the last **successful** build (set in `reloadWorker`; a failed build leaves it) — and `staleBuild` ($derived: `code !== builtSource`, any textual difference, same policy as `dirty`). Drives the accent dot + title on the Toolbar's Build button: the graph/tape view (and any in-flight run) reflects the last Build, not the editor. Complements — does not replace — the one-shot mid-run log warning below.
 - `panelEnabled` / `applyVisible` / `takeControlVisible` / `loadDisabled` / `stepDisabled` / `runDisabled` / `tapeCount` — all `$derived` (single source of truth for UI state)
 - `mirrorMachine` / `mirrorTapeBlock` — a real `TuringMachine` instance on the main thread that mirrors the worker's tape state. Built by `_buildMirrorMachine` after each `reloadWorker`; advanced one step at a time by `_runMirrorStep` (uses an `ifOtherSymbol` one-step `State` so the upstream library's transitions drive the visualization, not bespoke UI code). `renderFromMirror` hands each `mirrorTapeBlock.tapes[i]` to the matching `<Tape>` via `TapesStack.setFromTape(i, tape, …)`.
 - `$effect`s for the demo loop, auto-step loop, belt-transitions toggle, and a code-changed warning (debounced via `codeChangedWarned` flag — fires once per running session)

@@ -26,6 +26,7 @@ function defaultProps() {
     snippets: {} as Snippets,
     loadedSnippetId: null,
     dirty: false,
+    staleBuild: false,
     onBuild: vi.fn(),
     onStep: vi.fn(),
     onRun: vi.fn(),
@@ -149,6 +150,22 @@ describe('Toolbar', () => {
       });
       const input = screen.getByPlaceholderText('1s');
       expect(input.classList.contains('invalid')).toBe(true);
+    });
+  });
+
+  describe('stale build', () => {
+    it('C-toolbar-stale-dot-visible: Build button carries the stale accent + title when staleBuild', () => {
+      render(Toolbar, { props: { ...defaultProps(), staleBuild: true } });
+      const build = screen.getByRole('button', { name: /^build$/i });
+      expect(build).toHaveClass('stale');
+      expect(build).toHaveAttribute('title', 'code changed since last Build');
+    });
+
+    it('C-toolbar-stale-dot-hidden: no stale accent or title when the build is current', () => {
+      render(Toolbar, { props: defaultProps() });
+      const build = screen.getByRole('button', { name: /^build$/i });
+      expect(build).not.toHaveClass('stale');
+      expect(build).not.toHaveAttribute('title');
     });
   });
 
