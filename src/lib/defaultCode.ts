@@ -397,6 +397,221 @@ machine.replaceTapeWith(new Tape({
 return { machine };
 `;
 
+const TURING_BRAINFUCK_UTM = `// ─── Brainfuck UTM as a Turing machine ───────────────────────────────────────
+// One fixed state graph (~20 states) that interprets ANY brainfuck source
+// loaded on the program tape. Demonstrates a Universal Turing Machine.
+//
+// Architecture: 4 tapes in one TapeBlock
+//   [0] program   bf source + 'H' sentinel; head = instruction pointer
+//   [1] data      bf cells; head = data pointer
+//   [2] output    cells written by '.'
+//   [3] counter   unary stack of bracket-nesting levels (used by skip-bracket)
+//
+// Counter invariant: pointer is on the TOP of the stack ('*') or on a blank
+// cell when the stack is empty. push = move-R then write '*'. pop = write
+// ' ' then move-L.  Pop on empty would underflow — only happens on imbalanced
+// bf sources, which we trust to be balanced.
+//
+// To run a different bf program: change PROGRAM_TEXT below and re-build.
+
+const PROGRAM_TEXT = '++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++.';
+// classic Hello World — prints "Hello World!\\n"
+
+// ─── other programs to try ────────────────────────────────────────────────
+// Swap any of these into PROGRAM_TEXT above and re-Build. All halt well within
+// the demo's caps; step counts noted so you know what a Run/Step costs.
+//   '++++++++[>++++++++<-]>+.'                            → "A"   (~329 steps)  tiny — good for stepping through fetch→exec
+//   '[++++++++].'                                         → "·"   (~16 steps)   the bracket-SKIP path: loop guard is 0, so the
+//                                                                              body is skipped via the counter (stack) tape
+//   '++[>++[>+<-]<-]>>.'                                  → "₄"   (~117 steps)  nested loops → deeper pushes on the counter tape
+//   '++++++++[>+++++++++<-]>.>++++++++[>+++++++++++++<-]>+.' → "Hi" (~795 steps)  sequencing two characters
+
+const {
+  Alphabet, State, Tape, TapeBlock, TuringMachine, Reference,
+  haltState, ifOtherSymbol, movements,
+} = imports;
+
+const { left: L, right: R, stay: S } = movements;
+
+// ─── data alphabet: byte (0..127) → printable glyph ────────────────────────
+// Choosing glyphs so the data/output tapes are readable on the animated belt.
+const N = 128;
+const BYTE_TO_GLYPH = new Array(N);
+BYTE_TO_GLYPH[0] = '·';                                  // zero / blank
+for (let i = 1; i < 10; i++) BYTE_TO_GLYPH[i] = '₀₁₂₃₄₅₆₇₈₉'[i];
+BYTE_TO_GLYPH[10] = '↵';                                 // \\n
+for (let i = 11; i < 32; i++) BYTE_TO_GLYPH[i] = String.fromCharCode(0x24B6 + (i - 11));
+for (let i = 32; i < 127; i++) BYTE_TO_GLYPH[i] = String.fromCharCode(i);  // printable ASCII as itself
+BYTE_TO_GLYPH[127] = '⌫';
+const DATA_ZERO = '·';
+
+const PROG_ALPHA = new Alphabet([' ', '+', '-', '<', '>', '.', '[', ']', 'H']);
+const DATA_ALPHA = new Alphabet(BYTE_TO_GLYPH);
+const CNT_ALPHA  = new Alphabet([' ', '*']);
+
+// ─── tapes ──────────────────────────────────────────────────────────────────
+const t_prog = new Tape({ alphabet: PROG_ALPHA, symbols: [...PROGRAM_TEXT, 'H'], position: 0 });
+const t_data = new Tape({ alphabet: DATA_ALPHA, symbols: Array(16).fill(DATA_ZERO), position: 0 });
+const t_out  = new Tape({ alphabet: DATA_ALPHA, symbols: Array(32).fill(DATA_ZERO), position: 0 });
+const t_cnt  = new Tape({ alphabet: CNT_ALPHA,  symbols: Array(64).fill(' '), position: 0 });
+const tapeBlock = TapeBlock.fromTapes([t_prog, t_data, t_out, t_cnt]);
+const machine = new TuringMachine({ tapeBlock });
+
+// ─── per-tape command shorthands ────────────────────────────────────────────
+const nop  = { movement: S };
+const movR = { movement: R };
+const movL = { movement: L };
+const wr   = (sym, mv = S) => ({ symbol: sym, movement: mv });
+const cmd  = (p, d, o, c) => [p, d, o, c];
+
+// 4-tape symbol key. null entries become ifOtherSymbol (per-tape wildcard).
+const key = (p, d, o, c) =>
+  tapeBlock.symbol([p ?? ifOtherSymbol, d ?? ifOtherSymbol, o ?? ifOtherSymbol, c ?? ifOtherSymbol]);
+
+// ─── refs for cyclic graph ──────────────────────────────────────────────────
+const fetchRef   = new Reference();
+const skipFwdRef = new Reference();
+const skipBwdRef = new Reference();
+
+// ─── execute '+' / '-' (table over data alphabet) ──────────────────────────
+const execPlus = (() => {
+  const def = {};
+  for (let v = 0; v < N; v++) {
+    const next = (v + 1) % N;
+    def[key(null, BYTE_TO_GLYPH[v], null, null)] = {
+      command: cmd(movR, wr(BYTE_TO_GLYPH[next]), nop, nop), nextState: fetchRef,
+    };
+  }
+  return new State(def, 'execPlus');
+})();
+
+const execMinus = (() => {
+  const def = {};
+  for (let v = 0; v < N; v++) {
+    const prev = (v - 1 + N) % N;
+    def[key(null, BYTE_TO_GLYPH[v], null, null)] = {
+      command: cmd(movR, wr(BYTE_TO_GLYPH[prev]), nop, nop), nextState: fetchRef,
+    };
+  }
+  return new State(def, 'execMinus');
+})();
+
+// ─── execute '>' / '<' ──────────────────────────────────────────────────────
+const execRight = new State({
+  [ifOtherSymbol]: { command: cmd(movR, movR, nop, nop), nextState: fetchRef },
+}, 'execRight');
+
+const execLeft = new State({
+  [ifOtherSymbol]: { command: cmd(movR, movL, nop, nop), nextState: fetchRef },
+}, 'execLeft');
+
+// ─── execute '.' (copy data cell to output tape, advance output) ───────────
+const execDot = (() => {
+  const def = {};
+  for (let v = 0; v < N; v++) {
+    def[key(null, BYTE_TO_GLYPH[v], null, null)] = {
+      command: cmd(movR, nop, wr(BYTE_TO_GLYPH[v], R), nop), nextState: fetchRef,
+    };
+  }
+  return new State(def, 'execDot');
+})();
+
+// ─── skip-forward (when '[' with data == 0) ─────────────────────────────────
+// Scans the program tape rightward, maintaining a unary stack of nesting
+// levels on the counter tape. Exits when the stack underflows past the
+// matching ']'. Push/pop each take two states because TapeCommand is
+// "write-then-move", and a correct push needs "move-then-write".
+const skipFwdMainRef       = new Reference();
+const skipFwdPushFinishRef = new Reference();
+const skipFwdPopCheckRef   = new Reference();
+
+const skipFwdMain = new State({
+  [key('[', null, null, null)]: { command: cmd(movR, nop, nop, movR),       nextState: skipFwdPushFinishRef },
+  [key(']', null, null, null)]: { command: cmd(movR, nop, nop, wr(' ', L)), nextState: skipFwdPopCheckRef },
+  [ifOtherSymbol]:               { command: cmd(movR, nop, nop, nop),        nextState: skipFwdMainRef },
+}, 'skipFwdMain');
+skipFwdMainRef.bind(skipFwdMain);
+skipFwdRef.bind(skipFwdMain);
+
+const skipFwdPushFinish = new State({
+  [ifOtherSymbol]: { command: cmd(nop, nop, nop, wr('*')), nextState: skipFwdMainRef },
+}, 'skipFwdPushFinish');
+skipFwdPushFinishRef.bind(skipFwdPushFinish);
+
+const skipFwdPopCheck = new State({
+  [key(null, null, null, ' ')]: { command: cmd(nop, nop, nop, nop), nextState: fetchRef },
+  [key(null, null, null, '*')]: { command: cmd(nop, nop, nop, nop), nextState: skipFwdMainRef },
+}, 'skipFwdPopCheck');
+skipFwdPopCheckRef.bind(skipFwdPopCheck);
+
+// ─── skip-backward (when ']' with data != 0) ────────────────────────────────
+// Mirror image of skipFwd: program moves left, ']' pushes, '[' pops.
+const skipBwdMainRef       = new Reference();
+const skipBwdPushFinishRef = new Reference();
+const skipBwdPopCheckRef   = new Reference();
+
+const skipBwdMain = new State({
+  [key(']', null, null, null)]: { command: cmd(movL, nop, nop, movR),       nextState: skipBwdPushFinishRef },
+  [key('[', null, null, null)]: { command: cmd(movL, nop, nop, wr(' ', L)), nextState: skipBwdPopCheckRef },
+  [ifOtherSymbol]:               { command: cmd(movL, nop, nop, nop),        nextState: skipBwdMainRef },
+}, 'skipBwdMain');
+skipBwdMainRef.bind(skipBwdMain);
+skipBwdRef.bind(skipBwdMain);
+
+const skipBwdPushFinish = new State({
+  [ifOtherSymbol]: { command: cmd(nop, nop, nop, wr('*')), nextState: skipBwdMainRef },
+}, 'skipBwdPushFinish');
+skipBwdPushFinishRef.bind(skipBwdPushFinish);
+
+// After a successful pop we stand one cell LEFT of the matching '['.
+// Step program back to R so fetch sees '['.
+const skipBwdPopCheck = new State({
+  [key(null, null, null, ' ')]: { command: cmd(movR, nop, nop, nop), nextState: fetchRef },
+  [key(null, null, null, '*')]: { command: cmd(nop, nop, nop, nop),  nextState: skipBwdMainRef },
+}, 'skipBwdPopCheck');
+skipBwdPopCheckRef.bind(skipBwdPopCheck);
+
+// ─── execute '[' / ']' ─────────────────────────────────────────────────────
+// data == 0 → start skip-forward with a single counter level pushed
+// data != 0 → enter loop body (just IP++)
+const execLBracketPushFinishRef = new Reference();
+const execLBracket = new State({
+  [key(null, DATA_ZERO, null, null)]: { command: cmd(movR, nop, nop, movR), nextState: execLBracketPushFinishRef },
+  [ifOtherSymbol]:                     { command: cmd(movR, nop, nop, nop),  nextState: fetchRef },
+}, 'execLBracket');
+
+const execLBracketPushFinish = new State({
+  [ifOtherSymbol]: { command: cmd(nop, nop, nop, wr('*')), nextState: skipFwdRef },
+}, 'execLBracketPushFinish');
+execLBracketPushFinishRef.bind(execLBracketPushFinish);
+
+const execRBracketPushFinishRef = new Reference();
+const execRBracket = new State({
+  [key(null, DATA_ZERO, null, null)]: { command: cmd(movR, nop, nop, nop), nextState: fetchRef },
+  [ifOtherSymbol]:                     { command: cmd(movL, nop, nop, movR), nextState: execRBracketPushFinishRef },
+}, 'execRBracket');
+
+const execRBracketPushFinish = new State({
+  [ifOtherSymbol]: { command: cmd(nop, nop, nop, wr('*')), nextState: skipBwdRef },
+}, 'execRBracketPushFinish');
+execRBracketPushFinishRef.bind(execRBracketPushFinish);
+
+// ─── fetch (the main CPU loop dispatch) ────────────────────────────────────
+const initialState = new State({
+  [key('+')]: { command: cmd(nop, nop, nop, nop), nextState: execPlus },
+  [key('-')]: { command: cmd(nop, nop, nop, nop), nextState: execMinus },
+  [key('>')]: { command: cmd(nop, nop, nop, nop), nextState: execRight },
+  [key('<')]: { command: cmd(nop, nop, nop, nop), nextState: execLeft },
+  [key('.')]: { command: cmd(nop, nop, nop, nop), nextState: execDot },
+  [key('[')]: { command: cmd(nop, nop, nop, nop), nextState: execLBracket },
+  [key(']')]: { command: cmd(nop, nop, nop, nop), nextState: execRBracket },
+  [key('H')]: { command: cmd(nop, nop, nop, nop), nextState: haltState },
+}, 'fetch');
+fetchRef.bind(initialState);
+
+return { machine, initialState };
+`;
+
 const TURING_EXAMPLES: readonly Example[] = [
   {
     id: 'replace-b',
@@ -467,6 +682,7 @@ What to look for on the graph:
 - compare with the dotted \`return\` arrow the clean ending takes to \`accept\` — that path exists, this tape just never takes it.`,
   },
   { id: 'copy-two-tapes', title: 'Copy tape (multi-tape)', code: TURING_COPY_TWO_TAPES },
+  { id: 'brainfuck-utm', title: 'Brainfuck UTM — a universal machine', code: TURING_BRAINFUCK_UTM },
 ];
 
 const POST_EXAMPLES: readonly Example[] = [
