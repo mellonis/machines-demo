@@ -28,6 +28,26 @@ export function seedFromGlyphs(glyphs: readonly string[], seed: ExampleSeed): Se
   return { cells, head: seed.head ?? 0 };
 }
 
+/**
+ * Maps an example's / snippet's glyph seeds onto a set of tape band layouts
+ * — the currently-loaded program's bands, tried at pick/load time so the
+ * belt can seed itself before the next Build. Returns the mapped seeds when
+ * every provided seed fits (a band with no seed gets `emptySeed()`), or
+ * `null` when any seed doesn't fit the layout at that index (wrong alphabet,
+ * or more seeds than bands) — the caller falls back to applying at Build
+ * time against the new program's own layout.
+ */
+export function applySeedGlyphs(layouts: TapeLayout[], glyphSeeds: ExampleSeed[]): SeedTape[] | null {
+  if (glyphSeeds.length > layouts.length) return null;
+  const out: SeedTape[] = [];
+  for (const layout of layouts) {
+    const g = glyphSeeds[out.length];
+    if (!g) { out.push(emptySeed()); continue; }
+    try { out.push(seedFromGlyphs(layout.glyphs, g)); } catch { return null; }
+  }
+  return out;
+}
+
 function span(seed: SeedTape): { lo: number; hi: number } | null {
   if (seed.cells.size === 0) return null;
   let lo = Infinity;

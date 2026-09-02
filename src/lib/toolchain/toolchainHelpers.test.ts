@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { VIEWPORT_WIDTH } from '../caps.ts';
 import { loadMtcForTests } from './testModule.ts';
 import {
-  applyCommand, buildLineMap, cellAt, findStdDefinition, headDelta, indexStdExports,
+  applyCommand, applySeedGlyphs, buildLineMap, cellAt, findStdDefinition, headDelta, indexStdExports,
   layoutsEqual, seedFromGlyphs, seedFromSnapshot, seedFromWasm, seedToGlyphs, seedToLibTape, seedToWasm, snapshotToLibTape,
 } from './toolchainHelpers.ts';
 import type { SeedTape, TapeSnapshot } from './types.ts';
@@ -56,6 +56,24 @@ describe('seeds', () => {
     const s3 = applyCommand(s2, PM, { movement: 'S', symbol: ' ' });
     expect(s3.cells.size).toBe(0);
     expect(s0.cells.size).toBe(0); // pure
+  });
+
+  it('T-apply-seed-glyphs-fit: one SeedTape per band, missing seeds fall back to empty', () => {
+    const layouts = [{ name: 'a', glyphs: PM }, { name: 'b', glyphs: PM }];
+    const out = applySeedGlyphs(layouts, [{ cells: ['*'], head: 0 }]);
+    expect(out).not.toBeNull();
+    expect([...out![0].cells.entries()]).toEqual([[0, 1]]);
+    expect(out![1].cells.size).toBe(0);
+  });
+
+  it('T-apply-seed-glyphs-bad-glyph: a seed glyph outside the band alphabet fails the whole mapping', () => {
+    const layouts = [{ name: 'a', glyphs: PM }];
+    expect(applySeedGlyphs(layouts, [{ cells: ['x'] }])).toBeNull();
+  });
+
+  it('T-apply-seed-glyphs-too-many: more seeds than bands fails the whole mapping', () => {
+    const layouts = [{ name: 'a', glyphs: PM }];
+    expect(applySeedGlyphs(layouts, [{ cells: ['*'] }, { cells: ['*'] }])).toBeNull();
   });
 });
 

@@ -25,7 +25,7 @@
     type ProgressResponse, type SeedTape, type SourceFile, type SourceTab, type SteppedResponse, type TapeLayout, type TapeSnapshot,
   } from '../lib/toolchain/types.ts';
   import {
-    applyCommand, cellAt, emptySeed, findStdDefinition, headDelta, indexStdExports, layoutsEqual, seedCellAt,
+    applyCommand, applySeedGlyphs, cellAt, emptySeed, findStdDefinition, headDelta, indexStdExports, layoutsEqual, seedCellAt,
     seedFromGlyphs, seedFromSnapshot, seedFromWasm, seedToGlyphs, seedToLibTape, seedToWasm, snapshotToLibTape, type StdExport,
   } from '../lib/toolchain/toolchainHelpers.ts';
   import { toolchainLinter } from '../lib/toolchain/editor/lint.ts';
@@ -93,6 +93,13 @@
     if (loadedCode !== null) return loadSeeds(engine) ?? [];
     return initialExample.seeds ?? [];
   });
+  // True once `pendingSeedGlyphs` has already been applied to the current
+  // `tapes` layout (at pick/load time, see `pickExample` / `onLoadSnippet`)
+  // — tells `reloadWorker` it doesn't need to re-derive `seeds` from scratch
+  // when the next Build's bands turn out unchanged. Plain `let`, not
+  // `$state`: read only from non-reactive code (event handlers), never from
+  // a template or a `$derived`.
+  let pendingApplied = false;
   // The other kind's buffer, kept for the page's lifetime so switching back restores it.
   const otherBuffer: Record<BufferKind, string | null> = { source: null, asm: null };
 
@@ -291,9 +298,16 @@
       builtSource = source;
       builtLang = builtWith;
       lineMap = res.lineMap;
-      if (pendingSeedGlyphs !== null) {
+      // `pendingApplied` is true only when `pickExample` / `onLoadSnippet`
+      // already mapped `pendingSeedGlyphs` onto the (pre-Build) `tapes`
+      // layout and it fit. If the new build's bands come out unchanged,
+      // that mapping still holds and `seeds` is left alone — this is what
+      // lets a panel edit made between pick and Build survive. Any other
+      // case (nothing applied yet, e.g. boot; or the bands changed since)
+      // re-derives `seeds` from `pendingSeedGlyphs` against the *new*
+      // layout.
+      if (pendingSeedGlyphs !== null && (!pendingApplied || !layoutsEqual(tapes, res.tapes))) {
         const glyphSeeds = pendingSeedGlyphs;
-        pendingSeedGlyphs = null;
         seeds = res.tapes.map((t, i) => {
           const g = glyphSeeds[i];
           if (!g) return emptySeed();
@@ -303,6 +317,8 @@
         if (tapes.length > 0) log.report("seeds reset — the program's bands changed", 'warn');
         seeds = res.tapes.map(() => emptySeed());
       }
+      pendingSeedGlyphs = null;
+      pendingApplied = false;
       tapes = res.tapes;
       lastSnapshots = null;
       setIp(null);
@@ -594,12 +610,31 @@
     if (loadedSnippetId !== null) { const s = snippets[loadedSnippetId]; if (s) code = s.code; return; }
     code = selectedExample.code;
   }
+  /**
+   * Applies `pendingSeedGlyphs` to the currently-loaded program's bands
+   * (`tapes`, from the last Build) right away, when they fit — so the belt
+   * shows the picked example's / loaded snippet's seed immediately instead
+   * of waiting for the next Build. No-op (and no log) when they don't fit
+   * (different band count or alphabet) or nothing has been built yet
+   * (`tapes` empty, e.g. at boot); the seed then still applies inside
+   * `reloadWorker` once the next Build produces a layout.
+   */
+  function applyPendingSeedsNow(): void {
+    if (tapes.length === 0) return;
+    const applied = applySeedGlyphs(tapes, pendingSeedGlyphs ?? []);
+    if (applied === null) return;
+    seeds = applied;
+    renderSeeds();
+    pendingApplied = true;
+  }
   function pickExample(ex: Example): void {
     selectedExampleId = ex.id;
     kind = ex.kind ?? 'source';
     code = ex.code;
     loadedSnippetId = null;
     pendingSeedGlyphs = ex.seeds ?? [];
+    pendingApplied = false;
+    applyPendingSeedsNow();
   }
   function currentSeedGlyphs(): ExampleSeed[] { return seeds.map((s, i) => seedToGlyphs(alphabets[i] ?? [' '], s)); }
   function onSaveSnippet(title: string): void {
@@ -622,6 +657,8 @@
     code = s.code;
     loadedSnippetId = id;
     pendingSeedGlyphs = s.seeds ?? [];
+    pendingApplied = false;
+    applyPendingSeedsNow();
   }
   function onDeleteSnippet(id: string): void {
     deleteSnippet(engine, id);

@@ -26,6 +26,11 @@ async function setEditorText(page: Page, text: string) {
 const logLine = (page: Page, re: RegExp) => page.getByTestId('log-line').filter({ hasText: re });
 const cells = (page: Page) => page.getByTestId('tape').first().getByTestId('tape-cell');
 const nonBlank = async (page: Page) => (await cells(page).allInnerTexts()).filter((s) => s.trim() !== '');
+// The full (unfiltered) viewport strip — unlike `nonBlank`, this is
+// head-sensitive: `Tape.svelte` centers the viewport on the head, so a
+// head move shifts where the marks land in the strip even when `nonBlank`
+// (which drops blanks) reads the same run of marks either way.
+const strip = async (page: Page) => (await cells(page).allInnerTexts()).map((s) => s.trim());
 
 /**
  * Click the breakpoint gutter at a source line's y-coordinate. CodeMirror
@@ -265,5 +270,65 @@ test.describe('PM-1 page', () => {
     await page.keyboard.press('ControlOrMeta+Space');
     await expect(page.locator('.cm-tooltip-autocomplete')).toBeVisible({ timeout: 5_000 });
     await expect(page.locator('.cm-tooltip-autocomplete')).toContainText('goToEnd');
+  });
+
+  test('E-tc-pick-seeds-now: picking an example seeds the belt immediately, without a Build', async ({ page }) => {
+    expect(await logLine(page, /^built —/).count()).toBe(1);
+    await page.getByRole('button', { name: 'Example code sources' }).click();
+    await page.getByRole('menuitem', { name: 'Unary sum' }).click();
+    // The sum example's seed is ['*', '*', '*', ' ', '*', '*'] — five marks
+    // around a one-cell gap — applied to the still-loaded program's bands
+    // (unchanged layout), so no Build is needed for it to fit.
+    expect(await nonBlank(page)).toEqual(['*', '*', '*', '*', '*']);
+    expect(await logLine(page, /^built —/).count()).toBe(1);
+  });
+
+  test('E-tc-pick-then-build-keeps-panel-edit: a panel edit made after picking survives the next Build', async ({ page }) => {
+    await page.getByRole('button', { name: 'Example code sources' }).click();
+    await page.getByRole('menuitem', { name: 'Unary sum' }).click();
+    expect(await nonBlank(page)).toEqual(['*', '*', '*', '*', '*']);
+    const beforeMove = await strip(page);
+
+    // Move the head right with no write (the panel's write selector stays on
+    // "keep" by default), applied once — moves the head without touching the
+    // seed's marks. The move shifts the marks within the head-centered
+    // viewport, which is what makes the post-Build comparison below
+    // head-sensitive (`nonBlank` alone can't tell the two cases apart: the
+    // same five marks read identically whether the head moved or not).
+    await page.getByRole('button', { name: 'Move right' }).click();
+    await page.getByRole('button', { name: 'Apply' }).click();
+    const beforeBuild = await strip(page);
+    expect(beforeBuild).not.toEqual(beforeMove);
+    expect(beforeBuild.filter((s) => s !== '')).toEqual(['*', '*', '*', '*', '*']);
+
+    await page.getByRole('button', { name: /^build$/i }).click();
+    await expect(logLine(page, /^built — 1 band\(s\)/).nth(1)).toBeVisible({ timeout: 10_000 });
+    expect(await strip(page)).toEqual(beforeBuild);
+  });
+
+  test('E-tc-snippet-load-seeds-now: loading a saved snippet seeds the belt immediately, without a Build', async ({ page }) => {
+    // A distinctive seed: 4 marks (one more than either bundled example),
+    // same recipe as E-tc-boot-snippet-query.
+    await page.getByRole('button', { name: 'Move right' }).click();
+    await page.getByRole('button', { name: 'Write *' }).click();
+    for (let i = 0; i < 4; i++) {
+      await page.getByRole('button', { name: 'Apply' }).click();
+    }
+    expect(await nonBlank(page)).toEqual(['*', '*', '*', '*']);
+
+    await page.getByRole('button', { name: 'Save snippet' }).click();
+    await page.getByPlaceholder('Snippet name').fill('seed-now-test');
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(page.locator('.save-popover')).toBeHidden();
+
+    await page.getByRole('button', { name: 'Example code sources' }).click();
+    await page.getByRole('menuitem', { name: 'Unary increment', exact: true }).click();
+    expect(await nonBlank(page)).toEqual(['*', '*', '*']);
+
+    const buildCountBefore = await logLine(page, /^built —/).count();
+    await page.getByRole('button', { name: 'Example code sources' }).click();
+    await page.getByRole('menuitem', { name: 'seed-now-test' }).click();
+    expect(await nonBlank(page)).toEqual(['*', '*', '*', '*']);
+    expect(await logLine(page, /^built —/).count()).toBe(buildCountBefore);
   });
 });
