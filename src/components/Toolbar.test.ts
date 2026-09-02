@@ -197,4 +197,31 @@ describe('Toolbar', () => {
       expect(propsB.onStop).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe('format and file menu', () => {
+    it('C-toolbar-format-hidden: no Format button without onFormat', () => {
+      render(Toolbar, { props: defaultProps() });
+      expect(screen.queryByRole('button', { name: /^format$/i })).not.toBeInTheDocument();
+    });
+
+    it('C-toolbar-format-click: Format calls onFormat', async () => {
+      const onFormat = vi.fn();
+      render(Toolbar, { props: { ...defaultProps(), onFormat } });
+      await fireEvent.click(screen.getByRole('button', { name: /^format$/i }));
+      expect(onFormat).toHaveBeenCalledTimes(1);
+    });
+
+    it('C-toolbar-file-menu: Open / Save render only with their callbacks; Save calls back; Open forwards the picked file', async () => {
+      const onOpenFile = vi.fn();
+      const onSaveFile = vi.fn();
+      render(Toolbar, { props: { ...defaultProps(), onOpenFile, onSaveFile } });
+      await fireEvent.click(screen.getByRole('button', { name: 'Save source file' }));
+      expect(onSaveFile).toHaveBeenCalledTimes(1);
+      const input = screen.getByTestId('open-file-input') as HTMLInputElement;
+      const file = new File(['main() {}'], 'x.pmc', { type: 'text/plain' });
+      Object.defineProperty(input, 'files', { value: [file] });
+      await fireEvent.change(input);
+      expect(onOpenFile).toHaveBeenCalledWith(file);
+    });
+  });
 });

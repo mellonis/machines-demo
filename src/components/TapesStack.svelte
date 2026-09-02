@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte';
   import type * as turing from '@turing-machine-js/machine';
   import Tape from './Tape.svelte';
 
@@ -12,8 +13,12 @@
      *  (`setTapeViewport`, etc.). The imperative API (`setFromTape`,
      *  `clearAll`, `setTransitionsEnabled`) is unaffected. */
     readOnly?: boolean;
+    /** Toolchain engines: optional corner overlay (top-right) for stack-level
+     *  actions, e.g. loading a tape-block snapshot. Absent for the JS engine
+     *  pages, which render no corner markup at all. */
+    actions?: Snippet;
   };
-  let { tapeCount, caretColors, readOnly: _readOnly = false }: Props = $props();
+  let { tapeCount, caretColors, readOnly: _readOnly = false, actions }: Props = $props();
 
   let tapeRefs = $state<Array<ReturnType<typeof Tape> | undefined>>([]);
 
@@ -80,6 +85,9 @@
       caretColor={caretColors[i]}
     />
   {/each}
+  {#if actions}
+    <div class="stack-actions" data-testid="stack-actions">{@render actions()}</div>
+  {/if}
 </div>
 
 <style>
@@ -120,6 +128,15 @@
     width: 2px;
     transform: translateX(-50%);
     pointer-events: none;
+  }
+
+  .stack-actions {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    display: flex;
+    gap: 4px;
+    z-index: 2;
   }
 
   @keyframes enter {

@@ -36,6 +36,12 @@
     onLoadSnippet: (id: string) => void;
     onDeleteSnippet: (id: string) => void;
     onRenameSnippet: (id: string, newTitle: string) => void;
+    /** Toolchain engines: canonical whitespace-only formatting of the buffer. */
+    onFormat?: () => void;
+    /** Toolchain engines: open a local source file into the buffer. */
+    onOpenFile?: (file: File) => void;
+    /** Toolchain engines: download the buffer as a source file. */
+    onSaveFile?: () => void;
   };
 
   let {
@@ -63,7 +69,12 @@
     onLoadSnippet,
     onDeleteSnippet,
     onRenameSnippet,
+    onFormat,
+    onOpenFile,
+    onSaveFile,
   }: Props = $props();
+
+  let fileInputEl = $state<HTMLInputElement | undefined>(undefined);
 
   // Examples dropdown — fully owned here so the outside-click and Escape
   // handlers stay colocated with the menu they close.
@@ -428,6 +439,38 @@
       {/if}
     </dialog>
   </div>
+
+  {#if onOpenFile || onSaveFile}
+    <div class="file-menu">
+      {#if onOpenFile}
+        <input
+          type="file"
+          class="visually-hidden"
+          data-testid="open-file-input"
+          accept=".pmc,.tmc,.pma,.tma"
+          bind:this={fileInputEl}
+          onchange={(e) => {
+            const f = (e.currentTarget as HTMLInputElement).files?.[0];
+            if (f) onOpenFile(f);
+            (e.currentTarget as HTMLInputElement).value = '';
+          }}
+        />
+        <button type="button" class="icon-only" title="Open source file" aria-label="Open source file" onclick={() => fileInputEl?.click()}>
+          {@html icons.fileOpen}
+        </button>
+      {/if}
+      {#if onSaveFile}
+        <button type="button" class="icon-only" title="Save source file" aria-label="Save source file" onclick={onSaveFile}>
+          {@html icons.fileSave}
+        </button>
+      {/if}
+    </div>
+  {/if}
+  {#if onFormat}
+    <button type="button" disabled={loadDisabled} title="Format (canonical whitespace)" onclick={onFormat}>
+      {@html icons.formatCode}<span class="btn-label">Format</span>
+    </button>
+  {/if}
 
   <button
     type="button"
@@ -810,6 +853,26 @@
       font-size: 12px;
       padding: 3px 8px;
     }
+  }
+
+  .file-menu {
+    display: inline-flex;
+    gap: 4px;
+  }
+
+  /* The shared .visually-hidden (below) is the checkbox stretch-over-label
+     trick — inset: 0 fills its position:relative parent. Reused verbatim
+     here it would stretch over the whole .file-menu row (both buttons),
+     sitting above them in paint order and swallowing their clicks. The file
+     input only needs to be reachable via fileInputEl.click(), so clip it to
+     1px instead of stretching it. */
+  .file-menu input.visually-hidden {
+    inset: auto;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
   }
 
   .save-menu {
