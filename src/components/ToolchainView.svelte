@@ -25,7 +25,7 @@
     type ProgressResponse, type SeedTape, type SourceFile, type SourceTab, type SteppedResponse, type TapeLayout, type TapeSnapshot,
   } from '../lib/toolchain/types.ts';
   import {
-    applyCommand, applySeedGlyphs, cellAt, emptySeed, findStdDefinition, headDelta, indexStdExports, layoutsEqual, retiredBefore,
+    applyCommand, applySeedGlyphs, cellAt, emptySeed, findStdDefinition, headDelta, indexStdExports, layoutsEqual, resolveLoc, retiredBefore,
     seedCellAt, seedFromGlyphs, seedFromSnapshot, seedFromWasm, seedToGlyphs, seedToLibTape, seedToWasm, snapshotToLibTape, type StdExport,
   } from '../lib/toolchain/toolchainHelpers.ts';
   import { toolchainLinter } from '../lib/toolchain/editor/lint.ts';
@@ -269,14 +269,15 @@
 
   /* ───── rendering ───── */
   function locOf(ip: number): { file: SourceFile; line: number | null; fn: string } | null {
-    const l = lineMap?.addrToLoc.find((x) => x.addr === ip);
+    const l = lineMap ? resolveLoc(lineMap, ip) : null;
     return l ? { file: l.file, line: l.line, fn: l.fn } : null;
   }
   /** Where a run begins: the entry address, or the program's first mapped
    *  address when address 0 carries no instruction of its own. */
   function entryLoc(): { file: SourceFile; line: number | null; fn: string } | null {
     const first = lineMap?.addrToLoc[0];
-    return locOf(0) ?? (first ? { file: first.file, line: first.line, fn: first.fn } : null);
+    const l = lineMap && first ? (resolveLoc(lineMap, 0) ?? resolveLoc(lineMap, first.addr)) : null;
+    return l ? { file: l.file, line: l.line, fn: l.fn } : null;
   }
   function fileLabel(file: SourceFile): string { return file === 'std' ? `std.${srcExt}` : `main.${ext}`; }
   function locText(loc: { file: SourceFile; line: number | null; fn: string } | null): string {
@@ -460,7 +461,8 @@
     // instruction is the listing entry right before the ip; show and
     // highlight that one. `prevIpLoc` stays the real ip, so the next `step`
     // line still names the instruction that step retires.
-    const retired = r.cause === 'brk' && lineMap !== null ? retiredBefore(lineMap, r.ip) : null;
+    const retiredEntry = r.cause === 'brk' && lineMap !== null ? retiredBefore(lineMap, r.ip) : null;
+    const retired = retiredEntry && lineMap !== null ? resolveLoc(lineMap, retiredEntry.addr) : retiredEntry;
     setIp(retired?.addr ?? r.ip);
     log.report(`paused at ${locText(ipLoc).replace(' ', ' in ')} (${causeText(r)})`, 'pause');
     prevIpLoc = locOf(r.ip);

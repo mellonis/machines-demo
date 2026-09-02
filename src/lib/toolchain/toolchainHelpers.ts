@@ -168,6 +168,32 @@ export function buildLineMap(program: Program, userLines: number, stdLines: numb
 }
 
 /**
+ * A displayable location for `addr` — its `addrToLoc` entry, forward-resolved
+ * when that entry carries no line of its own. A function's `ent` instruction
+ * (its entry address) is always line-less in the toolchain's line table, so
+ * the raw entry alone is not fit for display: walk forward through
+ * `addrToLoc` (address order) to the first entry in the *same function* with
+ * a non-null line, and report that line under the entry's own `addr` and
+ * `file` (the file follows the function, not the resolved line). Returns the
+ * original entry unchanged when its line is already set, or when no later
+ * entry in the same function carries one; `null` when `addr` has no entry at
+ * all.
+ */
+export function resolveLoc(map: LineMap, addr: number): AddrLoc | null {
+  const i = map.addrToLoc.findIndex((x) => x.addr === addr);
+  if (i === -1) return null;
+  const entry = map.addrToLoc[i];
+  if (entry.line !== null) return entry;
+  for (let j = i + 1; j < map.addrToLoc.length; j++) {
+    const cand = map.addrToLoc[j];
+    if (cand.fn === entry.fn && cand.line !== null) {
+      return { addr: entry.addr, file: entry.file, line: cand.line, fn: entry.fn };
+    }
+  }
+  return entry;
+}
+
+/**
  * The instruction that retired just before `ip`, as its `addrToLoc` entry —
  * the entry immediately preceding the one whose `addr` is `ip`, since
  * `addrToLoc` is in listing (address) order. `null` when `ip` is the first

@@ -3,7 +3,7 @@ import { VIEWPORT_WIDTH } from '../caps.ts';
 import { loadMtcForTests } from './testModule.ts';
 import {
   applyCommand, applySeedGlyphs, buildLineMap, cellAt, findStdDefinition, headDelta, indexStdExports,
-  layoutsEqual, retiredBefore, seedFromGlyphs, seedFromSnapshot, seedFromWasm, seedToGlyphs, seedToLibTape, seedToWasm, snapshotToLibTape,
+  layoutsEqual, resolveLoc, retiredBefore, seedFromGlyphs, seedFromSnapshot, seedFromWasm, seedToGlyphs, seedToLibTape, seedToWasm, snapshotToLibTape,
 } from './toolchainHelpers.ts';
 import type { LineMap, SeedTape, TapeSnapshot } from './types.ts';
 
@@ -174,6 +174,41 @@ describe('line map', () => {
     expect(retiredBefore(map, 4)).toEqual({ addr: 3, file: 'user', line: 7, fn: 'main' });
     expect(retiredBefore(map, 0)).toBeNull(); // the first entry has no predecessor
     expect(retiredBefore(map, 2)).toBeNull(); // no entry carries this address
+  });
+
+  // A function's `ent` instruction carries no line of its own — resolve it
+  // forward to the first statement inside that function so Step 1 (and a
+  // call's first Step) highlights real code instead of showing `:?`.
+  it('T-linemap-resolve-forward: a line-less entry resolves forward to its function\'s first line; a normal instruction and an unknown address are unaffected', async () => {
+    const { Toolchain } = await loadMtcForTests();
+    const r = Toolchain.build('pmc', PMC_STD, undefined);
+    if (!r.ok) throw new Error('build failed');
+    const std = Toolchain.stdlibSource('pmc');
+    const map = buildLineMap(r.program, PMC_STD.split('\n').length, std.split('\n').length);
+
+    // main's entry (addr 0, line: null) resolves to the first statement's
+    // line, keeping the entry's own addr and file.
+    const mainEntry = map.addrToLoc.find((l) => l.addr === 0)!;
+    expect(mainEntry.line).toBeNull();
+    expect(resolveLoc(map, 0)).toEqual({ addr: 0, file: 'user', line: 2, fn: 'main' });
+
+    // std::goToEnd's entry likewise resolves forward, under file: 'std' — the
+    // expected line is derived from the fixture itself (the first lined
+    // entry in that function), not hardcoded, so a doc-comment shift in the
+    // vendored stdlib source can't break this unrelated assertion.
+    const stdEntry = map.addrToLoc.find((l) => l.fn === 'std::goToEnd' && l.line === null)!;
+    expect(stdEntry.file).toBe('std');
+    const stdFirstLine = map.addrToLoc.find((l) => l.fn === 'std::goToEnd' && l.line !== null)!.line;
+    expect(resolveLoc(map, stdEntry.addr)).toEqual({ addr: stdEntry.addr, file: 'std', line: stdFirstLine, fn: 'std::goToEnd' });
+
+    // A normal (already-lined) instruction returns itself unchanged.
+    const normal = map.addrToLoc.find((l) => l.line !== null)!;
+    expect(resolveLoc(map, normal.addr)).toEqual(normal);
+
+    // An unknown address returns null.
+    expect(resolveLoc(map, 9999)).toBeNull();
+
+    r.program.free();
   });
 });
 

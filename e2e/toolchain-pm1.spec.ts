@@ -150,7 +150,10 @@ test.describe('PM-1 page', () => {
 
   test('E-tc-step: Step pauses, highlights the ip line, and Continue runs to the end', async ({ page }) => {
     await page.getByRole('button', { name: /^step$/i }).click();
-    await expect(logLine(page, /^step 1: main\.pmc:/)).toBeVisible({ timeout: 10_000 });
+    // main's entry instruction (the first thing to retire) carries no source
+    // line of its own — it resolves forward to the function's first
+    // statement, so step 1 already names a real line, not `:?`.
+    await expect(logLine(page, /^step 1: main\.pmc:\d+ main/)).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('.cm-ip-line')).toHaveCount(1);
     await expect(page.getByRole('button', { name: /^continue$/i })).toBeVisible();
     await page.getByRole('button', { name: /^continue$/i }).click();
@@ -160,11 +163,14 @@ test.describe('PM-1 page', () => {
   test('E-tc-step-into-std: stepping into std::goToEnd switches to the stdlib tab with the ip line highlighted', async ({ page }) => {
     // Step is one retired instruction, not one source-level transition
     // (docs/execution-model.md (toolchain engines)); no `paused` line is
-    // logged in step mode. The call into std::goToEnd retires first
-    // (its frame's entry instruction carries no source line — "std.pmc:?"
-    // — mirroring main's own entry step), so poll a bounded number of Step
-    // clicks for a *numbered* std.pmc line to appear, not just the tab
-    // switch (which happens one step earlier, on the line-less entry).
+    // logged in step mode. The call into std::goToEnd retires first, and its
+    // frame's line-less entry instruction now resolves forward to the
+    // function's first line (mirroring main's own entry step) — so both the
+    // tab switch (driven by the ip *after* the step) and the numbered
+    // std.pmc log line (naming where the ip was *before* the step) arrive
+    // one Step earlier than before the fix. The tab still leads the log line
+    // by one Step (structural — see the two above), so poll a bounded number
+    // of Step clicks for the numbered line and only then assert the tab.
     const wanted = /^step \d+: std\.pmc:\d+ std::goToEnd/;
     for (let i = 0; i < 8; i++) {
       await page.getByRole('button', { name: /^step$/i }).click();
