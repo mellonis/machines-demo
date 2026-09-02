@@ -26,6 +26,12 @@ export class ToolchainCore {
   private stopRequested = false;
   private loopActive = false;
   private lastProgressAt = 0;
+  /** Bumped every time `this.session` is dropped or replaced. A running
+   *  `drive()` loop captures the value at entry and treats a mismatch as
+   *  "the session I was pumping is gone" — it stops touching it rather than
+   *  calling into a freed wasm object or finalising a session that isn't
+   *  its own. */
+  private generation = 0;
 
   constructor(private readonly mod: MtcModule, private readonly deps: CoreDeps) {}
 
@@ -49,8 +55,12 @@ export class ToolchainCore {
         }
         case 'encodeTapeBlock':
           return this.deps.post({ type: 'tapeBlockBytes', bytes: this.mod.Toolchain.encodeTapeBlock({ tapes: req.tapes }) });
-        case 'start': return this.start(req);
-        case 'resume': return this.drive(req.mode, req.intervalMs);
+        // `await` here (not a bare `return this.start(req)`) is load-bearing:
+        // inside a try, returning a promise directly does not route its
+        // later rejection through this function's `catch` — the `await`
+        // forces the rejection to surface while the try is still active.
+        case 'start': return await this.start(req);
+        case 'resume': return await this.drive(req.mode, req.intervalMs);
         case 'pause':
           this.session?.pause();
           return;
@@ -106,13 +116,26 @@ export class ToolchainCore {
     this.registered = new Set(want);
   }
 
+  /** Clears `this.session` and invalidates any `drive()` loop still holding
+   *  a reference to the incarnation it replaces. */
+  private clearSession(): void {
+    this.session = null;
+    this.generation++;
+  }
+
   private dropSession(): void {
-    if (this.session) { try { this.session.free(); } catch { /* already stopped */ } this.session = null; }
+    if (this.session) { try { this.session.free(); } catch { /* already stopped */ } }
+    this.clearSession();
     this.loopActive = false;
   }
 
+  /** No-op when the session is already gone — a stale `drive()` loop can
+   *  race a `build`/`stop` here after its generation check already passed
+   *  but before it reaches this call; tolerate it rather than dereferencing
+   *  null. */
   private finish(): void {
-    const s = this.session!;
+    const s = this.session;
+    if (!s) return;
     const result = s.finished()!;
     this.deps.post({ type: 'finished', result, snapshots: s.snapshots() });
     this.dropSession();
@@ -124,13 +147,15 @@ export class ToolchainCore {
     this.finishStopped();
   }
 
+  /** See `finish()` — tolerates an already-cleared session. */
   private finishStopped(): void {
-    const s = this.session!;
+    const s = this.session;
+    if (!s) return;
     const snapshots = s.snapshots();
     const ip = s.ip;
     const stack = s.stack();
     const stats = s.stop();
-    this.session = null;
+    this.clearSession();
     this.loopActive = false;
     this.deps.post({ type: 'finished', result: { outcome: { kind: 'stopped' }, stats, ip, stack }, snapshots });
   }
@@ -145,6 +170,12 @@ export class ToolchainCore {
     const s = this.session;
     if (!s) { this.deps.post({ type: 'error', message: 'resume: no run in progress' }); return; }
     if (s.finished()) { this.finish(); return; }
+    // Captured once: identifies the session incarnation this loop pumps.
+    // A `build`/`start` that lands while we're awaiting below bumps
+    // `generation` (via dropSession/clearSession) — every checkpoint below
+    // re-reads it and bails out silently rather than touching `s`, which may
+    // already be freed by then.
+    const gen = this.generation;
     this.loopActive = true;
     try {
       if (mode === 'step') {
@@ -161,6 +192,7 @@ export class ToolchainCore {
         return;
       }
       for (;;) {
+        if (this.generation !== gen) return; // superseded by a build/start — s may be freed
         if (this.stopRequested) { this.finishStopped(); return; }
         const budget = mode === 'auto' ? 1 : TOOLCHAIN_SLICE_BUDGET;
         const ev = s.pump(budget);
@@ -168,6 +200,10 @@ export class ToolchainCore {
         if (ev.kind === 'deviceWait') throw new Error('deviceWait with owned devices');
         if (ev.kind === 'paused') {
           if (this.isPauseHonoured(ev.cause)) {
+            // A stop that lands in the same synchronous stretch as this
+            // pump() call wins: finalise as stopped rather than reporting a
+            // pause nobody is waiting to see.
+            if (this.stopRequested) { this.finishStopped(); return; }
             this.deps.post({ type: 'paused', cause: ev.cause, ip: s.ip, snapshots: s.snapshots(), stats: s.stats() });
             return;
           }
@@ -177,6 +213,7 @@ export class ToolchainCore {
           this.deps.post({ type: 'stepped', snapshots: s.snapshots(), ip: s.ip, stats: s.stats(), retired: true });
           this.deps.post({ type: 'idle' });
           await this.deps.sleep(intervalMs ?? 0);
+          if (this.generation !== gen) return;
           this.deps.post({ type: 'busy' });
         } else {
           const t = this.deps.now();
@@ -185,6 +222,7 @@ export class ToolchainCore {
             this.deps.post({ type: 'progress', snapshots: s.snapshots(), steps: s.stats().steps, ip: s.ip });
           }
           await this.deps.yieldTurn();
+          if (this.generation !== gen) return;
         }
       }
     } finally {
