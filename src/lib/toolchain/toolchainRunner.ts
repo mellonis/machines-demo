@@ -35,7 +35,8 @@ export type RunHandlers = {
   onProgress?: (r: ProgressResponse) => void;
 };
 
-type SimplePending = { resolve: (r: ToolchainResponse) => void; reject: (e: Error) => void; timeoutId: ReturnType<typeof setTimeout> };
+type SimpleEntry = { msg: ToolchainRequest; resolve: (r: ToolchainResponse) => void; reject: (e: Error) => void };
+type SimplePending = SimpleEntry & { timeoutId: ReturnType<typeof setTimeout> };
 type RunPending = { resolve: (r: FinishedResponse) => void; reject: (e: Error) => void; timeoutId: ReturnType<typeof setTimeout> | null; handlers: RunHandlers };
 
 const RUN_CHANNEL = new Set(['stepped', 'progress', 'paused', 'finished', 'idle', 'busy']);
@@ -45,6 +46,11 @@ export type StartOptions = Omit<Extract<ToolchainRequest, { type: 'start' }>, 't
 export class ToolchainRunner {
   private worker: ToolchainWorkerLike | null = null;
   private simple: SimplePending | null = null;
+  /** Simple requests waiting for the channel — FIFO. The lint `check` that
+   *  rides along a continuous run can be in flight for a while, so a Build /
+   *  Format / disassemble click landing in that window queues behind it
+   *  instead of failing. */
+  private simpleQueue: SimpleEntry[] = [];
   private run: RunPending | null = null;
   private lastRunProgress: ProgressResponse | null = null;
   onUncorrelatedError: ((message: string) => void) | null = null;
@@ -66,6 +72,7 @@ export class ToolchainRunner {
 
   private killAll(err: Error): void {
     if (this.simple) { clearTimeout(this.simple.timeoutId); this.simple.reject(err); this.simple = null; }
+    this.rejectQueued(err);
     if (this.run) { if (this.run.timeoutId) clearTimeout(this.run.timeoutId); this.run.reject(err); this.run = null; }
     if (this.worker) { this.worker.terminate(); this.worker = null; }
   }
@@ -90,7 +97,7 @@ export class ToolchainRunner {
     if (data.type === 'error') {
       const err = new ToolchainWorkerError(data.message, data.fatal === true);
       if (err.fatal) { this.onFatal?.(data.message); this.killAll(err); return; }
-      if (this.simple) { const p = this.simple; this.simple = null; clearTimeout(p.timeoutId); p.reject(err); return; }
+      if (this.simple) { this.settleSimple((p) => p.reject(err)); return; }
       if (this.run) { const p = this.run; this.run = null; if (p.timeoutId) clearTimeout(p.timeoutId); p.reject(err); return; }
       this.onUncorrelatedError?.(data.message);
       return;
@@ -112,22 +119,49 @@ export class ToolchainRunner {
           return;
       }
     }
-    if (this.simple) { const p = this.simple; this.simple = null; clearTimeout(p.timeoutId); p.resolve(data); }
+    if (this.simple) this.settleSimple((p) => p.resolve(data));
+  }
+
+  private rejectQueued(err: Error): void {
+    const queued = this.simpleQueue;
+    this.simpleQueue = [];
+    for (const entry of queued) entry.reject(err);
   }
 
   private sendSimple(msg: ToolchainRequest): Promise<ToolchainResponse> {
-    if (this.simple) throw new Error('previous request still pending');
-    const w = this.ensureWorker();
     return new Promise((resolve, reject) => {
-      const timeoutMs = getSetting('workerTimeoutMs');
-      const timeoutId = setTimeout(() => {
-        this.simple = null;
-        if (this.worker) { this.worker.terminate(); this.worker = null; }
-        reject(new ToolchainTimeoutError(`timeout after ${timeoutMs}ms — worker terminated`, null));
-      }, timeoutMs);
-      this.simple = { resolve, reject, timeoutId };
-      w.postMessage(msg);
+      this.simpleQueue.push({ msg, resolve, reject });
+      this.pumpSimpleQueue();
     });
+  }
+
+  /** Posts the next queued simple request once the channel is free. The
+   *  watchdog is armed here, at dequeue — arming it at enqueue would make a
+   *  queued request inherit the wall-clock budget of the one ahead of it. */
+  private pumpSimpleQueue(): void {
+    if (this.simple || this.simpleQueue.length === 0) return;
+    const entry = this.simpleQueue.shift()!;
+    const w = this.ensureWorker();
+    const timeoutMs = getSetting('workerTimeoutMs');
+    const timeoutId = setTimeout(() => {
+      this.simple = null;
+      if (this.worker) { this.worker.terminate(); this.worker = null; }
+      const err = new ToolchainTimeoutError(`timeout after ${timeoutMs}ms — worker terminated`, null);
+      entry.reject(err);
+      this.rejectQueued(err);
+    }, timeoutMs);
+    this.simple = { ...entry, timeoutId };
+    w.postMessage(entry.msg);
+  }
+
+  /** Settles the in-flight simple request and starts the next one. */
+  private settleSimple(settle: (p: SimplePending) => void): void {
+    const p = this.simple;
+    if (!p) return;
+    this.simple = null;
+    clearTimeout(p.timeoutId);
+    settle(p);
+    this.pumpSimpleQueue();
   }
 
   private async expect<T extends ToolchainResponse['type']>(msg: ToolchainRequest, type: T): Promise<Extract<ToolchainResponse, { type: T }>> {

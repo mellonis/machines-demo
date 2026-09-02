@@ -44,6 +44,32 @@ describe('ToolchainRunner', () => {
     await expect(run).resolves.toMatchObject({ type: 'finished' });
   });
 
+  it('T-runner-simple-queue: a second simple request waits for the first, then is posted; both resolve in order', async () => {
+    const { factory, current } = makeFakeToolchainFactory();
+    const r = new ToolchainRunner(factory);
+    const order: string[] = [];
+    const first = r.check('pmc', 'a').then(() => order.push('first'));
+    const second = r.format('pmc', 'b').then(() => order.push('second'));
+    // Only the first is on the wire; the format waits its turn.
+    expect(current().postedMessages).toEqual([{ type: 'check', lang: 'pmc', code: 'a' }]);
+    current().respond({ type: 'checked', diagnostics: [] });
+    await first;
+    expect(current().last).toEqual({ type: 'format', lang: 'pmc', code: 'b' });
+    current().respond({ type: 'formatted', ok: true, text: 'b' });
+    await second;
+    expect(order).toEqual(['first', 'second']);
+  });
+
+  it('T-runner-queue-killed: a fatal error rejects the in-flight and the queued request', async () => {
+    const { factory, current } = makeFakeToolchainFactory();
+    const r = new ToolchainRunner(factory);
+    const inFlight = r.check('pmc', 'a');
+    const queued = r.build('pmc', 'b');
+    current().respond({ type: 'error', message: 'module trap', fatal: true });
+    await expect(inFlight).rejects.toBeInstanceOf(ToolchainWorkerError);
+    await expect(queued).rejects.toThrow(/module trap/);
+  });
+
   it('T-runner-maxsteps-from-settings: start fills limits from the setting; Infinity omits it', async () => {
     const { factory, current } = makeFakeToolchainFactory();
     const r = new ToolchainRunner(factory);

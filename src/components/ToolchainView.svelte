@@ -15,7 +15,7 @@
   import Log from './Log.svelte';
   import { LogStore } from '../lib/logStore.svelte.ts';
   import ToolchainWorker from '../lib/toolchain/toolchainWorker.ts?worker';
-  import { ToolchainRunner, ToolchainTimeoutError } from '../lib/toolchain/toolchainRunner.ts';
+  import { ToolchainRunner, ToolchainTimeoutError, ToolchainWorkerError } from '../lib/toolchain/toolchainRunner.ts';
   import { BELT_ANIMATION_MIN_INTERVAL_MS, MAX_TAPES, VIEWPORT_WIDTH } from '../lib/caps.ts';
   import { CARET_COLORS } from '../lib/caretColors.ts';
   import type { Command, ToolchainEngine } from '../lib/types.ts';
@@ -106,6 +106,10 @@
   let takeControlRequested = false;
   /** Head positions of the previously rendered frame — the belt slide's ±1. */
   let prevHeads: number[] | null = null;
+  /** Location of the instruction the next `stepped` will have retired.
+   *  `stepped.ip` is where execution *resumes*, so the step line has to name
+   *  this, not the incoming ip. */
+  let prevIpLoc: { file: SourceFile; line: number | null; fn: string } | null = null;
   let codeChangedWarned = false;
   // Breakpoints keyed "<file>:<line>" — user intent, kept across builds; resolved to addresses at Build / start.
   const breakpoints = new SvelteSet<string>();
@@ -192,6 +196,12 @@
   function locOf(ip: number): { file: SourceFile; line: number | null; fn: string } | null {
     const l = lineMap?.addrToLoc.find((x) => x.addr === ip);
     return l ? { file: l.file, line: l.line, fn: l.fn } : null;
+  }
+  /** Where a run begins: the entry address, or the program's first mapped
+   *  address when address 0 carries no instruction of its own. */
+  function entryLoc(): { file: SourceFile; line: number | null; fn: string } | null {
+    const first = lineMap?.addrToLoc[0];
+    return locOf(0) ?? (first ? { file: first.file, line: first.line, fn: first.fn } : null);
   }
   function fileLabel(file: SourceFile): string { return file === 'std' ? `std.${srcExt}` : `main.${ext}`; }
   function locText(loc: { file: SourceFile; line: number | null; fn: string } | null): string {
@@ -293,7 +303,12 @@
       runner.setDebug(debugMode);
       return true;
     } catch (err) {
-      workerLive = false;
+      // Only a dead module takes the worker down with it: a fatal error or a
+      // watchdog kill. Any other rejection (a superseded request, a bad
+      // response shape) leaves the worker alive, so clearing `workerLive`
+      // would disable the tape-block buttons and the setDebug effect until
+      // the next successful Build for no reason.
+      if (err instanceof ToolchainTimeoutError || (err instanceof ToolchainWorkerError && err.fatal)) workerLive = false;
       log.report(`error: ${err instanceof Error ? err.message : String(err)}`, 'error');
       return false;
     } finally {
@@ -348,7 +363,8 @@
     renderSnapshots(r.snapshots, animate, prev);
     prevHeads = r.snapshots.map((s) => s.head);
     setIp(r.ip);
-    if (r.retired) log.report(`step ${r.stats.steps}: ${locText(ipLoc)}${stepDetail(r.snapshots, heads, prev)}`);
+    if (r.retired) log.report(`step ${r.stats.steps}: ${locText(prevIpLoc)}${stepDetail(r.snapshots, heads, prev)}`);
+    prevIpLoc = locOf(r.ip);
     if (executionMode !== 'RUNNING_AUTO') executionMode = 'RUNNING_PAUSED';
   }
   function onPaused(r: PausedResponse): void {
@@ -356,6 +372,7 @@
     prevHeads = r.snapshots.map((s) => s.head);
     setIp(r.ip);
     log.report(`paused at ${locText(ipLoc).replace(' ', ' in ')} (${causeText(r)})`, 'pause');
+    prevIpLoc = locOf(r.ip);
     executionMode = 'RUNNING_PAUSED';
   }
   function onProgress(r: ProgressResponse): void {
@@ -385,6 +402,7 @@
     executionMode = 'HALTED';
   }
   function failHalted(err: unknown): void {
+    stopRequested = false;
     if (takeControlRequested) { takeControlRequested = false; executionMode = 'MANUAL'; return; }
     const msg = err instanceof Error ? err.message : String(err);
     log.report(`error: ${msg}`, 'error');
@@ -404,7 +422,9 @@
     const ok = await reloadWorker();
     if (!ok) { executionMode = 'MANUAL'; return; }
     codeChangedWarned = false;
+    stopRequested = false;
     prevHeads = seeds.map((s) => s.head);
+    prevIpLoc = entryLoc();
     lastSnapshots = null;
     executionMode = mode === 'step' ? 'RUNNING_PAUSED' : mode === 'auto' ? 'RUNNING_AUTO' : 'RUNNING_CONTINUOUS';
     log.report(mode === 'step' ? 'running step by step…' : mode === 'auto' ? `running, auto-stepping every ${intervalMs}ms` : 'running…');
@@ -423,13 +443,16 @@
   }
 
   function doStep(): void {
-    if (executionMode === 'RUNNING_PAUSED') { runner.resume('step'); return; }
+    // The highlight is "execution is here"; a resume makes it stale until the
+    // next stepped / paused repaints it.
+    if (executionMode === 'RUNNING_PAUSED') { setIp(null); runner.resume('step'); return; }
     if (executionMode === 'RUNNING_AUTO') { runner.pause(); return; }
     void startRun('step');
   }
   function doRun(): void {
     if (executionMode === 'RUNNING_PAUSED') {
       const mode = withPause ? 'auto' : 'continuous';
+      setIp(null);
       runner.resume(mode, withPause ? (intervalMs ?? undefined) : undefined);
       executionMode = withPause ? 'RUNNING_AUTO' : 'RUNNING_CONTINUOUS';
       return;
