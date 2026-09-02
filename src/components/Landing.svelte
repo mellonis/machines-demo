@@ -3,9 +3,9 @@
   import SnippetPanel from './SnippetPanel.svelte';
   import snippets from 'virtual:snippets';
   import { readEngineFromLandingQuery } from '../lib/routing';
-  import type { Engine } from '../lib/types';
+  import type { JsEngine } from '../lib/types';
 
-  let engine = $state<Engine>('turing');
+  let engine = $state<JsEngine>('turing');
 
   // Playback orchestration. One IntersectionObserver
   // over all panel slots — the panel with the highest visible ratio becomes
@@ -84,7 +84,7 @@
     };
   });
 
-  function setEngine(next: Engine) {
+  function setEngine(next: JsEngine) {
     if (next === engine) return;
     engine = next;
     // Engine switch remounts the panel slots; the action's destroy clears

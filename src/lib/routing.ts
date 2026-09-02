@@ -1,4 +1,4 @@
-import { ENGINES, type Engine, type Route } from './types';
+import { ENGINES, JS_ENGINES, type Engine, type JsEngine, type Route } from './types';
 
 export function readRouteFromUrl(pathname: string): Route {
   const seg = pathname.replace(/^\/+/, '').split('/')[0];
@@ -8,10 +8,10 @@ export function readRouteFromUrl(pathname: string): Route {
   return { kind: 'landing' };
 }
 
-export function readEngineFromLandingQuery(search: string): Engine {
+export function readEngineFromLandingQuery(search: string): JsEngine {
   const params = new URLSearchParams(search);
   const raw = params.get('engine');
-  return (ENGINES as readonly string[]).includes(raw ?? '') ? (raw as Engine) : 'turing';
+  return (JS_ENGINES as readonly string[]).includes(raw ?? '') ? (raw as JsEngine) : 'turing';
 }
 
 export function legacyMachineRewrite(url: URL): URL {

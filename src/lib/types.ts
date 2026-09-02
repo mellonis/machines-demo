@@ -5,8 +5,19 @@
 import type { Graph } from '@turing-machine-js/machine';
 import type { TapeSnapshot } from '@turing-machine-js/visuals';
 
-export const ENGINES = ['turing', 'post'] as const;
+export const JS_ENGINES = ['turing', 'post'] as const;
+export type JsEngine = (typeof JS_ENGINES)[number];
+export const TOOLCHAIN_ENGINES = ['pm1', 'tm1'] as const;
+export type ToolchainEngine = (typeof TOOLCHAIN_ENGINES)[number];
+export const ENGINES = [...JS_ENGINES, ...TOOLCHAIN_ENGINES] as const;
 export type Engine = (typeof ENGINES)[number];
+
+export function isToolchainEngine(e: Engine): e is ToolchainEngine {
+  return (TOOLCHAIN_ENGINES as readonly string[]).includes(e);
+}
+export function isJsEngine(e: Engine): e is JsEngine {
+  return (JS_ENGINES as readonly string[]).includes(e);
+}
 
 export type Route =
   | { kind: 'landing' }
