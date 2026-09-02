@@ -19,6 +19,19 @@ export type ComputeInitialBootInput = {
 };
 
 /**
+ * Read a query-string id param, normalising "absent" and "present but
+ * empty" to the same `null` (a bare `?example=` is not a chosen id).
+ * Shared by `computeInitialBoot`'s own `example` / `snippet` reads and by
+ * any caller that needs to resolve the same URL tier independently (e.g.
+ * ToolchainView.svelte's boot-time `kind` / seed-glyph resolution, which
+ * must agree with this function's tier-1 check without re-deriving it).
+ */
+export function parseIdParam(url: URL, name: string): string | null {
+  const raw = url.searchParams.get(name);
+  return raw !== null && raw !== '' ? raw : null;
+}
+
+/**
  * Resolve the initial editor state for a MachineView mount.
  *
  * Priority (highest to lowest):
@@ -43,10 +56,8 @@ export function computeInitialBoot({
   loadedCode,
   initialExample,
 }: ComputeInitialBootInput): InitialBoot {
-  const rawExample = url.searchParams.get('example');
-  const exampleId = rawExample !== null && rawExample !== '' ? rawExample : null;
-  const rawSnippet = url.searchParams.get('snippet');
-  const snippetId = rawSnippet !== null && rawSnippet !== '' ? rawSnippet : null;
+  const exampleId = parseIdParam(url, 'example');
+  const snippetId = parseIdParam(url, 'snippet');
 
   // 1. ?example=<id> wins when the id is known.
   if (exampleId !== null) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeInitialBoot } from './initialBoot.ts';
+import { computeInitialBoot, parseIdParam } from './initialBoot.ts';
 import { defaultExample, findExample } from './defaultCode.ts';
 import type { Snippets } from './persist.ts';
 import type { ExecutionMode } from './graphHighlightDerivation.ts';
@@ -118,6 +118,15 @@ describe('computeInitialBoot — boot-priority decision tree', () => {
       initialExample: TURING_INITIAL_EXAMPLE,
     });
     expect(bare.code).toBe(TURING_INITIAL_EXAMPLE.code);
+  });
+});
+
+describe('parseIdParam', () => {
+  it('M-boot-parse-id-param: empty string and missing both normalise to null; a real value passes through', () => {
+    const withValue = new URL('http://localhost/pm1?example=unary-increment&snippet=');
+    expect(parseIdParam(withValue, 'example')).toBe('unary-increment');
+    expect(parseIdParam(withValue, 'snippet')).toBe(null);
+    expect(parseIdParam(withValue, 'missing')).toBe(null);
   });
 });
 

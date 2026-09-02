@@ -66,6 +66,56 @@ test.describe('PM-1 page', () => {
     await expect(page.getByRole('tab', { name: 'main.pmc' })).toHaveAttribute('aria-selected', 'true');
   });
 
+  test('E-tc-boot-example-query: ?example=<id> wins the boot tier over a differing persisted seed/kind', async ({ page }) => {
+    // Plant a stale localStorage seed/kind (5-mark seed, kind 'source') on a
+    // plain visit — the URL-example tier (ToolchainView.svelte's
+    // `bootTierExample`) must win over it on the next navigation, not the
+    // localStorage tier `loadSeeds`/`loadKind` would otherwise resolve.
+    await page.evaluate(() => {
+      localStorage.setItem('machines-demo:pm1:seeds', JSON.stringify([{ cells: ['*', '*', '*', '*', '*'], origin: 0, head: 0 }]));
+      localStorage.setItem('machines-demo:pm1:kind', 'source');
+    });
+    await page.goto('/pm1?example=unary-increment-asm');
+    await expect(page.getByTestId('tapes-stack')).toBeVisible();
+    await expect(logLine(page, /^built — 1 band\(s\): tape/)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('tab', { name: 'main.pma' })).toHaveAttribute('aria-selected', 'true');
+    expect(await nonBlank(page)).toEqual(['*', '*', '*']);
+  });
+
+  test('E-tc-boot-snippet-query: ?snippet=<uuid> wins the boot tier over the localStorage seed', async ({ page }) => {
+    // Distinctive seed: 4 marks (one more than the bundled example's 3),
+    // built the same way E-tc-seed-persists does — walk the head across the
+    // three existing marks (no-ops) then extend with a fourth.
+    await page.getByRole('button', { name: 'Move right' }).click();
+    await page.getByRole('button', { name: 'Write *' }).click();
+    for (let i = 0; i < 4; i++) {
+      await page.getByRole('button', { name: 'Apply' }).click();
+    }
+    expect(await nonBlank(page)).toEqual(['*', '*', '*', '*']);
+
+    await page.getByRole('button', { name: 'Save snippet' }).click();
+    await page.getByPlaceholder('Snippet name').fill('boot-snippet-test');
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(page.locator('.save-popover')).toBeHidden();
+
+    const snippetUrl = page.url();
+    const snippetId = new URL(snippetUrl).searchParams.get('snippet');
+    expect(snippetId).not.toBeNull();
+
+    // Clear the localStorage seed tier (leave the snippets key, which holds
+    // the snippet's own seed) — proves the snippet tier is what resolves
+    // the belt, not a coincidental localStorage carry-over.
+    await page.evaluate(() => localStorage.removeItem('machines-demo:pm1:seeds'));
+
+    await page.goto(snippetUrl);
+    await expect(page.getByTestId('tapes-stack')).toBeVisible();
+    await expect(logLine(page, /^built — 1 band\(s\): tape/)).toBeVisible({ timeout: 15_000 });
+    expect(await nonBlank(page)).toEqual(['*', '*', '*', '*']);
+
+    await page.getByRole('button', { name: 'Example code sources' }).click();
+    await expect(page.getByRole('menuitem', { name: 'boot-snippet-test' })).toHaveClass(/selected/);
+  });
+
   test('E-tc-build-error: a syntax error fails the Build with a positioned error and the counter pill', async ({ page }) => {
     await setEditorText(page, 'main() {\n    mark;\n');
     await expect(page.locator('[data-testid="diag-pill"][data-severity="error"]')).toBeVisible({ timeout: 5_000 });

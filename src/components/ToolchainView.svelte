@@ -38,7 +38,7 @@
   import { parseInterval } from '../lib/interval.ts';
   import { parse as parseSnapshot, serialize as serializeSnapshot } from '../lib/tapeSnapshot.ts';
   import { defaultExample, examples, findExample, type Example } from '../lib/defaultCode.ts';
-  import { computeInitialBoot } from '../lib/initialBoot.ts';
+  import { computeInitialBoot, parseIdParam } from '../lib/initialBoot.ts';
   import {
     loadCode, loadExampleId, saveExampleId, loadSnippets, saveSnippet, deleteSnippet, renameSnippet,
     loadDebugMode, saveDebugMode, loadSeeds, saveSeeds, loadKind, saveKind, type Snippets,
@@ -78,10 +78,7 @@
   // untouched buffer with a panel-edited seed is byte-identical to the
   // example's code, so it read as "the example tier applied" and silently
   // discarded the persisted seed (and kind) on every reload.
-  const urlExampleId = untrack(() => {
-    const raw = new URL(window.location.href).searchParams.get('example');
-    return raw !== null && raw !== '' ? raw : null;
-  });
+  const urlExampleId = untrack(() => parseIdParam(new URL(window.location.href), 'example'));
   const bootTierExample = untrack(() => (urlExampleId !== null ? findExample(engine, urlExampleId) : undefined));
   let kind = $state<BufferKind>(untrack(() => {
     if (bootTierExample !== undefined) return bootTierExample.kind ?? 'source';
