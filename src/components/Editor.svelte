@@ -157,6 +157,11 @@
     :global(.cm-bp-gutter .cm-gutterElement.cm-bp-unmappable) {
       cursor: not-allowed;
     }
+    :global(.cm-bp-gutter .cm-bp-refuse) {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
     :global(.cm-bp-marker) {
       display: inline-block;
       width: 10px;

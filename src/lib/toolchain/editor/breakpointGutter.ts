@@ -46,6 +46,7 @@ class Unmappable extends GutterMarker {
   elementClass = 'cm-bp-unmappable';
   toDOM(): Node {
     const el = document.createElement('span');
+    el.className = 'cm-bp-refuse';
     el.title = this.title;
     return el;
   }

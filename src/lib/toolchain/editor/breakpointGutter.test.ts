@@ -75,6 +75,15 @@ describe('breakpointGutter', () => {
     const toggled: number[] = [];
     const { view, parent } = make(new Set(), new Set([2]), (n) => toggled.push(n));
     const el = parent.querySelector('.cm-bp-gutter .cm-gutterElement.cm-bp-unmappable') as HTMLElement;
+    // Pre-click: the tooltip must already be reachable on hover, before any
+    // click. `Unmappable.toDOM()` puts the `title` on its inner
+    // `.cm-bp-refuse` span (not on the wrapper `.cm-gutterElement`), and
+    // Editor.svelte's `.cm-bp-refuse` rule stretches that span to fill the
+    // cell so it is the actual hover/pointer target.
+    expect(el.classList.contains('cm-bp-unmappable')).toBe(true);
+    const refuse = el.querySelector('.cm-bp-refuse') as HTMLElement;
+    expect(refuse.title).toBe('no instruction on this line');
+    // Click: still refused, and the wrapper title is set too (belt-and-braces).
     el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
     expect(toggled).toEqual([]);
     expect(el.classList.contains('cm-bp-unmappable')).toBe(true);
