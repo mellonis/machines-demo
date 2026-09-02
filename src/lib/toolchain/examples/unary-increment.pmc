@@ -1,0 +1,7 @@
+// Unary increment: append one mark to a run of marks.
+// The head starts on the first mark; the run grows by one on the right.
+main() {
+    @std::goToEnd();
+    mark;
+    @std::goToBegin();
+}

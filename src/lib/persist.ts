@@ -1,3 +1,4 @@
+import type { BufferKind, ExampleSeed } from './toolchain/types.ts';
 import type { Engine } from './types.ts';
 
 const THEME_KEY = 'machines-demo:theme';
@@ -6,7 +7,7 @@ function engineKey(engine: Engine, suffix: string): string {
   return `machines-demo:${engine}:${suffix}`;
 }
 
-export type Snippet = { title: string; code: string; savedAt: number };
+export type Snippet = { title: string; code: string; savedAt: number; kind?: BufferKind; seeds?: ExampleSeed[] };
 // Keyed by UUID — the UUID is the stable identity; title is user-visible name.
 export type Snippets = Record<string, Snippet>;
 
@@ -112,11 +113,12 @@ export function saveSnippet(
   engine: Engine,
   title: string,
   code: string,
+  extra: { kind?: BufferKind; seeds?: ExampleSeed[] } = {},
 ): { id: string; snippet: Snippet } {
   const current = loadSnippets(engine);
   const existingId = Object.entries(current).find(([, s]) => s.title === title)?.[0];
   const id = existingId ?? crypto.randomUUID();
-  const snippet: Snippet = { title, code, savedAt: Date.now() };
+  const snippet: Snippet = { title, code, savedAt: Date.now(), ...(extra.kind ? { kind: extra.kind } : {}), ...(extra.seeds ? { seeds: extra.seeds } : {}) };
   try {
     current[id] = snippet;
     localStorage.setItem(engineKey(engine, 'snippets'), JSON.stringify(current));
@@ -124,6 +126,27 @@ export function saveSnippet(
     /* quota or private mode — ignore */
   }
   return { id, snippet };
+}
+
+export function loadSeeds(engine: Engine): ExampleSeed[] | null {
+  try {
+    const v = localStorage.getItem(engineKey(engine, 'seeds'));
+    if (!v) return null;
+    const parsed = JSON.parse(v) as unknown;
+    return Array.isArray(parsed) ? (parsed as ExampleSeed[]) : null;
+  } catch { return null; }
+}
+export function saveSeeds(engine: Engine, seeds: ExampleSeed[]): void {
+  try { localStorage.setItem(engineKey(engine, 'seeds'), JSON.stringify(seeds)); } catch { /* ignore */ }
+}
+export function loadKind(engine: Engine): BufferKind | null {
+  try {
+    const v = localStorage.getItem(engineKey(engine, 'kind'));
+    return v === 'source' || v === 'asm' ? v : null;
+  } catch { return null; }
+}
+export function saveKind(engine: Engine, kind: BufferKind): void {
+  try { localStorage.setItem(engineKey(engine, 'kind'), kind); } catch { /* ignore */ }
 }
 
 export function deleteSnippet(engine: Engine, id: string): void {

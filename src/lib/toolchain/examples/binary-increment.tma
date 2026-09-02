@@ -1,0 +1,18 @@
+.routine main, tapes=1, alpha=(3)
+.section tables
+T0:     .row    [0]
+        .row    [1]
+        .row    [2]
+
+T1:     .targets inc__2, inc__1, inc__0
+.section code
+.func main
+L0001:  rd
+        mtc     T0
+        djmp    T1
+inc__0: wrmv    [1], [<]
+        jmp     L0001
+inc__1: wrmv    [2], [.]
+        stp
+inc__2: wrmv    [2], [.]
+        stp

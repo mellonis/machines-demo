@@ -63,8 +63,15 @@ export function createSnippetsPlugin(opts: Options = {}): Plugin {
   ) => readonly Example[] | Promise<readonly Example[]> =
     opts.examples ??
     (async (engine) => {
-      const mod = await import('../lib/defaultCode.ts');
-      return mod.examples(engine);
+      // Import `jsExamples.ts` (not `defaultCode.ts`) deliberately: this
+      // `import()` is executed by plain Node — a plugin hook body, not
+      // application source Vite transforms — so it can only load plain
+      // TypeScript (Node's native type-stripping). `defaultCode.ts` reaches
+      // into `toolchain/examples.ts`'s `?raw` example-file imports, a
+      // Vite-only construct Node cannot resolve; `jsExamples.ts` holds only
+      // the turing/post example content, with no such reach.
+      const mod = await import('../lib/jsExamples.ts');
+      return engine === 'post' ? mod.POST_EXAMPLES : mod.TURING_EXAMPLES;
     });
 
   return {
@@ -178,8 +185,8 @@ export function createSnippetsPlugin(opts: Options = {}): Plugin {
     },
 
     handleHotUpdate(ctx) {
-      // Re-record when defaultCode.ts changes.
-      if (ctx.file.endsWith('/defaultCode.ts')) {
+      // Re-record when the showcase example content changes.
+      if (ctx.file.endsWith('/defaultCode.ts') || ctx.file.endsWith('/jsExamples.ts')) {
         const mod = ctx.server.moduleGraph.getModuleById(RESOLVED_VIRTUAL_ID);
         if (mod) ctx.server.moduleGraph.invalidateModule(mod);
         return [];

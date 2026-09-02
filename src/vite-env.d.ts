@@ -6,6 +6,11 @@ declare module '*.svg?raw' {
   export default content;
 }
 
+declare module '*.pmc?raw' { const content: string; export default content; }
+declare module '*.tmc?raw' { const content: string; export default content; }
+declare module '*.pma?raw' { const content: string; export default content; }
+declare module '*.tma?raw' { const content: string; export default content; }
+
 declare module 'virtual:lib-versions' {
   export const turingVersion: string;
   export const postVersion: string;
