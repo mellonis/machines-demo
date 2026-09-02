@@ -365,13 +365,17 @@ A run that doesn't halt naturally hits `MAX_STEPS = 100_000` inside the worker's
 
 ## 9. Toolchain engines
 
-The `/tm1` and `/pm1` pages keep the five modes and every user action of §§2–7; only the worker mechanics differ. The engine is a pumped wasm session (the toolchains' `docs/wasm.md (sessions)`): `pump(budget)` retires instructions until the budget is spent, a pause fires, or the program ends. A **step is one instruction** (`pump(1)`), which for TM-1 in particular may be one of several instructions behind a single source-level transition — consecutive steps often share a source location. The `step N:` log line names the instruction that just retired, with its per-band read → write/move notation (the engine pages' own edge-label vocabulary, via `formatStepNotation`); the ip highlight shows where execution *resumes*, not the instruction just named.
+The `/tm1` and `/pm1` pages keep the five modes and every user action of §§2–7; only the worker mechanics differ. The engine is a pumped wasm session (the toolchains' `docs/wasm.md (sessions)`): `pump(budget)` retires instructions until the budget is spent, a pause fires, or the program ends.
+
+A **step is one source-level step**: instructions retire, one `pump(1)` at a time, until the resolved `(file, function, line)` position differs from the one the step began at — the line granularity of the toolchains' debug adapter (their `docs/dap.md`, stepping granularity). The whole position is compared, file and function included, since two translation units each restart line numbering at 1. A position that resolves to no line at all counts as a change, so code the map knows nothing about is never stepped over in silence; a line-less entry instruction is first forward-resolved to its function's first statement (the same rule the ip highlight displays), so stepping into a call stops once, on the callee's first statement, rather than on the frame boundary and again on the statement. A breakpoint, a `debugger` (`brk`, with debug on), a manual pause or the program ending partway interrupts the step and reports its own event instead of `stepped`; a source line that jumps to itself is bounded by `TOOLCHAIN_SLICE_BUDGET` retirements, after which the step reports anyway rather than hanging the UI.
+
+TM-1 lowers one source transition to several instructions, so `stats.steps` — which still counts instructions — jumps by more than one per Step there; `.pmc` and both assembly languages are one instruction per line and step one at a time. The `step N:` log line names the position the step began at, with the span's net per-band read → write/move notation (the engine pages' own edge-label vocabulary, via `formatStepNotation`); the ip highlight shows where execution *resumes*.
 
 | Mode / action | JS engines | Toolchain engines |
 |---|---|---|
 | Build | `build` → mirror machine rebuilt | `build { lang }` → `built`; seeds kept if bands + alphabets unchanged, else reset (logged); breakpoints re-resolved by `{ file, line }` |
-| Step (cold-start / paused) | `run { step }` / `resume { step }` | `start { mode: 'step' }` / `resume { mode: 'step' }` → `stepped` → RUNNING_PAUSED |
-| Run, withPause on | `run { intervalMs }` | `start { mode: 'auto', intervalMs }` — `pump(1)`, `idle`, sleep, `busy` per step |
+| Step (cold-start / paused) | `run { step }` / `resume { step }` | `start { mode: 'step' }` / `resume { mode: 'step' }` — `pump(1)` until the resolved source position changes → `stepped` → RUNNING_PAUSED |
+| Run, withPause on | `run { intervalMs }` | `start { mode: 'auto', intervalMs }` — one source-level step, `idle`, sleep, `busy` per tick |
 | Run, withPause off | `run` | `start { mode: 'continuous' }` — `pump(TOOLCHAIN_SLICE_BUDGET)` slices, `progress` heartbeats, an event-loop yield between slices |
 | Pause (auto) | `pause` | `pause` → next `paused { cause: 'manual' }` |
 | Continue | `resume` | `resume { mode }` |

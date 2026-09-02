@@ -20,6 +20,27 @@ test.describe('TM-1 page', () => {
     expect(await nonBlank(page)).toEqual(['1', '0', '0']);
   });
 
+  test('E-tc-tm-step-is-one-transition: a Step advances one `.tmc` transition, logging one line per click', async ({ page }) => {
+    // Source-level stepping (docs/execution-model.md (toolchain engines)):
+    // the read / match / dispatch instructions behind `entry state inc {`
+    // retire inside the Step that leaves that line, so no intermediate
+    // instruction gets a `step N:` line of its own.
+    const stepLines = logLine(page, /^step \d+:/);
+    await page.getByRole('button', { name: /^step$/i }).click();
+    await expect(stepLines).toHaveCount(1);
+    // Step 1 leaves the state line and lands on the rule that matched.
+    await expect(page.locator('.cm-ip-line')).toHaveCount(1);
+    await expect(page.locator('.cm-ip-line')).toContainText('->');
+    expect(await nonBlank(page)).toEqual(['0', '1', '1']); // the rule has not run yet
+
+    await page.getByRole('button', { name: /^step$/i }).click();
+    await expect(stepLines).toHaveCount(2);
+    // Step 2 ran the whole transition — the head's cell was rewritten and
+    // the head moved — and the ip is back on the state line.
+    expect(await nonBlank(page)).toEqual(['0', '1', '0']);
+    await expect(page.locator('.cm-ip-line')).toContainText('entry state inc');
+  });
+
   test('E-tc-tm-multitape: the two-tape example shows two belts and copies src to dst', async ({ page }) => {
     await page.getByRole('button', { name: 'Example code sources' }).click();
     await page.getByRole('menuitem', { name: 'Two-tape copy' }).click();

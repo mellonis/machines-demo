@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { TOOLCHAIN_SLICE_BUDGET } from '../caps.ts';
 import { loadMtcForTests } from './testModule.ts';
+import { positionKey } from './toolchainHelpers.ts';
+import BINARY_INCREMENT from './examples/binary-increment.tmc?raw';
 import { ToolchainCore, type CoreDeps, type MtcModule } from './workerCore.ts';
 import type { Program, RunStats, Session } from '$mtc';
 import type { ToolchainRequest, ToolchainResponse } from './types.ts';
@@ -56,7 +59,7 @@ function fakeSession(overrides: Partial<Session> = {}): Session {
   } as unknown as Session;
 }
 
-function fakeProgram(session: Session): Program {
+function fakeProgram(session: Session, over: Partial<Record<keyof Program, unknown>> = {}): Program {
   return {
     free: () => {},
     addressForLine: () => undefined,
@@ -68,6 +71,7 @@ function fakeProgram(session: Session): Program {
     seedsFromTapeBlock: () => [],
     session: () => session,
     tapes: () => [],
+    ...over,
   } as unknown as Program;
 }
 
@@ -154,15 +158,95 @@ describe('build / simple requests', () => {
 });
 
 describe('pump loops', () => {
-  it('T-pump-step: step mode retires one instruction per start/resume and reports snapshots + ip', async () => {
+  it('T-pump-step: step mode advances one source position per start/resume and reports snapshots + ip', async () => {
     const h = await harness();
     await h.send({ type: 'build', lang: 'pmc', code: PMC_INC });
     await h.send({ type: 'start', seeds: [{ cells: [1, 1, 1], head: 0 }], limits: {}, breakpoints: [], mode: 'step' });
     const s1 = ofType(h, 'stepped')[0];
     expect(s1.retired).toBe(true);
-    expect(s1.stats.steps).toBe(1);
+    // Two instructions: main's line-less `ent` resolves forward to the first
+    // statement, so it shares that statement's position and retires with it.
+    expect(s1.stats.steps).toBe(2);
     await h.send({ type: 'resume', mode: 'step' });
-    expect(ofType(h, 'stepped')[1].stats.steps).toBe(2);
+    expect(ofType(h, 'stepped')[1].stats.steps).toBe(3);
+  });
+
+  // Source-level stepping (`docs/execution-model.md (toolchain engines)`):
+  // a Step retires instructions until the resolved (file, function, line)
+  // position changes, so one `.tmc` transition is one Step.
+  it('T-pump-step-source-level-tmc: every Step of the binary increment lands on a new source position, retiring whole transitions', async () => {
+    const h = await harness();
+    await h.send({ type: 'build', lang: 'tmc', code: BINARY_INCREMENT });
+    const b = ofType(h, 'built')[0];
+    if (!b.ok) throw new Error('build failed');
+    const map = b.lineMap;
+    // `0 1 1` with the head on the least significant digit (the bundled
+    // example's own seed); glyphs are ['_', '0', '1'].
+    await h.send({ type: 'start', seeds: [{ cells: [1, 2, 2], head: 2 }], limits: {}, breakpoints: [], mode: 'step' });
+    for (let i = 0; i < 30 && ofType(h, 'finished').length === 0; i++) await h.send({ type: 'resume', mode: 'step' });
+
+    const steps = ofType(h, 'stepped');
+    expect(steps.length).toBeGreaterThan(1);
+    let position = positionKey(map, 0); // where the run begins: main's entry
+    let retiredSoFar = 0;
+    let spans = 0;
+    for (const s of steps) {
+      const now = positionKey(map, s.ip);
+      expect(now).not.toBe(position); // no Step ever stops where it started
+      position = now;
+      if (s.stats.steps - retiredSoFar > 1) spans++;
+      retiredSoFar = s.stats.steps;
+    }
+    // `stats.steps` still counts instructions, so a transition shows up as a
+    // jump of more than one.
+    expect(spans).toBeGreaterThan(0);
+
+    const f = ofType(h, 'finished')[0];
+    expect(f.result.outcome.kind).toBe('stopped');
+    expect(Array.from(f.snapshots[0].cells)).toEqual([2, 1, 1]); // 0 1 1 → 1 0 0
+  });
+
+  it('T-pump-step-source-level-pmc-unchanged: a `.pmc` statement is one instruction, so each Step still retires one — bar the entry Step, which folds the line-less `ent` into the first statement', async () => {
+    const h = await harness();
+    await h.send({ type: 'build', lang: 'pmc', code: PMC_INC });
+    await h.send({ type: 'start', seeds: [{ cells: [1, 1, 1], head: 0 }], limits: {}, breakpoints: [], mode: 'step' });
+    for (let i = 0; i < 4; i++) await h.send({ type: 'resume', mode: 'step' });
+    expect(ofType(h, 'stepped').map((s) => s.stats.steps)).toEqual([2, 3, 4, 5, 6]);
+  });
+
+  it('T-pump-step-interrupted-by-breakpoint: a breakpoint inside a transition\'s instruction run ends the Step as a pause, not a stepped', async () => {
+    const h = await harness();
+    await h.send({ type: 'build', lang: 'tmc', code: BINARY_INCREMENT });
+    const b = ofType(h, 'built')[0];
+    if (!b.ok) throw new Error('build failed');
+    // The last instruction of line 6's run — the Step is already under way
+    // (the entry and the earlier instructions of the same line retired)
+    // when the breakpoint fires.
+    const run = b.lineMap.addrToLoc.filter((l) => l.file === 'user' && l.line === 6);
+    const addr = run[run.length - 1].addr;
+    await h.send({ type: 'setDebug', on: true });
+    await h.send({ type: 'start', seeds: [{ cells: [1, 2, 2], head: 2 }], limits: {}, breakpoints: [addr], mode: 'step' });
+    expect(ofType(h, 'stepped')).toHaveLength(0);
+    const p = ofType(h, 'paused')[0];
+    expect(p.cause).toEqual({ breakpoint: addr });
+    expect(p.ip).toBe(addr);
+  });
+
+  it('T-pump-step-cap: a step whose position never changes gives up after TOOLCHAIN_SLICE_BUDGET retirements', async () => {
+    let pumps = 0;
+    const session = fakeSession({ pump: () => { pumps++; return { kind: 'budgetSpent' }; } });
+    // One instruction, one line, an ip that never moves — a line that jumps
+    // to itself. Only the cap can end the step.
+    const program = fakeProgram(session, {
+      listing: () => [{ addr: 0 }],
+      lineOf: () => ({ file: 'user', line: 1, function: 'main' }),
+    });
+    const h = bareHarness(fakeModule(program));
+    await h.send({ type: 'build', lang: 'pmc', code: 'main() {\n    right;\n}\n' });
+    await h.send({ type: 'start', seeds: [], limits: {}, breakpoints: [], mode: 'step' });
+    expect(pumps).toBe(TOOLCHAIN_SLICE_BUDGET);
+    const s = ofType(h, 'stepped')[0];
+    expect(s.retired).toBe(true);
   });
 
   it('T-pump-step-to-finish: stepping past the last instruction posts finished with the final snapshots', async () => {

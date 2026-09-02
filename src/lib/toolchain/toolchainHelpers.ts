@@ -194,6 +194,30 @@ export function resolveLoc(map: LineMap, addr: number): AddrLoc | null {
 }
 
 /**
+ * The step-granularity position of `addr` — `` `<file>:<function>:<line>` ``
+ * — or `null` when it resolves to no line at all. Source-level stepping
+ * retires instructions until this key changes, the line granularity of the
+ * toolchains' debug adapter (their `docs/dap.md`, stepping granularity).
+ *
+ * Two things follow that adapter deliberately. The *whole* position is
+ * compared, file and function included: two translation units each restart
+ * line numbering at 1, so a return from one file's line 2 into another's
+ * line 2 is real motion a line-only comparison would miss. And `null` — no
+ * entry for the address, or an entry still line-less after `resolveLoc` —
+ * counts as a change wherever the step came from, so a stretch of code the
+ * map knows nothing about is never stepped over in silence.
+ *
+ * The forward resolution is what makes a call stop once: a function's
+ * line-less `ent` reports its first statement's line (the same rule the ip
+ * highlight displays), so stepping into a callee lands on that statement
+ * rather than pausing on the entry and again on the statement.
+ */
+export function positionKey(map: LineMap, addr: number): string | null {
+  const loc = resolveLoc(map, addr);
+  return loc && loc.line !== null ? `${loc.file}:${loc.fn}:${loc.line}` : null;
+}
+
+/**
  * The instruction that retired just before `ip`, as its `addrToLoc` entry —
  * the entry immediately preceding the one whose `addr` is `ip`, since
  * `addrToLoc` is in listing (address) order. `null` when `ip` is the first

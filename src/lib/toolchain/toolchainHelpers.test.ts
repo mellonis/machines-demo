@@ -3,8 +3,9 @@ import { VIEWPORT_WIDTH } from '../caps.ts';
 import { loadMtcForTests } from './testModule.ts';
 import {
   applyCommand, applySeedGlyphs, buildLineMap, cellAt, findStdDefinition, headDelta, indexStdExports,
-  layoutsEqual, resolveLoc, retiredBefore, seedFromGlyphs, seedFromSnapshot, seedFromWasm, seedToGlyphs, seedToLibTape, seedToWasm, snapshotToLibTape,
+  layoutsEqual, positionKey, resolveLoc, retiredBefore, seedFromGlyphs, seedFromSnapshot, seedFromWasm, seedToGlyphs, seedToLibTape, seedToWasm, snapshotToLibTape,
 } from './toolchainHelpers.ts';
+import BINARY_INCREMENT from './examples/binary-increment.tmc?raw';
 import type { LineMap, SeedTape, TapeSnapshot } from './types.ts';
 
 const PM = [' ', '*'];
@@ -209,6 +210,48 @@ describe('line map', () => {
     expect(resolveLoc(map, 9999)).toBeNull();
 
     r.program.free();
+  });
+});
+
+describe('step positions', () => {
+  // The unit a source-level Step advances by: instructions retire until this
+  // key changes (the toolchains' `docs/dap.md`, stepping granularity).
+  it('T-position-key: every instruction of one `.tmc` rule line shares a key, the line-less entry folds into the first statement, and an unresolvable address is null', async () => {
+    const { Toolchain } = await loadMtcForTests();
+    const r = Toolchain.build('tmc', BINARY_INCREMENT, undefined);
+    if (!r.ok) throw new Error('build failed');
+    const map = buildLineMap(r.program, BINARY_INCREMENT.split('\n').length, Toolchain.stdlibSource('tmc').split('\n').length);
+
+    // `entry state inc {` (line 6) lowers to a read, a match and a dispatch:
+    // several instructions, one position.
+    const rule = map.addrToLoc.filter((l) => l.file === 'user' && l.line === 6);
+    expect(rule.length).toBeGreaterThan(1);
+    for (const l of rule) expect(positionKey(map, l.addr)).toBe('user:main:6');
+
+    // main's `ent` carries no line of its own; it resolves forward to the
+    // first statement, so a Step from the entry stops once, not twice.
+    const entry = map.addrToLoc.find((l) => l.line === null)!;
+    expect(entry.fn).toBe('main');
+    expect(positionKey(map, entry.addr)).toBe('user:main:6');
+
+    // Two rules of the same state are two positions.
+    const other = map.addrToLoc.find((l) => l.file === 'user' && l.line === 7)!;
+    expect(positionKey(map, other.addr)).toBe('user:main:7');
+
+    // No entry at all → null.
+    expect(positionKey(map, 9999)).toBeNull();
+
+    r.program.free();
+  });
+
+  it('T-position-key-lineless: an entry that stays line-less after resolution is null, so stepping into it counts as a change', () => {
+    const map: LineMap = {
+      addrToLoc: [{ addr: 0, file: 'user', line: null, fn: 'blind' }, { addr: 1, file: 'user', line: null, fn: 'blind' }],
+      userLineToAddr: [],
+      stdLineToAddr: [],
+    };
+    expect(positionKey(map, 0)).toBeNull();
+    expect(positionKey(map, 1)).toBeNull();
   });
 });
 

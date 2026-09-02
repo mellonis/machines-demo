@@ -4,8 +4,8 @@
 // contract in the toolchains' `docs/wasm.md (sessions)`.
 import type { Program, Session } from '$mtc';
 import { PROGRESS_INTERVAL_MS, TOOLCHAIN_SLICE_BUDGET } from '../caps.ts';
-import { buildLineMap } from './toolchainHelpers.ts';
-import type { DriveMode, Lang, PauseCause, ToolchainRequest, ToolchainResponse } from './types.ts';
+import { buildLineMap, positionKey } from './toolchainHelpers.ts';
+import type { DriveMode, Lang, LineMap, PauseCause, ToolchainRequest, ToolchainResponse } from './types.ts';
 
 export type MtcModule = Pick<typeof import('$mtc'), 'Toolchain'>;
 
@@ -19,6 +19,9 @@ export type CoreDeps = {
 
 export class ToolchainCore {
   private program: Program | null = null;
+  /** The current program's address → source map, kept so a Step can tell
+   *  where one source position ends and the next begins. */
+  private lineMap: LineMap | null = null;
   private session: Session | null = null;
   private breakpoints = new Set<number>();
   private registered = new Set<number>();
@@ -90,11 +93,13 @@ export class ToolchainCore {
   private build(lang: Lang, code: string): void {
     this.dropSession();
     if (this.program) { this.program.free(); this.program = null; }
+    this.lineMap = null;
     const r = this.mod.Toolchain.build(lang, code, undefined);
     if (!r.ok) { this.deps.post({ type: 'built', ok: false, diagnostics: r.diagnostics }); return; }
     this.program = r.program;
     const stdLines = this.mod.Toolchain.stdlibSource(lang).split('\n').length;
     const lineMap = buildLineMap(r.program, code.split('\n').length, stdLines);
+    this.lineMap = lineMap;
     this.deps.post({ type: 'built', ok: true, tapes: r.program.tapes(), diagnostics: r.diagnostics, lineMap });
   }
 
@@ -188,6 +193,64 @@ export class ToolchainCore {
     return true;
   }
 
+  /** The source position of `ip` under the current program's line map — the
+   *  unit a Step advances by. `null` when nothing resolves (no map, or an
+   *  address with no line), which every comparison treats as a change. */
+  private positionAt(ip: number): string | null {
+    return this.lineMap ? positionKey(this.lineMap, ip) : null;
+  }
+
+  /**
+   * One source-level step: instructions retire, one `pump(1)` at a time,
+   * until the resolved `(file, function, line)` position differs from the
+   * one the step began at — the line granularity of the toolchains' debug
+   * adapter (their `docs/dap.md`, stepping granularity). A breakpoint, an
+   * honoured `debugger`, a manual pause or the program ending partway
+   * interrupts the step and reports that event instead.
+   *
+   * Returns the `retired` flag for the caller's `stepped` response, or
+   * `null` when this call already finalised the segment — it posted
+   * `finished` / `paused`, or the loop was stopped or superseded and there
+   * is nothing left to post.
+   */
+  private sourceStep(s: Session, gen: number): boolean | null {
+    const start = this.positionAt(s.ip);
+    let retired = 0;
+    for (;;) {
+      if (this.generation !== gen) return null; // superseded by a build/start — s may be freed
+      if (this.stopRequested) { this.finishStopped(); return null; }
+      const ev = s.pump(1);
+      if (ev.kind === 'finished') { this.finish(); return null; }
+      if (ev.kind === 'deviceWait') throw new Error('deviceWait with owned devices');
+      if (ev.kind === 'paused') {
+        // `brk` is the one cause whose instruction has already retired; every
+        // other pause fires *before* the instruction at the ip.
+        if (ev.cause === 'brk') retired++;
+        if (this.isPauseHonoured(ev.cause)) {
+          // A breakpoint met with nothing retired means the session was
+          // already sitting on it, not that the step ran into one: report the
+          // step as the no-op it was, which is what `retired: false` has
+          // always meant here. Every other cause — a manual pause above all —
+          // is a pause wherever in the step it lands.
+          if (retired === 0 && typeof ev.cause === 'object' && 'breakpoint' in ev.cause) return false;
+          // A stop that lands in the same synchronous stretch as this pump()
+          // wins, exactly as in the continuous loop.
+          if (this.stopRequested) { this.finishStopped(); return null; }
+          this.deps.post({ type: 'paused', cause: ev.cause, ip: s.ip, snapshots: s.snapshots(), stats: s.stats() });
+          return null;
+        }
+        // an ignored brk retired like a no-op: keep stepping
+      } else {
+        retired++;
+      }
+      // The cap is the runaway guard: a source line that jumps to itself
+      // would otherwise pump forever inside one Step and hang the UI.
+      if (retired >= TOOLCHAIN_SLICE_BUDGET) return true;
+      const now = this.positionAt(s.ip);
+      if (now === null || now !== start) return true;
+    }
+  }
+
   private async drive(mode: DriveMode, intervalMs?: number): Promise<void> {
     const s = this.session;
     if (!s) { this.deps.post({ type: 'error', message: 'resume: no run in progress' }); return; }
@@ -201,38 +264,19 @@ export class ToolchainCore {
     this.loopActive = true;
     try {
       if (mode === 'step') {
-        const ev = s.pump(1);
-        if (ev.kind === 'finished') { this.finish(); return; }
-        if (ev.kind === 'deviceWait') throw new Error('deviceWait with owned devices');
-        if (ev.kind === 'paused' && !this.isPauseHonoured(ev.cause)) {
-          // An ignored brk retired like a no-op — count it as the step.
-          this.deps.post({ type: 'stepped', snapshots: s.snapshots(), ip: s.ip, stats: s.stats(), retired: true });
-          return;
-        }
-        const retired = ev.kind === 'budgetSpent' || (ev.kind === 'paused' && ev.cause === 'brk');
-        this.deps.post({ type: 'stepped', snapshots: s.snapshots(), ip: s.ip, stats: s.stats(), retired });
+        const retired = this.sourceStep(s, gen);
+        if (retired !== null) this.deps.post({ type: 'stepped', snapshots: s.snapshots(), ip: s.ip, stats: s.stats(), retired });
         return;
       }
       for (;;) {
         if (this.generation !== gen) return; // superseded by a build/start — s may be freed
         if (this.stopRequested) { this.finishStopped(); return; }
-        const budget = mode === 'auto' ? 1 : TOOLCHAIN_SLICE_BUDGET;
-        const ev = s.pump(budget);
-        if (ev.kind === 'finished') { this.finish(); return; }
-        if (ev.kind === 'deviceWait') throw new Error('deviceWait with owned devices');
-        if (ev.kind === 'paused') {
-          if (this.isPauseHonoured(ev.cause)) {
-            // A stop that lands in the same synchronous stretch as this
-            // pump() call wins: finalise as stopped rather than reporting a
-            // pause nobody is waiting to see.
-            if (this.stopRequested) { this.finishStopped(); return; }
-            this.deps.post({ type: 'paused', cause: ev.cause, ip: s.ip, snapshots: s.snapshots(), stats: s.stats() });
-            return;
-          }
-          // ignored brk: fall through and keep going
-        }
         if (mode === 'auto') {
-          this.deps.post({ type: 'stepped', snapshots: s.snapshots(), ip: s.ip, stats: s.stats(), retired: true });
+          // One *source* step per interval — the same unit the Step button
+          // advances by, so an auto run reads like held-down Step.
+          const retired = this.sourceStep(s, gen);
+          if (retired === null) return;
+          this.deps.post({ type: 'stepped', snapshots: s.snapshots(), ip: s.ip, stats: s.stats(), retired });
           this.deps.post({ type: 'idle' });
           await this.sleepInterval(intervalMs ?? 0);
           if (this.generation !== gen) return;
@@ -243,15 +287,27 @@ export class ToolchainCore {
           // instruction boundary, which is what ends the segment.
           if (this.stopRequested) { this.finishStopped(); return; }
           this.deps.post({ type: 'busy' });
-        } else {
-          const t = this.deps.now();
-          if (t - this.lastProgressAt >= PROGRESS_INTERVAL_MS) {
-            this.lastProgressAt = t;
-            this.deps.post({ type: 'progress', snapshots: s.snapshots(), steps: s.stats().steps, ip: s.ip });
-          }
-          await this.deps.yieldTurn();
-          if (this.generation !== gen) return;
+          continue;
         }
+        const ev = s.pump(TOOLCHAIN_SLICE_BUDGET);
+        if (ev.kind === 'finished') { this.finish(); return; }
+        if (ev.kind === 'deviceWait') throw new Error('deviceWait with owned devices');
+        if (ev.kind === 'paused' && this.isPauseHonoured(ev.cause)) {
+          // A stop that lands in the same synchronous stretch as this
+          // pump() call wins: finalise as stopped rather than reporting a
+          // pause nobody is waiting to see.
+          if (this.stopRequested) { this.finishStopped(); return; }
+          this.deps.post({ type: 'paused', cause: ev.cause, ip: s.ip, snapshots: s.snapshots(), stats: s.stats() });
+          return;
+        }
+        // an ignored brk falls through and keeps going
+        const t = this.deps.now();
+        if (t - this.lastProgressAt >= PROGRESS_INTERVAL_MS) {
+          this.lastProgressAt = t;
+          this.deps.post({ type: 'progress', snapshots: s.snapshots(), steps: s.stats().steps, ip: s.ip });
+        }
+        await this.deps.yieldTurn();
+        if (this.generation !== gen) return;
       }
     } finally {
       this.loopActive = false;

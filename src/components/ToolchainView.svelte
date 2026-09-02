@@ -428,8 +428,9 @@
    * pages log, so a step reads the same on every tab. Returns '' when there is
    * no comparable previous frame. The read is taken from the previous
    * snapshots, or from the seeds on a run's first step (nothing has been
-   * snapshotted yet). One TM-1 source line lowers to several instructions, so
-   * consecutive steps often share a location — this is what tells them apart.
+   * snapshotted yet). A Step spans every instruction of one source position
+   * (TM-1 lowers one transition to several), so this reports the span's net
+   * effect: what the head read when it began against what it left behind.
    */
   function stepDetail(snaps: TapeSnapshot[], heads: number[] | null, prev: TapeSnapshot[] | null): string {
     if (heads === null || heads.length !== snaps.length) return '';
