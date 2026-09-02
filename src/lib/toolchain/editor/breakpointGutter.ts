@@ -10,6 +10,12 @@ export type BreakpointGutterOpts = {
   canSet: (line: number) => boolean;
   onToggle: (line: number) => void;
   refuseTitle: string;
+  /** The file's current breakpoint lines, read on every document change so
+   *  they can be mapped through the edit. Omit for a read-only document. */
+  lines?: () => number[];
+  /** Old line → new line for every line `lines()` returned, called only when
+   *  at least one of them moved. Omit together with `lines`. */
+  onLinesMapped?: (next: Map<number, number>) => void;
 };
 
 export const bpRefresh = StateEffect.define<null>();
@@ -52,9 +58,49 @@ class Unmappable extends GutterMarker {
   }
 }
 
+/**
+ * Keeps line-keyed breakpoints attached to the text they were set on.
+ * A stored line number names a position in the revision it was set in; an
+ * insertion or deletion above it renames the line, so every document change
+ * maps the current breakpoint lines through it and reports what moved.
+ *
+ * A change that spans the whole document (Format, Reset, picking an example)
+ * is a new buffer rather than an edit — every old position maps to the end of
+ * the inserted text, which would pile every breakpoint onto the last line —
+ * so the lines are left as they are and the next Build prunes whatever no
+ * longer maps.
+ */
+function lineRemapper(opts: BreakpointGutterOpts): Extension {
+  const { lines, onLinesMapped } = opts;
+  if (!lines || !onLinesMapped) return [];
+  return EditorView.updateListener.of((update) => {
+    if (!update.docChanged) return;
+    const oldDoc = update.startState.doc;
+    let lo = Infinity;
+    let hi = -1;
+    update.changes.iterChanges((fromA, toA) => {
+      if (fromA < lo) lo = fromA;
+      if (toA > hi) hi = toA;
+    });
+    if (lo === 0 && hi === oldDoc.length) return;
+    const next = new Map<number, number>();
+    let moved = false;
+    for (const n of lines()) {
+      if (n < 1 || n > oldDoc.lines) continue;
+      // Association 1 keeps a line start pinned to the text that follows it,
+      // so a deleted line's breakpoint lands on the line that absorbed it
+      // rather than on the one before.
+      const to = update.state.doc.lineAt(update.changes.mapPos(oldDoc.line(n).from, 1)).number;
+      next.set(n, to);
+      if (to !== n) moved = true;
+    }
+    if (moved) onLinesMapped(next);
+  });
+}
+
 export function breakpointGutter(opts: BreakpointGutterOpts): Extension {
   const unmappable = new Unmappable(opts.refuseTitle);
-  return gutter({
+  return [lineRemapper(opts), gutter({
     class: 'cm-bp-gutter',
     lineMarker(view, line) {
       const n = view.state.doc.lineAt(line.from).number;
@@ -76,7 +122,7 @@ export function breakpointGutter(opts: BreakpointGutterOpts): Extension {
         return true;
       },
     },
-  });
+  })];
 }
 
 export function refreshBreakpoints(view: EditorView): void {

@@ -167,6 +167,21 @@ export function buildLineMap(program: Program, userLines: number, stdLines: numb
   return { addrToLoc, userLineToAddr, stdLineToAddr };
 }
 
+/**
+ * The instruction that retired just before `ip`, as its `addrToLoc` entry —
+ * the entry immediately preceding the one whose `addr` is `ip`, since
+ * `addrToLoc` is in listing (address) order. `null` when `ip` is the first
+ * entry or carries no entry at all.
+ *
+ * Only sound for an instruction that cannot jump: a `debugger` (`brk`) pauses
+ * at the *next* instruction boundary, so the reported ip is the instruction
+ * after it and this is what names the `debugger` line itself.
+ */
+export function retiredBefore(map: LineMap, ip: number): AddrLoc | null {
+  const i = map.addrToLoc.findIndex((x) => x.addr === ip);
+  return i > 0 ? map.addrToLoc[i - 1] : null;
+}
+
 export type StdExport = {
   name: string;
   kind: 'function' | 'routine' | 'graph' | 'alphabet';

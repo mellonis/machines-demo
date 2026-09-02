@@ -57,6 +57,15 @@ const UNARY_INCREMENT = readFileSync(
   'utf8',
 );
 
+// The bundled `Unary sum` example with a `debugger;` inserted after the two
+// `right;` lines — it lands on line 9, and the instruction that follows it
+// (the `@goToEnd();` on line 10) is what the engine reports as the ip when
+// the pause arrives.
+const SUM_WITH_DEBUGGER = readFileSync(
+  path.join(__dirname, '../src/lib/toolchain/examples/sum.pmc'),
+  'utf8',
+).replace('    right;\n    right;\n', '    right;\n    right;\n    debugger;\n');
+
 test.describe('PM-1 page', () => {
   test.beforeEach(async ({ page }) => {
     // Playwright gives each test a fresh, isolated browser context, so
@@ -375,5 +384,89 @@ test.describe('PM-1 page', () => {
     await page.getByRole('menuitem', { name: 'seed-now-test' }).click();
     expect(await nonBlank(page)).toEqual(['*', '*', '*', '*']);
     expect(await logLine(page, /^built —/).count()).toBe(buildCountBefore);
+  });
+
+  test('E-tc-breakpoint-on-added-line: a line added since the last Build takes a breakpoint without building first', async ({ page }) => {
+    // The line map is the last Build's; a line the user just typed owns no
+    // instruction in it, so a strictly-map-driven gutter would refuse the
+    // breakpoint until the next Build. While the build is stale any non-blank
+    // user line takes one instead, and the Build resolves it.
+    //
+    // The new `right;` goes *after* `@std::goToBegin();`, so it lands on line
+    // 8 — the built program's closing `}`, which owns no instruction. Placing
+    // it higher up would land on a line the stale map already maps (the built
+    // program's lines 4-7 all carry instructions) and the case would pass
+    // with or without the fix.
+    const withExtraRight = UNARY_INCREMENT.replace('    @std::goToBegin();\n', '    @std::goToBegin();\n    right;\n');
+    expect(withExtraRight).not.toEqual(UNARY_INCREMENT);
+    await setEditorText(page, withExtraRight);
+    // The stale-build dot is the sync point: it lights once the debounced
+    // view→`code` sync has landed, which is also what flips `staleBuild`.
+    await expect(page.getByRole('button', { name: /^build$/i })).toHaveAttribute('title', 'code changed since last Build', { timeout: 8_000 });
+
+    // The inserted `right;` is line 8 (0-based index 7).
+    await clickGutterAtLine(page, 7);
+    await expect(page.locator('.cm-bp-gutter .cm-gutterElement:not(.cm-bp-spacer) .cm-bp-marker')).toHaveCount(1);
+
+    await page.getByRole('checkbox', { name: /^debug$/i }).check();
+    await page.getByRole('button', { name: /^run$/i }).click();
+    await expect(logLine(page, /^paused at main\.pmc:8 in main \(breakpoint\)/)).toBeVisible({ timeout: 15_000 });
+    await page.getByRole('button', { name: /^continue$/i }).click();
+    await expect(logLine(page, /^stopped after \d+ step\(s\)/)).toBeVisible({ timeout: 15_000 });
+  });
+
+  test('E-tc-breakpoint-follows-insert: inserting a line above a breakpoint moves it with the text', async ({ page }) => {
+    await page.getByRole('checkbox', { name: /^debug$/i }).check();
+    // Line 6 is `    mark;` (0-based index 5) in the built example.
+    await clickGutterAtLine(page, 5);
+    const markerEl = page.locator('.cm-bp-gutter .cm-gutterElement:not(.cm-bp-spacer)').filter({ has: page.locator('.cm-bp-marker') });
+    // Anchored: the second comment line reads "… on the first mark; the run
+    // grows …", so a plain `mark;` substring match would find that instead.
+    const markLine = page.locator('.cm-line').filter({ hasText: /^\s*mark;\s*$/ }).first();
+    await expect(markerEl).toHaveCount(1);
+    const before = await markerEl.boundingBox();
+    const markBefore = await markLine.boundingBox();
+    if (!before || !markBefore) throw new Error('gutter marker not laid out');
+    expect(Math.abs(before.y - markBefore.y)).toBeLessThan(3);
+
+    // A real edit of the existing document, not a whole-buffer replacement
+    // (`setEditorText` replaces everything, which is a new buffer rather than
+    // an edit — see breakpointGutter.ts's line mapping). Enter at the very
+    // start pushes every line down by one; ArrowUp + typing then fills the
+    // new first line without a completion tooltip ever being open.
+    await page.locator('.cm-content').first().click();
+    await page.keyboard.press('ControlOrMeta+Home');
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.type('// a note above');
+    await expect(page.getByRole('button', { name: /^build$/i })).toHaveAttribute('title', 'code changed since last Build', { timeout: 8_000 });
+
+    const after = await markerEl.boundingBox();
+    const markAfter = await markLine.boundingBox();
+    if (!after || !markAfter) throw new Error('gutter marker not laid out after the edit');
+    // The marker rode down with `mark;` rather than staying on line 6.
+    expect(after.y).toBeGreaterThan(before.y);
+    expect(Math.abs(after.y - markAfter.y)).toBeLessThan(3);
+
+    await page.getByRole('button', { name: /^run$/i }).click();
+    await expect(logLine(page, /^paused at main\.pmc:7 in main \(breakpoint\)/)).toBeVisible({ timeout: 15_000 });
+    await page.getByRole('button', { name: /^continue$/i }).click();
+    await expect(logLine(page, /^stopped after \d+ step\(s\)/)).toBeVisible({ timeout: 15_000 });
+  });
+
+  test('E-tc-debugger-pauses-on-its-line: a `debugger` pauses on its own line, not the next one', async ({ page }) => {
+    // A retired `debugger` pauses at the *next* instruction boundary, so the
+    // engine reports the following instruction's ip — the page has to name
+    // the `debugger;` line itself (line 9 here, not line 10).
+    await page.getByRole('button', { name: 'Example code sources' }).click();
+    await page.getByRole('menuitem', { name: 'Unary sum' }).click();
+    await setEditorText(page, SUM_WITH_DEBUGGER);
+    await page.getByRole('checkbox', { name: /^debug$/i }).check();
+    await page.getByRole('button', { name: /^run$/i }).click();
+    await expect(logLine(page, /^paused at main\.pmc:9 in main \(debugger\)/)).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('.cm-ip-line')).toHaveCount(1);
+    await expect(page.locator('.cm-ip-line')).toContainText('debugger;');
+    await page.getByRole('button', { name: /^continue$/i }).click();
+    await expect(logLine(page, /^stopped after \d+ step\(s\)/)).toBeVisible({ timeout: 15_000 });
   });
 });

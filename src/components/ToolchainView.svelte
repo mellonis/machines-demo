@@ -25,8 +25,8 @@
     type ProgressResponse, type SeedTape, type SourceFile, type SourceTab, type SteppedResponse, type TapeLayout, type TapeSnapshot,
   } from '../lib/toolchain/types.ts';
   import {
-    applyCommand, applySeedGlyphs, cellAt, emptySeed, findStdDefinition, headDelta, indexStdExports, layoutsEqual, seedCellAt,
-    seedFromGlyphs, seedFromSnapshot, seedFromWasm, seedToGlyphs, seedToLibTape, seedToWasm, snapshotToLibTape, type StdExport,
+    applyCommand, applySeedGlyphs, cellAt, emptySeed, findStdDefinition, headDelta, indexStdExports, layoutsEqual, retiredBefore,
+    seedCellAt, seedFromGlyphs, seedFromSnapshot, seedFromWasm, seedToGlyphs, seedToLibTape, seedToWasm, snapshotToLibTape, type StdExport,
   } from '../lib/toolchain/toolchainHelpers.ts';
   import { toolchainLinter } from '../lib/toolchain/editor/lint.ts';
   import { stdCompletion } from '../lib/toolchain/editor/stdCompletion.ts';
@@ -184,7 +184,53 @@
   /* ───── breakpoints ───── */
   const bpKey = (file: SourceFile, line: number) => `${file}:${line}`;
   function tableFor(file: SourceFile): (number | null)[] { return (file === 'std' ? lineMap?.stdLineToAddr : lineMap?.userLineToAddr) ?? []; }
+  /** Strict: the line owns an instruction of the last Build. What resolution
+   *  (`resolveBreakpoints`) and pruning (`pruneBreakpoints`) go by. */
   function canSet(file: SourceFile, line: number): boolean { return (tableFor(file)[line] ?? null) !== null; }
+  /**
+   * What the gutter offers *now*. While the build is stale the line map
+   * describes a program the buffer no longer is, so a just-typed instruction
+   * line would be refused until the next Build. Any non-blank user line takes
+   * a breakpoint instead; the Build resolves it, and `pruneBreakpoints` drops
+   * — and logs — whatever turns out to own no instruction.
+   */
+  function canSetNow(file: SourceFile, line: number): boolean {
+    if (file !== 'user' || !staleBuild) return canSet(file, line);
+    const doc = mainView?.state.doc;
+    if (!doc) return canSet(file, line);
+    return line >= 1 && line <= doc.lines && doc.line(line).text.trim() !== '';
+  }
+  function userBreakpointLines(): number[] {
+    const out: number[] = [];
+    for (const key of breakpoints) {
+      const [file, l] = key.split(':') as [SourceFile, string];
+      if (file === 'user') out.push(Number(l));
+    }
+    return out;
+  }
+  /**
+   * Re-keys the user file's breakpoints after an edit renamed their lines
+   * (`breakpointGutter`'s line mapping). Two old lines can map onto one new
+   * line — the set collapses them into a single breakpoint.
+   *
+   * Deliberately does not re-send the addresses to the worker: the edit
+   * changed the buffer, not the built program, so the addresses already
+   * registered still name the instructions the user marked. Resolving the
+   * *new* line numbers against the *old* line map would hand a paused run a
+   * different instruction. The next Build re-resolves the whole set.
+   */
+  function remapUserBreakpoints(next: Map<number, number>): void {
+    const moved: number[] = [];
+    for (const key of [...breakpoints]) {
+      const [file, l] = key.split(':') as [SourceFile, string];
+      if (file !== 'user') continue;
+      breakpoints.delete(key);
+      const to = next.get(Number(l)) ?? Number(l);
+      if (!moved.includes(to)) moved.push(to);
+    }
+    for (const line of moved) breakpoints.add(bpKey('user', line));
+    if (mainView) refreshBreakpoints(mainView);
+  }
   function resolveBreakpoints(): number[] {
     const out: number[] = [];
     for (const key of breakpoints) {
@@ -212,9 +258,12 @@
   function gutterFor(file: SourceFile): Extension {
     return breakpointGutter({
       has: (line) => breakpoints.has(bpKey(file, line)),
-      canSet: (line) => canSet(file, line),
+      canSet: (line) => canSetNow(file, line),
       onToggle: (line) => toggleBreakpoint(file, line),
       refuseTitle: 'no instruction on this line',
+      // Only the main buffer is editable — the std tab's document never changes.
+      lines: file === 'user' ? userBreakpointLines : undefined,
+      onLinesMapped: file === 'user' ? remapUserBreakpoints : undefined,
     });
   }
 
@@ -405,7 +454,14 @@
   function onPaused(r: PausedResponse): void {
     renderSnapshots(r.snapshots, false, null);
     prevHeads = r.snapshots.map((s) => s.head);
-    setIp(r.ip);
+    // A `debugger` pauses at the next instruction boundary, so `r.ip` is the
+    // instruction *after* it — reporting that would name the line below the
+    // one the user wrote `debugger;` on. `brk` never jumps, so the retired
+    // instruction is the listing entry right before the ip; show and
+    // highlight that one. `prevIpLoc` stays the real ip, so the next `step`
+    // line still names the instruction that step retires.
+    const retired = r.cause === 'brk' && lineMap !== null ? retiredBefore(lineMap, r.ip) : null;
+    setIp(retired?.addr ?? r.ip);
     log.report(`paused at ${locText(ipLoc).replace(' ', ' in ')} (${causeText(r)})`, 'pause');
     prevIpLoc = locOf(r.ip);
     executionMode = 'RUNNING_PAUSED';
@@ -706,6 +762,10 @@
     history.replaceState(null, '', url);
   });
   $effect(() => { tapesStackRef?.setTransitionsEnabled(beltTransitionsOn); });
+  // `canSetNow` answers differently once the build goes stale (and again once
+  // a Build makes it fresh), and CodeMirror only re-asks the gutter for its
+  // markers when it is told to. Mount is already covered by `onMainReady`.
+  $effect(() => { void staleBuild; if (mainView) refreshBreakpoints(mainView); });
   $effect(() => {
     void code;
     untrack(() => {

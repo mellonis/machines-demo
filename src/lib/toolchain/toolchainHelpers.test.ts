@@ -3,9 +3,9 @@ import { VIEWPORT_WIDTH } from '../caps.ts';
 import { loadMtcForTests } from './testModule.ts';
 import {
   applyCommand, applySeedGlyphs, buildLineMap, cellAt, findStdDefinition, headDelta, indexStdExports,
-  layoutsEqual, seedFromGlyphs, seedFromSnapshot, seedFromWasm, seedToGlyphs, seedToLibTape, seedToWasm, snapshotToLibTape,
+  layoutsEqual, retiredBefore, seedFromGlyphs, seedFromSnapshot, seedFromWasm, seedToGlyphs, seedToLibTape, seedToWasm, snapshotToLibTape,
 } from './toolchainHelpers.ts';
-import type { SeedTape, TapeSnapshot } from './types.ts';
+import type { LineMap, SeedTape, TapeSnapshot } from './types.ts';
 
 const PM = [' ', '*'];
 const PMC_INC = 'main() {\n    1: right(2);\n    2: check(1, 3);\n    3: mark(4);\n    4: left(5);\n    5: check(4, 6);\n    6: right(!);\n}\n';
@@ -154,6 +154,26 @@ describe('line map', () => {
     expect(map.userLineToAddr[3]).not.toBeNull(); // rgt
     expect(map.userLineToAddr[2]).toBeNull();     // label line
     r.program.free();
+  });
+
+  // A retired `debugger` never jumps, so the ip the engine reports when it
+  // pauses is the *next* instruction; the instruction that actually retired
+  // is the listing entry immediately before it.
+  it('T-linemap-retired-before: the entry before the ip, or null at the first entry / an unknown ip', () => {
+    const map: LineMap = {
+      addrToLoc: [
+        { addr: 0, file: 'user', line: null, fn: 'main' },
+        { addr: 1, file: 'user', line: 6, fn: 'main' },
+        { addr: 3, file: 'user', line: 7, fn: 'main' },
+        { addr: 4, file: 'std', line: 12, fn: 'std::goToEnd' },
+      ],
+      userLineToAddr: [],
+      stdLineToAddr: [],
+    };
+    expect(retiredBefore(map, 3)).toEqual({ addr: 1, file: 'user', line: 6, fn: 'main' });
+    expect(retiredBefore(map, 4)).toEqual({ addr: 3, file: 'user', line: 7, fn: 'main' });
+    expect(retiredBefore(map, 0)).toBeNull(); // the first entry has no predecessor
+    expect(retiredBefore(map, 2)).toBeNull(); // no entry carries this address
   });
 });
 

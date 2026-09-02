@@ -4,14 +4,27 @@ import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { breakpointGutter, refreshBreakpoints } from './breakpointGutter.ts';
 
-function make(has: Set<number>, mappable: Set<number>, onToggle: (n: number) => void) {
+type Extra = {
+  doc?: string;
+  lines?: () => number[];
+  onLinesMapped?: (next: Map<number, number>) => void;
+};
+
+function make(has: Set<number>, mappable: Set<number>, onToggle: (n: number) => void, extra: Extra = {}) {
   const parent = document.createElement('div');
   document.body.appendChild(parent);
   const view = new EditorView({
     parent,
     state: EditorState.create({
-      doc: 'a\nb\nc\n',
-      extensions: [breakpointGutter({ has: (n) => has.has(n), canSet: (n) => mappable.has(n), onToggle, refuseTitle: 'no instruction on this line' })],
+      doc: extra.doc ?? 'a\nb\nc\n',
+      extensions: [breakpointGutter({
+        has: (n) => has.has(n),
+        canSet: (n) => mappable.has(n),
+        onToggle,
+        refuseTitle: 'no instruction on this line',
+        lines: extra.lines,
+        onLinesMapped: extra.onLinesMapped,
+      })],
     }),
   });
   return { view, parent };
@@ -88,6 +101,79 @@ describe('breakpointGutter', () => {
     expect(toggled).toEqual([]);
     expect(el.classList.contains('cm-bp-unmappable')).toBe(true);
     expect(el.title).toBe('no instruction on this line');
+    view.destroy();
+  });
+});
+
+// Breakpoints are stored by line number, but a line number is only a name
+// for a position in *some* revision of the document. Every edit that adds
+// or removes lines above a breakpoint renames it, so the gutter maps the
+// stored lines through each change and reports the result — otherwise a
+// breakpoint set before an insertion silently names a different instruction
+// after the next Build (docs/execution-model.md (toolchain engines)).
+describe('breakpointGutter line mapping', () => {
+  it('T-bp-map-insert-above: inserting a line above a breakpoint reports the shifted number', () => {
+    const bps = [3];
+    const calls: Map<number, number>[] = [];
+    const { view } = make(new Set(bps), new Set([1, 2, 3]), () => {}, {
+      lines: () => bps,
+      onLinesMapped: (next) => calls.push(next),
+    });
+    view.dispatch({ changes: { from: 0, insert: 'x\n' } });
+    expect(calls).toHaveLength(1);
+    expect([...calls[0]]).toEqual([[3, 4]]);
+    view.destroy();
+  });
+
+  it('T-bp-map-delete-line: a deleted breakpointed line maps onto its successor, with no duplicate', () => {
+    const bps = [2, 3];
+    const calls: Map<number, number>[] = [];
+    const { view } = make(new Set(bps), new Set([1, 2, 3, 4]), () => {}, {
+      doc: 'a\nb\nc\nd\n',
+      lines: () => bps,
+      onLinesMapped: (next) => calls.push(next),
+    });
+    const from = view.state.doc.line(2).from;
+    const to = view.state.doc.line(3).from;
+    view.dispatch({ changes: { from, to } });
+    expect(calls).toHaveLength(1);
+    // Line 2 is gone; its breakpoint lands on the line that absorbed it —
+    // the same line 3's breakpoint moved onto. The caller stores lines in a
+    // set, so the two collapse into one breakpoint rather than duplicating.
+    expect([...calls[0]]).toEqual([[2, 2], [3, 2]]);
+    expect([...new Set(calls[0].values())]).toEqual([2]);
+    view.destroy();
+  });
+
+  it('T-bp-map-edit-within-line: typing inside another line reports nothing', () => {
+    const bps = [3];
+    const calls: Map<number, number>[] = [];
+    const { view } = make(new Set(bps), new Set([1, 2, 3]), () => {}, {
+      lines: () => bps,
+      onLinesMapped: (next) => calls.push(next),
+    });
+    // The crux: the mapping compares line *numbers*, not positions. Typing
+    // on line 1 does shift line 3's start position, but not its number — so
+    // nothing moved and the caller is left alone.
+    view.dispatch({ changes: { from: 1, insert: 'XY' } });
+    expect(calls).toEqual([]);
+    view.destroy();
+  });
+
+  it('T-bp-map-whole-doc-replace: replacing the whole document reports nothing', () => {
+    const bps = [2, 3];
+    const calls: Map<number, number>[] = [];
+    const { view } = make(new Set(bps), new Set([1, 2, 3]), () => {}, {
+      lines: () => bps,
+      onLinesMapped: (next) => calls.push(next),
+    });
+    // Format / Reset / picking an example replace the buffer wholesale. Every
+    // old position maps to the end of the inserted text, which would pile
+    // every breakpoint onto the last line — a new buffer is not an edit, so
+    // the lines are left as they are and the next Build prunes what no
+    // longer maps.
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'p\nq\nr\ns\n' } });
+    expect(calls).toEqual([]);
     view.destroy();
   });
 });
