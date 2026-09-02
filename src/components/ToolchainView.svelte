@@ -34,6 +34,7 @@
   import { breakpointGutter, refreshBreakpoints } from '../lib/toolchain/editor/breakpointGutter.ts';
   import { ipHighlight, scrollToLine, showIp } from '../lib/toolchain/editor/ipHighlight.ts';
   import { downloadBlob } from '../lib/toolchain/download.ts';
+  import { formatStepNotation } from '@turing-machine-js/visuals';
   import { parseInterval } from '../lib/interval.ts';
   import { parse as parseSnapshot, serialize as serializeSnapshot } from '../lib/tapeSnapshot.ts';
   import { defaultExample, examples, findExample, type Example } from '../lib/defaultCode.ts';
@@ -319,12 +320,35 @@
     return 'trap';
   }
 
+  const MOVEMENT_OF = { '-1': 'L', 0: 'S', 1: 'R' } as const;
+
+  /**
+   * What the step did to the bands, in the engine's edge-label vocabulary —
+   * `[reads] → [writes]/[moves]`, the same `formatStepNotation` the JS engine
+   * pages log, so a step reads the same on every tab. Returns '' when there is
+   * no comparable previous frame. The read is taken from the previous
+   * snapshots, or from the seeds on a run's first step (nothing has been
+   * snapshotted yet). One TM-1 source line lowers to several instructions, so
+   * consecutive steps often share a location — this is what tells them apart.
+   */
+  function stepDetail(snaps: TapeSnapshot[], heads: number[] | null, prev: TapeSnapshot[] | null): string {
+    if (heads === null || heads.length !== snaps.length) return '';
+    const reads = snaps.map((snap, i) => snap.glyphs[prev ? cellAt(prev[i], heads[i]) : seedCellAt(seeds[i] ?? emptySeed(), heads[i])] ?? '');
+    const commands: Command[] = snaps.map((snap, i) => {
+      const written = snap.glyphs[cellAt(snap, heads[i])] ?? '';
+      return { movement: MOVEMENT_OF[headDelta(heads[i], snap.head)], symbol: written === reads[i] ? null : written };
+    });
+    return ` — ${formatStepNotation(reads, commands, snaps.map((s) => s.glyphs[0] ?? ' '))}`;
+  }
+
   function onStepped(r: SteppedResponse): void {
+    const prev = lastSnapshots;
+    const heads = prevHeads;
     const animate = executionMode !== 'RUNNING_AUTO' || (intervalMs !== null && intervalMs >= BELT_ANIMATION_MIN_INTERVAL_MS);
-    renderSnapshots(r.snapshots, animate, lastSnapshots);
+    renderSnapshots(r.snapshots, animate, prev);
     prevHeads = r.snapshots.map((s) => s.head);
     setIp(r.ip);
-    if (r.retired) log.report(`step ${r.stats.steps}: ${locText(ipLoc)}`);
+    if (r.retired) log.report(`step ${r.stats.steps}: ${locText(ipLoc)}${stepDetail(r.snapshots, heads, prev)}`);
     if (executionMode !== 'RUNNING_AUTO') executionMode = 'RUNNING_PAUSED';
   }
   function onPaused(r: PausedResponse): void {
