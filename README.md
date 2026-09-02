@@ -8,6 +8,8 @@ Interactive in-browser playground for **Turing** and **Post** machines.
 
 A landing page (`/`) introduces both engines through a column of showcase panels — each panel auto-plays a prerecorded run of one small program, with the state graph, tape, and a step-by-step execution-trace table laid out beside human-readable lesson notes that describe what the program is doing. From there, two engine tabs (`/turing`, `/post`) drop you into an editor where you write JavaScript that builds a machine — using the published [`@turing-machine-js/machine`](https://www.npmjs.com/package/@turing-machine-js/machine), [`@post-machine-js/machine`](https://www.npmjs.com/package/@post-machine-js/machine), and [`@turing-machine-js/visuals`](https://www.npmjs.com/package/@turing-machine-js/visuals) (highlight + graph-indexing surface) libraries — and watch it execute on an animated tape. Manual control of the tape head via a movement/symbol/Apply panel, single-step and paused-auto-step execution, a log of every command applied, and clipboard copy/paste of the tape-block state for sharing or restoring snapshots.
 
+Two more tabs, `/pm1` and `/tm1`, run the Rust machine toolchains in the browser: the Post machine PM-1 and the multi-tape Turing machine TM-1, compiled to WebAssembly. You write `.pmc` / `.tmc` source (or `.pma` / `.tma` assembly), Build, and step or run the linked program with the same tape, panel and log; the editor doubles as the debugger — gutter breakpoints, the instruction pointer highlighted on its line, the standard library open in a read-only second tab, lint and canonical formatting from the toolchain itself. Input tapes are edited on the panel or loaded from `.pmt` / `.tmt` tape-block files. The deploy pins one toolchains release; the footer shows its version.
+
 ## Running locally
 
 ```sh
@@ -30,6 +32,8 @@ npm run test:watch     # Vitest watch mode
 npm run test:coverage  # Vitest with v8 coverage; output in coverage/
 npm run test:e2e       # Playwright E2E (Chromium; builds, then runs `vite preview` automatically)
 npm run test:e2e:ui    # Playwright interactive mode for local debugging (builds first)
+npm run fetch:wasm     # fetch the pinned machine-toolchains wasm bundle into vendor/mtc-wasm/ (also runs on postinstall)
+npm run test:scripts   # node --test over scripts/*.test.mjs
 ```
 
 Static bundle emitted to `dist/`. Serve with any static host. The build references hashed assets, so far-future caching is safe.
@@ -41,6 +45,7 @@ Static bundle emitted to `dist/`. Serve with any static host. The build referenc
 - [Tabler Icons](https://tabler.io/icons) (SVG `?raw` imports)
 - User code runs inside a Web Worker — terminate-on-timeout sandbox, with `'unsafe-eval'` only at the worker level so the worker is the actual security boundary
 - `@turing-machine-js/machine` and `@post-machine-js/machine` (peer-dependency relationship preserved); `@turing-machine-js/visuals` for the highlight + graph-indexing surface that drives `MachineGraph.svelte`'s breakpoint dots, pulse animations, frame-active marks, and the engine edge-label log notation
+- Machine toolchains wasm bundle (`mtc-wasm`, pinned by tag and checksum; fetched on install into a gitignored vendor directory) — PM-1 / TM-1 compile, assemble, lint, format, tape-block codec, and a pumped run session, all in a Web Worker
 
 ## Architecture: two lands
 

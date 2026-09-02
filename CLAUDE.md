@@ -16,6 +16,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `npm run test:coverage` — Vitest with v8 coverage; output in `coverage/` (gitignored)
 - `npm run test:e2e` — Playwright E2E (Chromium; tests in `e2e/`). Runs `npm run build` first, then `vite preview` via `playwright.config.ts`'s `webServer`. **The build step is load-bearing:** `vite preview` serves `dist/` exactly as it finds it and never rebuilds, so without it the suite silently tests a stale bundle — passing on deleted code or failing on working code. Putting the build in the npm script rather than `webServer.command` is deliberate: `reuseExistingServer` is true outside CI, so a leftover preview server would skip the command entirely.
 - `npm run test:e2e:ui` — Playwright interactive mode for local debugging (builds first, same reason)
+- `npm run fetch:wasm` — fetches the pinned machine-toolchains wasm bundle into `vendor/mtc-wasm/` (also runs on `postinstall`; no-op when the cache already verifies against `toolchains-wasm.json`)
+- `npm run test:scripts` — `node --test` over `scripts/*.test.mjs` (the fetch/verify/override logic in `scripts/fetch-toolchains-wasm.mjs`, outside the Vitest suite since it exercises real filesystem, tar, and a loopback HTTP server)
 
 ## Dependency notes
 
@@ -33,24 +35,30 @@ src/
 ├── app.ts                   entry; mount()s <App>
 ├── app.css                  global tokens + base styles
 ├── components/
-│   ├── MachineView.svelte   per-engine orchestrator (state + handlers)
+│   ├── MachineView.svelte   per-engine orchestrator (state + handlers) — JS engines (`/turing`, `/post`); untouched by the toolchain-engines work
+│   ├── ToolchainView.svelte  per-engine orchestrator for the toolchain engines (`/pm1`, `/tm1`) — same shape as MachineView.svelte over `ToolchainRunner` instead of `MachineRunner`; see "Toolchain engines (PM-1 / TM-1)" below
 │   ├── Landing.svelte       `/` route — engine switcher + snippet-grid; owns the single IntersectionObserver across all panels and dispatches an `active: boolean` to the most-visible SnippetPanel (one snippet plays at a time)
 │   ├── SnippetPanel.svelte  showcase tile — two-column layout (player + lesson notes; stacks under 768px); 4-state playback machine (`idle | playing | paused | done`) driven by the `active` prop; `done` is sticky (no auto-replay on re-activation, Replay only). Reduced-motion pins to final frame on mount, IO orchestration is skipped.
 │   ├── ExecutionTraceTable.svelte  read-only 6-column trace (Step | State | Head reads | Write | Move | Goto); sticky thead inside `max-height` scroll, `aria-current="step"` + accent row, manual `scrollTop` math (no `Element.scrollIntoView`, which would yank the page)
-│   ├── TapesStack.svelte    multi-tape stack with shared head-thread
+│   ├── TapesStack.svelte    multi-tape stack with shared head-thread; optional `actions` snippet renders in the corner slot (the toolchain pages' tape-block Load/Save buttons)
+│   ├── TapesStack.test.ts   Vitest suite for TapesStack — actions-snippet present / absent (cites C-stack-...)
 │   ├── Tape.svelte          single horizontal belt (renders a turing.Tape)
 │   ├── ControlPanel.svelte  L/S/R + alphabet chips + Apply
+│   ├── FileTabs.svelte      toolchain-engine file-tab bar — `main.<ext>` / `std.<ext>` tabs plus the source↔asm kind `<select>`
+│   ├── FileTabs.test.ts     Vitest suite for FileTabs — tab naming / select / kind-change + disabled-while-pending (cites C-tabs-...)
 │   ├── Toolbar.svelte       Build/Step/Run/Stop + with-pause + examples menu
 │   ├── Toolbar.test.ts      Vitest suite for Toolbar — runLabel / disabled / visibility / interval / callbacks / stale-build (cites C-toolbar-...)
-│   ├── Editor.svelte        CodeMirror 6 wrapper + reset overlay
+│   ├── Editor.svelte        CodeMirror 6 wrapper + reset overlay; `readOnly` prop routes to the wrapper's own `readonly`/`editable` props (used for the toolchain pages' std tab)
 │   ├── Log.svelte           log entries (desktop)
 │   ├── IconButton.svelte    shared corner-overlay icon button (reset / clear)
 │   ├── DiagnosticsCounter.svelte  three-pill overlay (#106) — E / W / I pills, each hidden when count is 0; bottom-right absolute-positioned, click-through (pointer-events: none) in Phase 1. Colors from --diag-error / --diag-warning / --diag-info palette tokens.
 │   ├── SettingsPanel.svelte  gear in the header (#65) — native `<dialog>` modal exposing the three tunable caps (max run steps / worker timeout / log render cap) with per-field validation, inline error, and reset-to-default; valid input persists immediately via lib/settings.ts
 │   └── SettingsPanel.test.ts Vitest suite for SettingsPanel — open / valid-persists / invalid-error / infinity / reset (cites C-settings-...)
+├── vite-plugins/
+│   └── snippets.ts           build-time Vite plugin recording `virtual:snippets` — evaluates each `showcase: true` JS example under Node and captures a `Snippet` per the `@turing-machine-js/visuals` `recordSnippet` format for the Landing page's SnippetPanel tiles; imports `jsExamples.ts` directly (see above) since it runs under plain Node, not Vite's transform pipeline
 └── lib/
     ├── types.ts                Engine, Command, Alphabets, WorkerRequest/Response (TapeSnapshot + Graph imported from @turing-machine-js/{visuals,machine})
-    ├── caps.ts                 numeric caps: VIEWPORT_WIDTH, MAX_STEPS, WORKER_TIMEOUT_MS, MAX_TAPES, PROGRESS_INTERVAL_MS
+    ├── caps.ts                 numeric caps: VIEWPORT_WIDTH, MAX_STEPS, WORKER_TIMEOUT_MS, MAX_TAPES, PROGRESS_INTERVAL_MS, plus toolchain-only TOOLCHAIN_SLICE_BUDGET (see Caps below)
     ├── settings.ts             user-tunable caps (#65) — SETTING_SPECS (defaults from caps.ts + min/max; maxSteps also accepts Infinity), read-through getSetting / write-through setSetting / resetSetting / parseSettingValue over `machines-demo:settings:<key>`; plain TS (no runes) so node-env suites import it
     ├── settings.test.ts        Vitest suite for settings — defaults / roundtrip / invalid-stored-falls-back / infinity / reset / parse (cites S-settings-...)
     ├── machineRunner.ts        main-thread worker wrapper; WORKER_TIMEOUT_MS per-segment cap; injected workerFactory; stashes the run-loop progress heartbeat (lastProgress, kept across terminate) and rejects run timeouts with WorkerTimeoutError carrying it
@@ -65,6 +73,43 @@ src/
     ├── initialBoot.ts          pure helper computing engine-page initial state from URL params + localStorage — 4-tier priority (?example=<id> > ?snippet=<id> > localStorage > first bundled example), with badExampleId/badUrlId for not-found logging
     ├── initialBoot.test.ts     Vitest suite for initialBoot — M-boot-example-query / M-boot-example-unknown / M-boot-priority-example-over-snippet / M-boot-priority-snippet-over-localstorage / M-boot-priority-localstorage-over-default / M-execution-mode-union
     ├── interval.ts             parseInterval + MIN_AUTO_INTERVAL_MS for the RUNNING_AUTO throttle
+    ├── toolchain/              PM-1 / TM-1 engines over the machine-toolchains wasm bundle — see "Toolchain engines (PM-1 / TM-1)" below
+    │   ├── types.ts              protocol types (ToolchainRequest/Response, DriveMode, PauseCause, LineMap, SeedTape, ExampleSeed) + Lang/Arch/BufferKind helpers (`langFor`, `kindOfLang`, `extOf`); re-exports the wasm module's own types ($mtc)
+    │   ├── types.test.ts         Vitest suite for the Lang/Arch helpers and ENGINES/route wiring (cites T-engines-... / T-lang-for)
+    │   ├── toolchainWorker.ts    thin Web Worker shell — initialises the wasm module once, forwards every request to a ToolchainCore; the only file that imports `$mtc` at runtime (types-only elsewhere)
+    │   ├── workerCore.ts         `ToolchainCore` — the pump-loop brain, kept free of `self` so it runs under Node in tests; drives `step`/`auto`/`continuous` via `Session.pump()`, guards the loop with a session generation counter (a build/start during a yield abandons the old loop silently), honours Stop on a paused exit, reports a `WebAssembly.RuntimeError` as `error { fatal: true }`, and a `deviceWait` pump event as a plain non-fatal error
+    │   ├── workerCore.test.ts    Vitest suite for ToolchainCore against the real wasm module — build/start/pump/breakpoints/panic/deviceWait (cites T-core-...)
+    │   ├── toolchainRunner.ts    main-thread wrapper (parity with `machineRunner.ts`) — FIFO queue of simple requests (lint/format/codec/build; only a `start` overlap throws), watchdog armed at dequeue, progress stash kept across terminate, fatal error kills the worker and respawns lazily on the next request
+    │   ├── toolchainRunner.test.ts  Vitest suite for ToolchainRunner — build / handlers / idle-busy / error-routing / maxSteps-from-settings / fatal-respawn categories (cites T-runner-...)
+    │   ├── toolchainTestUtils.ts FakeToolchainWorker + factory helper — toolchain-side counterpart of `lib/testUtils.ts`
+    │   ├── toolchainHelpers.ts   pure helpers: seed tapes ↔ wasm/glyph/snapshot conversions, `buildLineMap` (addr ↔ `{file, line}` via the program's `lineOf`, deliberately not `addressForLine`, which snaps forward), stdlib export index
+    │   ├── toolchainHelpers.test.ts  Vitest suite for the pure helpers against the real wasm module — seeds / linemap / layouts-equal / delta-clamp (cites T-delta-... / T-linemap-... / T-layouts-... / T-seed-...)
+    │   ├── testModule.ts         test-only: loads the vendored wasm module from bytes under Node, once per process
+    │   ├── module.test.ts        smoke test — the vendored wasm module loads and exposes `Toolchain` (cites T-module-loads)
+    │   ├── examples.ts           bundled PM-1 / TM-1 examples with seeds — PM-1: `unary-increment`, `sum`, `unary-increment-asm`; TM-1: `binary-increment`, `two-tape-copy`, `pow2`, `binary-increment-asm`
+    │   ├── examples.test.ts      Vitest suite for the bundled examples — build + seed shape against the real wasm module (cites T-examples-...)
+    │   ├── examples/              example source files (`?raw`-imported by examples.ts): binary-increment.tma, binary-increment.tmc, pow2.tmc, sum.pmc, two-tape-copy.tmc, unary-increment.pma, unary-increment.pmc
+    │   ├── download.ts           browser download of an in-memory blob (source-file Save and tape-block Save both use it)
+    │   ├── persistToolchain.test.ts  Vitest suite for the toolchain-specific slice of `lib/persist.ts` — kind / seeds / snippet seed+kind round-trip (cites T-persist-...)
+    │   ├── lang/                 CodeMirror stream-language modes hand-ported from the toolchains' TextMate grammars
+    │   │   ├── index.ts            composes the four stream parsers into `toolchainLanguage(lang)`; exports `tokenizeLine` for tests
+    │   │   ├── lang.test.ts        Vitest suite tokenizing sample lines per mode (cites T-lang-...)
+    │   │   ├── tokens.ts           shared token table / styles for the four stream modes
+    │   │   ├── pmc.ts              PM-1 `.pmc` source stream mode
+    │   │   ├── pma.ts              PM-1 `.pma` assembly stream mode (mnemonic alternation longest-first so `jm.s` isn't shadowed by `jm`)
+    │   │   ├── tmc.ts              TM-1 `.tmc` source stream mode
+    │   │   └── tma.ts              TM-1 `.tma` assembly stream mode
+    │   └── editor/                CodeMirror extensions specific to the toolchain debugger view
+    │       ├── breakpointGutter.ts   gutter keyed by 1-based line — CodeMirror renders a gutter element only for lines with a marker (plus one hidden spacer); a click resolves by y-coordinate, not by an existing element; unmappable lines carry the refuse tooltip
+    │       ├── breakpointGutter.test.ts  Vitest suite (happy-dom) — render / click / refuse (cites T-bp-...)
+    │       ├── ipHighlight.ts        line decoration for the paused instruction pointer; scrolls with manual `scrollTop` math, never `scrollIntoView`
+    │       ├── ipHighlight.test.ts   Vitest suite (happy-dom) — show/hide/out-of-range (cites T-ip-...)
+    │       ├── lint.ts               editor lint source over the toolchain's `check` channel; positions arrive as UTF-16 offsets (CodeMirror's own coordinate), so they map 1:1 after clamping
+    │       ├── lint.test.ts          Vitest suite (happy-dom) for the lint source — clamp / fix-action / fix-machine-applicable / map (cites T-lint-...)
+    │       ├── stdCompletion.ts      `std::` completion built from `stdlibSource` so the list can't drift from what the module actually links
+    │       ├── stdCompletion.test.ts Vitest suite for `stdCompletionSource` — activation / options (cites T-stdcomp-...)
+    │       ├── stdLink.ts            Cmd/Ctrl-click on a `std::name` reference opens the stdlib tab at its definition (the orchestrator does the tab switch + search)
+    │       └── stdLink.test.ts       Vitest suite for `stdNameAt` — hit / miss / asm (cites T-stdlink-...)
     ├── completions/            context-aware, schema-driven CodeMirror autocomplete (#103)
     │   ├── index.ts              completionExtensions(engine) — composes the layers below
     │   ├── schema/               typed const describing engine + post API surface
@@ -103,10 +148,12 @@ src/
     ├── persist.ts              localStorage helpers per engine — code, example, snippets (UUID-keyed)
     ├── tapeSnapshot.ts         serialize/parse for tape-block copy+paste snapshots — JSON with `format`/`version` discriminator, categorized ParseError, no DOM/clipboard knowledge
     ├── tapeSnapshot.test.ts    Vitest suite for tapeSnapshot — roundtrip / parse-not-json / wrong-format / unsupported-version / wrong-shape-* / length-mismatch (cites R-snapshot-...)
-    ├── defaultCode.ts          starter Turing / Post snippets — `Example` type carries optional `lessonNotes` (markdown subset) authored per showcase for the SnippetPanel right column
+    ├── defaultCode.ts          shared `Example` type (carries optional `lessonNotes` — markdown subset authored per showcase for the SnippetPanel right column — plus the toolchain-only `kind` / `seeds`) + `examples(engine)` composing `jsExamples.ts` (Turing/Post) and `toolchain/examples.ts` (PM-1/TM-1)
+    ├── jsExamples.ts           starter Turing / Post snippets (`POST_EXAMPLES`, `TURING_EXAMPLES`) — split out of `defaultCode.ts` because `vite-plugins/snippets.ts` imports examples under plain Node at build time, where the toolchain examples' `?raw` imports (in `toolchain/examples.ts`) cannot resolve; this file holds no such imports, so it stays Node-loadable
     ├── format.ts               LogEntry assemblers: commandsEntry / tapesEntry / CommandsApplication; per-step string rendering (`formatStepNotation`, `formatTape`) is consumed from `@turing-machine-js/visuals`
     ├── lessonMarkdown.ts       tiny markdown renderer for `Example.lessonNotes` — HTML-escapes input, then handles paragraphs (blank-line split), bullet lists (`- ` prefix), and inline `` `code` ``. Build-time author content only; injected via `{@html}` in `SnippetPanel.svelte` (same policy as the SVG-icon `{@html}` use).
     ├── icons.ts                Tabler icon namespace (?raw imports)
+    ├── caretColors.ts          shared 5-entry caret palette — `TapesStack.svelte` / `ControlPanel.svelte` index it modulo its length (`lib/caretColors.ts`'s own doc comment), so a toolchain program with more bands than colors still gets one per belt without collision; `MachineView.svelte` keeps its own identical inline copy (untouched by this work)
     ├── theme.svelte.ts         theme (light / dark) state + matchMedia watcher (Svelte 5 .svelte.ts module)
     ├── diagnosticsCounter.svelte.ts  class DiagnosticsCounter (Svelte 5 runes — three $state counts for errors / warnings / info; info severity folds in info + hint) + diagnosticsCounterPlugin(counter) ViewPlugin that recomputes via forEachDiagnostic on every transaction. Per-Editor instance.
     └── diagnosticsCounter.test.ts    Vitest specs (happy-dom env) — empty / errors-only / mixed / hint-folded / replace-on-update (cites S-diag-...)
@@ -117,18 +164,28 @@ e2e/
 ├── completions.spec.ts         member access / state.debug RHS / auto-import roundtrip (cites E-completions-...)
 ├── diagnostics-counter.spec.ts counter pills fed by syntaxLinter + unboundLinter; pill clears when the code is fixed (cites E-diag-...)
 ├── landing.spec.ts             `/` route — snippet panels, engine switch, deep link, scroll-triggered playback
+├── no-wasm-on-js-pages.spec.ts the JS engine pages (`/turing`, `/post`) never request a `.wasm` file, through a full Run (cites E-tc-no-wasm-...)
 ├── settings.spec.ts            settings panel — persist across reload, invalid input dropped, lowered maxSteps truncates a real run (cites E-settings-...)
 ├── stale-build.spec.ts         stale-build notice — edit / example load shows the Build dot, successful Build clears it, failed Build keeps it (cites E-stale-build-...)
+├── toolchain-pm1.spec.ts       PM-1 (`/pm1`) — boot / boot-priority / build-error / run / step / step-into-std / breakpoint (incl. refused) / format / kind-switch-disassemble / seed-persists / tape-block round-trip / std tab / std:: completion (cites E-tc-...)
+├── toolchain-tm1.spec.ts       TM-1 (`/tm1`) — binary-increment run, two-tape copy, a lowered maxSteps truncating pow2, the assembly example (cites E-tc-tm-...)
 └── worker-termination.spec.ts  progress restore after worker termination — watchdog timeout and hand Stop restore the last heartbeat, auto-run Stop doesn't regress (cites E-term-...)
 
 playwright.config.ts            Chromium project; webServer runs `npm run preview`
+
+scripts/
+├── fetch-toolchains-wasm.mjs      fetches the wasm bundle pinned in `toolchains-wasm.json` (tag + per-file SHA-256) into the gitignored `vendor/mtc-wasm/`; runs on `postinstall`, no-op when the cache already verifies; `MTC_WASM_DIR=<dir>` copies an unpacked local bundle instead (skips the hash check, warns)
+└── fetch-toolchains-wasm.test.mjs `node --test` suite for the fetch/verify/override logic (`npm run test:scripts`)
+
+toolchains-wasm.json             the wasm bundle pin — release tag + SHA-256 per file, checked by `fetch-toolchains-wasm.mjs`
+vendor/mtc-wasm/                 (gitignored) the fetched/verified wasm bundle — mtc_wasm_bg.wasm, mtc_wasm.js, mtc_wasm.d.ts, manifest.json; populated by `npm run fetch:wasm` / `postinstall`, resolved at `$mtc` (`vite.config.ts`, `tsconfig.json`)
 
 .github/workflows/
 ├── main.yml                    CD: build + rsync to VPS on push to master
 └── test.yml                    PR gate: check / lint / vitest / playwright
 ```
 
-**`App.svelte`** picks the active engine from the URL pathname (`/turing`, `/post`) and renders one `<MachineView engine={...}>` keyed by engine — switching engines unmounts and remounts the tab (kills CodeMirror undo, cheap CPU). Legacy `?machine=<engine>` URLs are rewritten to the path form on first load. SPA-fallback routing is required (nginx `try_files $uri $uri/ /index.html;` in `vps/nginx/sites/demo.machines.mellonis.ru`; Vite default in dev).
+**`App.svelte`** picks the active engine from the URL pathname (`/turing`, `/post`, `/pm1`, `/tm1`) and renders one engine view keyed by engine — `isToolchainEngine(route.engine)` routes `pm1`/`tm1` to `<ToolchainView>` and `turing`/`post` to `<MachineView>`; switching engines (or switching between a JS and a toolchain tab) unmounts and remounts the tab (kills CodeMirror undo, cheap CPU). Legacy `?machine=<engine>` URLs are rewritten to the path form on first load. SPA-fallback routing is required (nginx `try_files $uri $uri/ /index.html;` in `vps/nginx/sites/demo.machines.mellonis.ru`; Vite default in dev). The footer shows the app version plus each dependency's version, including the pinned `machine-toolchains` release (`virtual:lib-versions`, backed by the vendored bundle's `manifest.json`).
 
 **`MachineView.svelte`** is the orchestrator (UI is split into `TapesStack`, `Toolbar`, `ControlPanel`, `Editor`, `Log`). It owns:
 
@@ -186,6 +243,7 @@ The main thread converts each `TapeSnapshot` to a `turing.Tape` once via `_build
 - `MAX_STEPS = 100_000` — `run`-mode hard cap; if `runToEnd` reaches it before the machine halts, the response sets `truncated: true`. Same backstop as `WORKER_TIMEOUT_MS` but counts steps instead of wall-clock time, so a tight loop that never yields still terminates eventually.
 - `WORKER_TIMEOUT_MS = 5_000` — wall-clock cap on a single worker request **segment**. For `build` / `step` / `run`-without-pause it's a round-trip cap. For `run` with paused/resume cycles it's per-segment: timer suspends on each `paused` (user is inspecting; no clock), restarts on `resume`-send, killed on `ran`/`error`. The `MachineRunner` schedules a `setTimeout` and kills the worker (terminate + respawn next request) if any segment exceeds it.
 - `VIEWPORT_WIDTH = 23` — see Tape section below.
+- `TOOLCHAIN_SLICE_BUDGET = 80_000` — toolchain-only: instructions retired per `pump()` call in a continuous toolchain run, between which the worker yields to its event loop (`pause` / `stop` / lint requests get served, a `progress` heartbeat can go out). Sized for ~20–50ms of work per slice; measured at 28–39ms/slice against the `pow2` example at implementation time (20,000 measured only ~7–12ms, too far under the target). See "Toolchain engines (PM-1 / TM-1)" below.
 
 `MAX_STEPS`, `WORKER_TIMEOUT_MS`, and `LOG_RENDER_CAP` are **defaults**, user-tunable via the header settings panel (#65, `SettingsPanel.svelte` + `lib/settings.ts` — `machines-demo:settings:<key>`, engine-agnostic). Consumers read at use time (`getSetting`): the runner resolves `maxSteps` when posting a `run` request and the timeout when scheduling each segment timer; the LogStore reads the render cap at each flush. `maxSteps` alone also accepts `Infinity` (input `Infinity` / `∞`) — an uncapped run stays bounded by the wall-clock timeout, whereas an Infinity timeout would disable the watchdog and an Infinity log cap would unbound the DOM, so those two stay strict-integer. Invalid stored values fall back to the default (no clamping).
 
@@ -205,7 +263,7 @@ The head ▲ marker below each bottom belt is a **CSS-border triangle** (not a U
 
 ## Multi-tape stack and head-thread connector
 
-`TapesStack.svelte` renders `tapeCount` tapes inside `.tapes-stack` (flex column, 4px gap). Only the bottom belt shows the ▲ marker (`showCaret={i === tapeCount - 1}`); each belt gets a per-instance `caretColor` from the 5-entry `CARET_COLORS` palette (length must match `MAX_TAPES` in `lib/caps.ts`). The stack owns its own per-tape refs and exposes an imperative API (`setFromTape(i, tape, delta?, animate?, wrote?)`, `clearAll()`, `setTransitionsEnabled(on)`) — `MachineView.svelte` holds a `tapesStackRef` and calls these.
+`TapesStack.svelte` renders `tapeCount` tapes inside `.tapes-stack` (flex column, 4px gap). Only the bottom belt shows the ▲ marker (`showCaret={i === tapeCount - 1}`); each belt gets a per-instance `caretColor` — belt `i` takes `caretColors[i % caretColors.length]`, so the palette repeats rather than requiring one entry per tape. JS engines pass a 5-entry palette matching `MAX_TAPES` (`lib/caps.ts`) straight through, one color per tape; toolchain engines (TM-1 in particular, whose bands aren't capped at `MAX_TAPES`) pass the shared `lib/caretColors.ts` palette and rely on the repeat. The stack owns its own per-tape refs and exposes an imperative API (`setFromTape(i, tape, delta?, animate?, wrote?)`, `clearAll()`, `setTransitionsEnabled(on)`) — `MachineView.svelte` / `ToolchainView.svelte` hold a `tapesStackRef` and call these.
 
 A `.head-thread` div sits behind the stack as the first child of `.tapes-stack` and acts as a vertical connector from the top tape's caret box down to the bottom-belt ▲ marker. Implementation:
 - `position: absolute; top: 0; bottom: 4px; left: 50%; width: 2px; transform: translateX(-50%);` — the `bottom: 4px` lands the line at the marker's vertical center (CSS triangle is 8px tall).
@@ -237,9 +295,23 @@ A `.head-thread` div sits behind the stack as the first child of `.tapes-stack` 
 
 **Palette sandbox** at `docs/palette-sandbox/` is a standalone HTML page (served by Vite at `/docs/palette-sandbox/variant-a.html`) for iterating on colors without rebuilding the demo. Dual-pane (light + dark side by side), color-picker per token, "Copy CSS (both themes)" button exports a snippet ready to paste into `src/app.css`. Edit `sample.svg` if you need a different machine shape to design against — re-export from the live demo by writing user code to localStorage + clicking Build (see `docs/palette-sandbox/README.md`).
 
+## Toolchain engines (PM-1 / TM-1)
+
+`/pm1` and `/tm1` are driven by the Rust machine toolchains compiled to WebAssembly — `mtc-wasm`, the browser bundle every machine-toolchains release attaches. The bundle is **pinned** in `toolchains-wasm.json` (release tag + SHA-256 per file) and fetched by `scripts/fetch-toolchains-wasm.mjs` into the gitignored `vendor/mtc-wasm/` on `postinstall` (no-op when the cache already verifies; `MTC_WASM_DIR=<unpacked bundle>` copies a local build instead, skips the hash check, and warns). Only `src/lib/toolchain/toolchainWorker.ts` imports the glue at runtime (Vite alias `$mtc` → `vendor/mtc-wasm/mtc_wasm.js`, set in `vite.config.ts` / `tsconfig.json`) — `workerCore.ts` imports only its *types* from `$mtc`, which are erased at build, so the JS engine pages never request the wasm file (`e2e/no-wasm-on-js-pages.spec.ts` guards this).
+
+What differs from the JS engines:
+
+- **Orchestrator**: `ToolchainView.svelte` (sibling of `MachineView.svelte`, which this work left untouched) over `ToolchainRunner` (`toolchainRunner.ts`) → `toolchainWorker.ts` → `ToolchainCore` (`workerCore.ts`, testable under Node against the real module via `testModule.ts`). Protocol in `src/lib/toolchain/types.ts`. Same five execution modes (MANUAL / RUNNING_AUTO / RUNNING_CONTINUOUS / RUNNING_PAUSED / HALTED); Step is one `pump(1)` — one *instruction*, not one source-level transition (TM-1 in particular can lower one source line to several instructions, so consecutive steps often share a location) — auto-run is `pump(1)` per interval, continuous is `pump(TOOLCHAIN_SLICE_BUDGET)` slices with a `progress` heartbeat and an event-loop yield between slices. See `docs/execution-model.md` (toolchain engines).
+- **Tapes are UI-owned seeds** (`SeedTape` — a sparse map of absolute position → alphabet index, plus `head`) while the page is in MANUAL. The Rust session snapshots tape state for the run's lifetime; every `finished` response (halt, abort, trap, Stop, or Take Control) copies that snapshot back into `seeds`, and so does a segment timeout that still carried a last `progress` heartbeat. Seeds persist per engine (`machines-demo:<engine>:seeds`, glyph form) and travel with examples and snippets. Tape blocks (`.pmt` / `.tmt`) load and save through the wasm codec via the two icon buttons on the tape stack (`TapesStack.svelte`'s `actions` snippet slot).
+- **Buffer kind** `source | asm` per engine (`machines-demo:<engine>:kind`); `lang = arch × kind` (`pmc` / `pma` / `tmc` / `tma`). Switching kind restores that kind's kept in-memory buffer if the page has one; otherwise, switching to `asm` with a build behind it disassembles the last Build; otherwise the new buffer starts blank — one deterministic path, no prompt (`onKindChange` in `ToolchainView.svelte`). Each kind's buffer is kept for the page's lifetime.
+- **Editor is the debugger view**: two tabs (`FileTabs.svelte`) — the user's buffer and the read-only stdlib (`Toolchain.stdlibSource`, the exact text the module links; fetched once per page instance in the source lang, since the stdlib text is the same regardless of buffer kind). Breakpoints are keyed `"<file>:<line>"` and resolved to addresses through `LineMap` at Build / start and on every toggle (a line owns an address only if an instruction's `lineOf` names it — `addressForLine` snaps forward to the next instruction and is deliberately not used here, since a gutter must refuse comment/declaration lines rather than silently retarget a click). The active tab follows the ip across `user` / `std`. Cmd/Ctrl-click on `std::name` jumps to its definition; `std::` completion lists the stdlib's exports (`indexStdExports`).
+- **Stream modes** in `src/lib/toolchain/lang/`, hand-ported from the toolchains' TextMate grammars. Syntax errors surface while typing from the toolchain's `check` (lint channel → `@codemirror/lint`); a failed Build additionally logs each returned diagnostic as its own error/warning log line (not a gutter squiggle).
+- **Panic policy**: a `WebAssembly.RuntimeError` (a Rust panic) is reported as `error { fatal: true }`; the runner terminates the worker and respawns it lazily on the next request, and the log says so once (`toolchain module crashed — restarting the worker`). A `deviceWait` pump event — owned devices are out of scope for this UI — is thrown as a plain, non-fatal error instead.
+- **Examples split**: the JS-engine starter snippets moved from `defaultCode.ts` into `src/lib/jsExamples.ts`. The landing page's build-time snippet recorder (`src/vite-plugins/snippets.ts`) imports examples under plain Node, where `?raw` imports — used by the toolchain examples under `src/lib/toolchain/examples/` — cannot resolve; `jsExamples.ts` carries no such imports, so it stays Node-loadable. `defaultCode.ts` now composes both engines' `examples()` from `jsExamples.ts` and `toolchain/examples.ts`.
+
 ## Conventions
 
-- **localStorage** keys follow `machines-demo:<engine>:<key>` hierarchy (non-engine keys: `machines-demo:theme`, and `machines-demo:settings:<key>` for the app-wide caps — see `lib/settings.ts`): `code` persists editor contents, `example` the selected bundled example id, `snippets` the user snippet map (keyed by UUID → `{ title, code, savedAt }`). The currently loaded snippet's UUID is **not** stored here — it lives in the URL (`?snippet=<uuid>`) so it's bookmarkable / shareable. (Via `lib/persist.ts`, errors swallowed.)
+- **localStorage** keys follow `machines-demo:<engine>:<key>` hierarchy (non-engine keys: `machines-demo:theme`, and `machines-demo:settings:<key>` for the app-wide caps — see `lib/settings.ts`): `code` persists editor contents, `example` the selected bundled example id, `snippets` the user snippet map (keyed by UUID → `{ title, code, savedAt, kind?, seeds? }` — `kind`/`seeds` are toolchain-only, omitted for JS-engine snippets). Toolchain engines also persist `seeds` (input tape per band, glyph form) and `kind` (buffer language) per engine. The currently loaded snippet's UUID is **not** stored here — it lives in the URL (`?snippet=<uuid>`) so it's bookmarkable / shareable. (Via `lib/persist.ts`, errors swallowed.)
 - **`log.report(text, kind?)`** in MachineView is the single log entry point — appends to the LogStore buffer and schedules a 16ms flush. `log.reportSeparator()` pushes a `{separator: true}` entry that `Log.svelte` renders as an `<hr>`; called before each Build / first-Step / Run so distinct sessions read as visually grouped. The mobile-status `latestEntry $derived` (now `$derived(log.latest)`) skips separator and overflow-header entries. `LogKind` is `error | warn | ok | pause | abort`; `abort` (crimson, DASHED left stripe — the dash matches the graph's abort sentinel node) marks the aborted-run terminal line and its `↳ <frame>` backtrace lines. HALTED presentation is outcome-flavored: MachineView keeps `terminalOutcome` / `terminalStateId` from the `ran` response, and `deriveGraphHighlight` keeps a terminal highlight (final state → abort node, `toId: -1`) alive in HALTED mode after an abort — a classical halt keeps no highlight, errors clear the flavor.
 - **CSS nesting** is used throughout (native, no preprocessor) — Vite's CSS pipeline handles it; supported by all evergreen browsers. Keep nesting shallow (≤2 levels) to preserve specificity readability.
 - **No UI substitution of alphabet symbols.** The user picks the blank glyph in their alphabet; the UI renders the literal symbol. CSS classes (`Tape.svelte#.cell.blank`, `ControlPanel.svelte#.cp-btn.blank`) provide visual hints (dim border / opacity) so blank cells remain recognisable regardless of which character was chosen — no character is reserved for "blank visualization", so no alphabet glyph collides with one.
@@ -255,7 +327,7 @@ A `.head-thread` div sits behind the stack as the first child of `.tapes-stack` 
 
 ## Snippets
 
-User-saved code lives in `localStorage` under `machines-demo:<engine>:snippets`, keyed by UUID → `{ title, code, savedAt }`. Title is user-visible (matches the save-popover input); UUID is the stable identity that survives renames and is the share key (issue #24).
+User-saved code lives in `localStorage` under `machines-demo:<engine>:snippets`, keyed by UUID → `{ title, code, savedAt, kind?, seeds? }`. Title is user-visible (matches the save-popover input); UUID is the stable identity that survives renames and is the share key (issue #24). The optional `kind` / `seeds` fields are toolchain-only — `saveSnippet`'s `extra` argument (`lib/persist.ts`) — carrying the buffer language and the input-tape seed alongside the code so a loaded toolchain snippet restores its whole editing context, not just the text.
 
 The currently loaded snippet's UUID lives in the URL query string (`?snippet=<uuid>`), not in localStorage. On mount, MachineView reads it; on `loadedSnippetId` change a `$effect` rewrites it via `history.replaceState` (no history entries — switching engines is the only operation that pushes). If the URL UUID isn't in `snippets`, MachineView reports `snippet not found: <uuid>` once and falls back to the `code` localStorage key. The bad param is dropped on the next state change (the `$effect` writes the canonical URL).
 

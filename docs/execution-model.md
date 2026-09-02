@@ -46,7 +46,7 @@ stateDiagram-v2
 
 ### 1.1 Scope: engine pages only
 
-This document describes the **engine pages** (`/turing`, `/post`) — `MachineView.svelte` driving a real `DebugSession` over a live machine in a worker. The landing page (`/`) renders showcase **`SnippetPanel`** tiles instead: those play back prerecorded `Snippet` artifacts produced at build time by `recordSnippet` (via the `src/vite-plugins/snippets.ts` Vite plugin). No worker, no `DebugSession`, no breakpoints — just a `SnippetPlayer` reading frames from an in-memory artifact, driven by its own playback state machine (`idle` / `playing` / `paused` / `done`) and orchestrated by Landing's IntersectionObserver. See `Landing.svelte` and `SnippetPanel.svelte` for the playback model; it's orthogonal to everything below.
+This document describes the **engine pages** — the JS engines (`/turing`, `/post`, `MachineView.svelte` driving a real `DebugSession` over a live machine in a worker) in §§1–8, and the toolchain engines (`/pm1`, `/tm1`, `ToolchainView.svelte` driving a pumped wasm session) in §9, which keeps §§2–7's five modes and user actions and only restates the worker mechanics that differ. The landing page (`/`) renders showcase **`SnippetPanel`** tiles instead: those play back prerecorded `Snippet` artifacts produced at build time by `recordSnippet` (via the `src/vite-plugins/snippets.ts` Vite plugin), for the JS engines only — no worker, no `DebugSession`, no breakpoints, just a `SnippetPlayer` reading frames from an in-memory artifact, driven by its own playback state machine (`idle` / `playing` / `paused` / `done`) and orchestrated by Landing's IntersectionObserver. See `Landing.svelte` and `SnippetPanel.svelte` for the playback model; it's orthogonal to everything below.
 
 ## 2. Mode reference
 
@@ -77,7 +77,7 @@ Terminal state. The machine reached its halt state, **aborted** (the engine's `a
 
 HALTED is one mode with an **outcome flavor**, not two modes: the `ran` / `stepped` responses carry `outcome: 'halted' | 'aborted'` (captured from the engine session's terminal `'halt'` / `'abort'` event), and MachineView keeps `terminalOutcome` + `terminalStateId` for the presentation. A classical halt logs the `ok` line and keeps no graph highlight; an abort logs `aborted at '<state>' after N step(s)` (kind `abort` — crimson dashed stripe) plus one `↳ <frame>` line per backtrace entry (engine continuation stack on the Turing page, the abort site's instruction-level arrival path on the Post page), and keeps a terminal graph highlight on the abort sentinel node (`toId: -1` → mermaid `s1`). Errors and truncation clear the flavor.
 Entry: run completion (halted or aborted), Stop, error, timeout, or truncation from any RUNNING_*; build error from any cold-start.
-Exit: Build (→ MANUAL), Step / Run (→ RUNNING_* via cold-start). Take Control is hidden (nothing to take — see §9 for the design question).
+Exit: Build (→ MANUAL), Step / Run (→ RUNNING_* via cold-start). Take Control is hidden (nothing to take — see §10 for the design question).
 
 ## 3. Flag reference
 
@@ -180,7 +180,7 @@ Notes:
 
 HALTED is the terminal state — the machine reached its halt state, was stopped, or hit an error / timeout / `MAX_STEPS` truncation. The tape is frozen at the final state; the worker is alive but idle (no run in flight). Build / Step / Run reload-from-code.
 
-**Exits.** Build (→ MANUAL), Step / Run (→ RUNNING_* via cold-start, see §5). Take Control is hidden (terminal mode — nothing to take; see §9 for the design question).
+**Exits.** Build (→ MANUAL), Step / Run (→ RUNNING_* via cold-start, see §5). Take Control is hidden (terminal mode — nothing to take; see §10 for the design question).
 
 **Visible controls.** Build, Step, Run. Apply hidden (Apply is MANUAL-only). Stop hidden (nothing to stop). Take Control hidden.
 
@@ -363,7 +363,31 @@ A run that doesn't halt naturally hits `MAX_STEPS = 100_000` inside the worker's
 
 **Edge case.** Today's API doesn't expose any callback hook to user code — `state.debug.before` / `state.debug.after` are filter values (`true | string[] | null`), not user-supplied functions, and the worker's `DebugSession` listeners (`step` / `pause`) wrap the run on the demo side. So a "stall via async user callback" isn't reachable in the current surface. The per-segment cap defends against the cases that *are* reachable: infinite loops in user code, hung worker-side Promises, and any future API surface that might let user-supplied async logic interpose.
 
-## 9. Current divergences from spec
+## 9. Toolchain engines
+
+The `/pm1` and `/tm1` pages keep the five modes and every user action of §§2–7, with one visibility difference on Take Control noted below; otherwise only the worker mechanics differ. The engine is a pumped wasm session (the toolchains' `docs/wasm.md (sessions)`): `pump(budget)` retires instructions until the budget is spent, a pause fires, or the program ends. A **step is one instruction** (`pump(1)`), which for TM-1 in particular may be one of several instructions behind a single source-level transition — consecutive steps often share a source location. The `step N:` log line names the instruction that just retired, with its per-band read → write/move notation (the engine pages' own edge-label vocabulary, via `formatStepNotation`); the ip highlight shows where execution *resumes*, not the instruction just named.
+
+| Mode / action | JS engines | Toolchain engines |
+|---|---|---|
+| Build | `build` → mirror machine rebuilt | `build { lang }` → `built`; seeds kept if bands + alphabets unchanged, else reset (logged); breakpoints re-resolved by `{ file, line }` |
+| Step (cold-start / paused) | `run { step }` / `resume { step }` | `start { mode: 'step' }` / `resume { mode: 'step' }` → `stepped` → RUNNING_PAUSED |
+| Run, withPause on | `run { intervalMs }` | `start { mode: 'auto', intervalMs }` — `pump(1)`, `idle`, sleep, `busy` per step |
+| Run, withPause off | `run` | `start { mode: 'continuous' }` — `pump(TOOLCHAIN_SLICE_BUDGET)` slices, `progress` heartbeats, an event-loop yield between slices |
+| Pause (auto) | `pause` | `pause` → next `paused { cause: 'manual' }` |
+| Continue | `resume` | `resume { mode }` |
+| Stop | terminate | `stop` → `finished { outcome: { kind: 'stopped' } }` → HALTED |
+| Take Control | mode flip | `stop`; last snapshots copied into seeds → MANUAL |
+| Apply (MANUAL) | mirror write | seed-tape write on the main thread |
+| Debug toggle | `setDebug` | `setDebug` — off: no breakpoints registered, a retired `debugger` (`brk`) is not a pause |
+| Completion | `ran` | `finished { halted \| stopped \| trapped }` → HALTED; a `step-limit` trap reads as the truncated run; other traps keep the ip highlight on the faulting line |
+
+Pause causes: a breakpoint address (before the instruction there; resuming past it does not re-pause), `brk` (a retired `debugger`, honoured only while the debug toggle is on), `manual` (click-Pause). The watchdog is per segment: armed on `start` / `resume` / the auto-mode `busy` heartbeat, disarmed on `paused` / `stepped` / `idle` / `finished`. A timeout restores the last `progress` snapshot when it is ahead of what's rendered.
+
+**Take Control's on-screen visibility does not match §2/§6/§7's JS-engine rule** (visible in every RUNNING_* mode, hidden in HALTED — "nothing to take"). On the toolchain pages `takeControlVisible` (`ToolchainView.svelte`) is currently true only in RUNNING_AUTO and HALTED, and false in RUNNING_CONTINUOUS and RUNNING_PAUSED — close to the inverse. The underlying action itself is mode-agnostic (`runner.stop()` when a run is pending, direct `→ MANUAL` when not — reachable from any RUNNING_* and from HALTED alike), and from HALTED it needs no worker round-trip since the final snapshot already sits in `seeds` (`onFinished`'s unconditional `adoptSnapshots`). No test in this branch exercises the button, so this visibility rule is undocumented in the spec and unconfirmed against intent.
+
+Scenario IDs for this section use the `T-` prefix (node scenarios for the toolchain helpers, worker core, runner, and editor extensions, `src/lib/toolchain/**/*.test.ts`); component tests keep `C-` (`FileTabs.test.ts`, `TapesStack.test.ts`); e2e specs use `E-tc-…` (`e2e/toolchain-pm1.spec.ts`, `e2e/toolchain-tm1.spec.ts`, `e2e/no-wasm-on-js-pages.spec.ts`).
+
+## 10. Current divergences from spec
 
 A punchlist of where today's code differs from the spec. Acts as a TODO list for follow-up work; the test suites cite scenario IDs and `it.skip` divergent ones until they close.
 
@@ -371,20 +395,20 @@ A punchlist of where today's code differs from the spec. Acts as a TODO list for
 
 > ⚠️ The former entries here — "IDLE mode does not exist", "halting iter's `state.debug.after` never fires", "`haltState.debug.after` silently ignored" — are all **resolved**. IDLE was retired entirely with the DEMO + IDLE removal; Step no longer arms `.after` (it uses the engine's `stepIn()`, before-side); `haltState.debug` is now a `boolean` upstream whose pause fires reliably on the after-side of the halt-triggering iter. None of these divergences apply anymore.
 
-## 10. Engine quirks
+## 11. Engine quirks
 
 Upstream behaviors the spec encodes (won't change without a major upstream version, so the spec works around them):
 
 - The `DebugSession` `step` event is fire-and-forget and synchronous (per-iter, mid-iter, between any before-pause and after-pause). The demo's `step` listener uses it purely to buffer commands / reads / match-kinds and track `prevYieldedStateId` — it never awaits. Per-iter **awaited** coordination lives on the `iter` event (the engine awaits it, sequenced after any after-pause), which the demo uses for the RUNNING_AUTO throttle. The `pause` event is also awaited (the engine blocks on its internal resume-promise until `continue` / `stepIn` / `stop`). This is the engine's v7 `DebugSession` contract.
 
-§9 vs §10: §9 lists demo-side gaps to be closed; §10 lists engine semantics that won't change. Items can move from §10 to §9 if the upstream issue lands and a corresponding demo-side simplification becomes possible.
+§10 vs §11: §10 lists demo-side gaps to be closed; §11 lists engine semantics that won't change. Items can move from §11 to §10 if the upstream issue lands and a corresponding demo-side simplification becomes possible.
 
-## 11. Cross-references
+## 12. Cross-references
 
 - [`CLAUDE.md`](../CLAUDE.md) — working conventions, file structure, build commands. Runtime-behavior content moved here.
 - [`docs/superpowers/specs/2026-05-08-worker-run-mode-design.md`](superpowers/specs/2026-05-08-worker-run-mode-design.md) — the worker-run-mode design; gives the *why* behind RUNNING_PAUSED and the worker contract.
 
-## 12. Scenario ID grammar
+## 13. Scenario ID grammar
 
 `<prefix>-<action-or-topic>-<context-or-facet>-<flags?>`
 
@@ -394,6 +418,7 @@ Upstream behaviors the spec encodes (won't change without a major upstream versi
 | `R-` | runner / worker / helper internal scenarios (no UI counterpart). Format `R-<topic>-<facet>`, e.g. `R-protocol-build`, `R-timer-suspend-on-paused`. Used in `*.test.ts` files alongside `S-...` IDs. |
 | `C-` | component-test scenarios. Format `C-<component>-<facet>`, e.g. `C-toolbar-run-label-default`, `C-toolbar-disabled-build`. Used in component test files (`*.test.ts` co-located with `.svelte` files). |
 | `E-` | end-to-end scenarios — full UI flow including worker round-trip. Format `E-<from-state-or-context>-<facet>`, e.g. `E-cold-start-run-debug-off`. Used in `e2e/*.spec.ts`. |
+| `T-` | toolchain-engine node scenarios (helpers, worker core, runner, modes, editor extensions). Format `T-<topic>-<facet>`, e.g. `T-pump-breakpoint`, `T-linemap-std`. Used in `src/lib/toolchain/**/*.test.ts`. |
 | `<action>` (S only) | `build`, `step`, `run`, `continue`, `stop`, `takectl`, `apply`, `debug-toggle`, `withpause-toggle`, `error`, `truncate`, `timeout` |
 | `<from-state>` (S only) | `manual`, `auto`, `cont`, `paused`, `halted` |
 | `<topic>` (R / C / E) | `machineRunner.test.ts`: `protocol`, `timer`, `pending`, `error`. `workerHelpers.test.ts`: `movement-code`, `commands`, `snapshot`, `phase-guard`, `step-arm`. `logStore.test.ts`: `buffer-append`, `cap-overflow`, `cap-boundary`, `separator-skip-empty`, `latest-skips-separator`, `latest-synchronous`, `clear`, `dispose`, `flush-coalesce`, `flush-no-pending-timer`. `tapeSnapshot.test.ts`: `roundtrip`, `parse-not-json`, `parse-wrong-format`, `parse-unsupported-version`, `parse-wrong-shape-tapes`, `parse-wrong-shape-alphabets`, `parse-length-mismatch`. `Toolbar.test.ts`: `run-label`, `disabled`, `visibility`, `interval`, `callbacks`, `stale`. `e2e/cold-start.spec.ts`: `cold-start`, `continue-from-step`, `stop-while-paused`. `e2e/stale-build.spec.ts`: `stale-build`. |
@@ -405,10 +430,10 @@ Conventions:
 - One token per slot. Don't run flags together.
 - Drop slots that don't matter — uniform behavior across flags ⇒ no flag suffix.
 - Stable across spec edits — prefer adding new IDs over renaming.
-- All four prefixes follow the regex `\b[SRCE]-[a-z-]+`. Tests / CI grep this to find every cited scenario.
+- All five prefixes follow the regex `\b[SRCET]-[a-z-]+`. Tests / CI grep this to find every cited scenario.
 
 Where IDs live:
 - **Matrix cells** (§6): `S-step-paused-off: arm .after, resume(step), → PAUSED`. Text after `:` is the one-line outcome.
 - **Walk-throughs** (§8): each opens with `### \`S-step-paused-off\` / \`S-step-paused-on\` — Step from break` so the ID is the section anchor.
 - **Tests**: each `it()` cites at least one ID. UI-flow tests cite `S-...` (component / E2E layers); runner / worker / helper tests cite `R-...`. Failing tests point straight at the spec rule they broke.
-- **§9 entries**: cite the IDs they affect when describing today's divergences.
+- **§10 entries**: cite the IDs they affect when describing today's divergences.
