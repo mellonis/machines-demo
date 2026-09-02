@@ -4,6 +4,8 @@
     "target": "ES2023",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "baseUrl": ".",
+    "paths": { "$mtc": ["vendor/mtc-wasm/mtc_wasm"] },
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
@@ -16,6 +18,6 @@
     "resolveJsonModule": true,
     "types": ["svelte", "vite/client", "@testing-library/jest-dom", "node"]
   },
-  "include": ["src/**/*.ts", "src/**/*.svelte", "src/**/*.d.ts"],
+  "include": ["src/**/*.ts", "src/**/*.svelte", "src/**/*.d.ts", "vendor/mtc-wasm/*.d.ts"],
   "exclude": ["node_modules", "dist", "src.legacy"]
 }

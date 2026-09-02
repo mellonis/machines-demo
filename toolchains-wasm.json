@@ -1,0 +1,9 @@
+{
+  "tag": "v0.5.0-rc.2",
+  "files": {
+    "mtc_wasm_bg.wasm": "ffe72ee93a31f273685393b067225a2e2dbdb6172f1372bf1385b8e74de25a73",
+    "mtc_wasm.js": "c26e045c796496d708dfd09f1247d3e848227c7c02799ee5dee61efd8ed978f2",
+    "mtc_wasm.d.ts": "4c4840214894fb69c5097aed2dc2d2f0c679aa798735382f04c3917aa2d2b0b4",
+    "manifest.json": "9b1e20397754ab63f755dae0f1f51efc943937ae419b2255c37326120c890e42"
+  }
+}

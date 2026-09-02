@@ -1,7 +1,10 @@
 import { defineConfig, type Plugin } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { createSnippetsPlugin } from './src/vite-plugins/snippets.ts';
+
+const MTC_GLUE = fileURLToPath(new URL('./vendor/mtc-wasm/mtc_wasm.js', import.meta.url));
 
 const pkgVersion = (pkg: string): string =>
   JSON.parse(readFileSync(`./node_modules/${pkg}/package.json`, 'utf-8')).version;
@@ -32,4 +35,5 @@ export const appVersion = ${JSON.stringify(app)};
 
 export default defineConfig({
   plugins: [svelte(), libVersions(), createSnippetsPlugin()],
+  resolve: { alias: { $mtc: MTC_GLUE } },
 });

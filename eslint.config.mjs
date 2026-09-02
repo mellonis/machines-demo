@@ -29,6 +29,6 @@ export default [
     },
   },
   {
-    ignores: ['dist', 'node_modules', '.svelte-kit', 'coverage'],
+    ignores: ['dist', 'node_modules', '.svelte-kit', 'coverage', 'vendor'],
   },
 ];
