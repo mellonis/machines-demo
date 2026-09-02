@@ -249,6 +249,42 @@ describe('pump loops', () => {
     expect(h.sleeps[0]).toBe(50);
   });
 
+  it('T-pump-auto-pause-interrupts-sleep: a pause cuts the auto interval short instead of waiting it out', async () => {
+    const h = await harness();
+    await h.send({ type: 'build', lang: 'tmc', code: TMC_REPLACE_B });
+    // A sleep that never resolves on its own: only the wake path can end it,
+    // so the pause has to interrupt the interval for this run to finish.
+    (h.core as unknown as { deps: CoreDeps }).deps.sleep = () => new Promise<void>(() => {});
+    const run = h.send({ type: 'start', seeds: [{ cells: [2, 2, 2, 2, 2, 2, 2, 2] }], limits: {}, breakpoints: [], mode: 'auto', intervalMs: 600_000 });
+    await h.send({ type: 'pause' });
+    await run;
+    expect(ofType(h, 'paused')[0]?.cause).toBe('manual');
+  });
+
+  it('T-pump-auto-stop-interrupts-sleep: a stop cuts the auto interval short and finalises without another pump', async () => {
+    const h = await harness();
+    await h.send({ type: 'build', lang: 'tmc', code: TMC_REPLACE_B });
+    (h.core as unknown as { deps: CoreDeps }).deps.sleep = () => new Promise<void>(() => {});
+    const run = h.send({ type: 'start', seeds: [{ cells: [2, 2, 2, 2, 2, 2, 2, 2] }], limits: {}, breakpoints: [], mode: 'auto', intervalMs: 600_000 });
+    await h.send({ type: 'stop' });
+    await run;
+    const finished = ofType(h, 'finished');
+    expect(finished).toHaveLength(1);
+    expect(finished[0].result.outcome.kind).toBe('stopped');
+    expect(ofType(h, 'paused')).toHaveLength(0);
+    // The woken loop finalises straight away — it never re-announces itself
+    // as busy, so the main thread's watchdog stays disarmed.
+    expect(ofType(h, 'busy')).toHaveLength(0);
+  });
+
+  it('T-pump-stop-no-session: stop with nothing running is a silent no-op', async () => {
+    const h = await harness();
+    await h.send({ type: 'build', lang: 'pmc', code: PMC_INC });
+    await h.send({ type: 'stop' });
+    expect(h.posted.filter((r) => r.type === 'error')).toHaveLength(0);
+    expect(ofType(h, 'finished')).toHaveLength(0);
+  });
+
   it('T-pump-stop: stop while paused posts finished { stopped } with snapshots', async () => {
     const h = await harness();
     await h.send({ type: 'build', lang: 'pmc', code: PMC_INC });

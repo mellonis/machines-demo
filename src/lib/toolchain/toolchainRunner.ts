@@ -65,16 +65,39 @@ export class ToolchainRunner {
     if (!this.worker) {
       this.worker = this.factory();
       this.worker.onmessage = (e) => this.onMessage(e.data);
-      this.worker.onerror = (e) => this.killAll(new ToolchainWorkerError(`worker error: ${e.message ?? 'unknown'}`, true));
+      this.worker.onerror = (e) => {
+        const message = `worker error: ${e.message ?? 'unknown'}`;
+        this.onFatal?.(message);
+        this.killAll(new ToolchainWorkerError(message, true));
+      };
     }
     return this.worker;
   }
 
-  private killAll(err: Error): void {
-    if (this.simple) { clearTimeout(this.simple.timeoutId); this.simple.reject(err); this.simple = null; }
-    this.rejectQueued(err);
-    if (this.run) { if (this.run.timeoutId) clearTimeout(this.run.timeoutId); this.run.reject(err); this.run = null; }
+  /**
+   * The single kill path. Whatever killed the worker — a watchdog on either
+   * channel, a fatal module error, unmount — takes down *both* channels:
+   * leaving one pending against a terminated worker strands the request
+   * forever (and the queue behind it) until its own timer fires with a
+   * misleading message. `runErr` lets the channel that timed out report the
+   * real cause while the other reads "worker terminated".
+   */
+  private killAll(err: Error, runErr: Error = err): void {
+    const simple = this.simple;
+    const queued = this.simpleQueue;
+    const run = this.run;
+    this.simple = null;
+    this.simpleQueue = [];
+    this.run = null;
+    if (simple) clearTimeout(simple.timeoutId);
+    if (run?.timeoutId) clearTimeout(run.timeoutId);
     if (this.worker) { this.worker.terminate(); this.worker = null; }
+    // Reject last, with the runner already back to a clean state, so a
+    // handler that immediately posts a new request gets a fresh worker
+    // instead of one this call is about to terminate.
+    simple?.reject(err);
+    for (const entry of queued) entry.reject(err);
+    run?.reject(runErr);
   }
 
   private startRunTimer(): void {
@@ -82,10 +105,10 @@ export class ToolchainRunner {
     if (this.run.timeoutId) clearTimeout(this.run.timeoutId);
     const timeoutMs = getSetting('workerTimeoutMs');
     this.run.timeoutId = setTimeout(() => {
-      const p = this.run;
-      this.run = null;
-      if (this.worker) { this.worker.terminate(); this.worker = null; }
-      p?.reject(new ToolchainTimeoutError(`timeout after ${timeoutMs}ms — worker terminated (likely infinite loop)`, this.lastRunProgress));
+      this.killAll(
+        new ToolchainWorkerError('worker terminated'),
+        new ToolchainTimeoutError(`timeout after ${timeoutMs}ms — worker terminated (likely infinite loop)`, this.lastRunProgress),
+      );
     }, timeoutMs);
   }
 
@@ -122,12 +145,6 @@ export class ToolchainRunner {
     if (this.simple) this.settleSimple((p) => p.resolve(data));
   }
 
-  private rejectQueued(err: Error): void {
-    const queued = this.simpleQueue;
-    this.simpleQueue = [];
-    for (const entry of queued) entry.reject(err);
-  }
-
   private sendSimple(msg: ToolchainRequest): Promise<ToolchainResponse> {
     return new Promise((resolve, reject) => {
       this.simpleQueue.push({ msg, resolve, reject });
@@ -144,11 +161,10 @@ export class ToolchainRunner {
     const w = this.ensureWorker();
     const timeoutMs = getSetting('workerTimeoutMs');
     const timeoutId = setTimeout(() => {
-      this.simple = null;
-      if (this.worker) { this.worker.terminate(); this.worker = null; }
-      const err = new ToolchainTimeoutError(`timeout after ${timeoutMs}ms — worker terminated`, null);
-      entry.reject(err);
-      this.rejectQueued(err);
+      this.killAll(
+        new ToolchainTimeoutError(`timeout after ${timeoutMs}ms — worker terminated`, null),
+        new ToolchainWorkerError('worker terminated'),
+      );
     }, timeoutMs);
     this.simple = { ...entry, timeoutId };
     w.postMessage(entry.msg);
@@ -191,8 +207,11 @@ export class ToolchainRunner {
     });
   }
 
+  /** No-op without a live run: these three are wired straight to click
+   *  handlers, and the worker can be gone (a watchdog kill) by the time the
+   *  user reaches the button. */
   resume(mode: DriveMode, intervalMs?: number): void {
-    if (!this.run || !this.worker) throw new Error('resume: no pending run');
+    if (!this.run || !this.worker) return;
     this.startRunTimer();
     this.worker.postMessage({ type: 'resume', mode, intervalMs });
   }

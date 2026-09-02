@@ -26,6 +26,9 @@ export class ToolchainCore {
   private stopRequested = false;
   private loopActive = false;
   private lastProgressAt = 0;
+  /** Set while the auto loop is parked in its interval; calling it ends the
+   *  wait immediately (see `sleepInterval`). Null at every other moment. */
+  private wake: (() => void) | null = null;
   /** Bumped every time `this.session` is dropped or replaced. A running
    *  `drive()` loop captures the value at entry and treats a mismatch as
    *  "the session I was pumping is gone" — it stops touching it rather than
@@ -63,6 +66,7 @@ export class ToolchainCore {
         case 'resume': return await this.drive(req.mode, req.intervalMs);
         case 'pause':
           this.session?.pause();
+          this.wake?.();
           return;
         case 'stop': return this.stop();
         case 'setBreakpoints':
@@ -141,10 +145,28 @@ export class ToolchainCore {
     this.dropSession();
   }
 
+  /** Silent when there is nothing to stop, like `pause`: Stop can land just
+   *  after the run finished on its own, and an error nobody asked for would
+   *  surface on the main thread as an uncorrelated failure. */
   private stop(): void {
-    if (!this.session) { this.deps.post({ type: 'error', message: 'stop: no run in progress' }); return; }
-    if (this.loopActive) { this.stopRequested = true; return; } // the loop finalises after its slice
+    if (!this.session) return;
+    if (this.loopActive) { this.stopRequested = true; this.wake?.(); return; } // the loop finalises after its slice
     this.finishStopped();
+  }
+
+  /** The auto-mode interval, cut short by a `pause` / `stop` that arrives
+   *  while it is running. Waiting the interval out would make both actions
+   *  look dead for as long as the user configured (intervals go up to
+   *  minutes), and would let a Stop outlive the main thread's watchdog. */
+  private sleepInterval(ms: number): Promise<void> {
+    // Only clear `wake` if it is still ours: an abandoned loop's real sleep
+    // can resolve long after a newer loop parked, and clearing that one's
+    // resolver would leave its Pause / Stop with nothing to call.
+    let mine: (() => void) | null = null;
+    return Promise.race([
+      this.deps.sleep(ms),
+      new Promise<void>((resolve) => { this.wake = mine = resolve; }),
+    ]).finally(() => { if (this.wake === mine) this.wake = null; });
   }
 
   /** See `finish()` — tolerates an already-cleared session. */
@@ -212,8 +234,14 @@ export class ToolchainCore {
         if (mode === 'auto') {
           this.deps.post({ type: 'stepped', snapshots: s.snapshots(), ip: s.ip, stats: s.stats(), retired: true });
           this.deps.post({ type: 'idle' });
-          await this.deps.sleep(intervalMs ?? 0);
+          await this.sleepInterval(intervalMs ?? 0);
           if (this.generation !== gen) return;
+          // A stop that woke the interval finalises here rather than at the
+          // top of the loop, so the main thread never sees a `busy` (and the
+          // watchdog it re-arms) for a run that is already over. A pause
+          // falls through: the engine's armed pause fires at the next
+          // instruction boundary, which is what ends the segment.
+          if (this.stopRequested) { this.finishStopped(); return; }
           this.deps.post({ type: 'busy' });
         } else {
           const t = this.deps.now();

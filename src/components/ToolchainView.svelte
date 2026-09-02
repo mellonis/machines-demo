@@ -159,11 +159,19 @@
   const tapeBlockEnabled = $derived((executionMode === 'MANUAL' || executionMode === 'HALTED') && workerLive && pendingOp === null);
   const beltTransitionsOn = $derived(executionMode !== 'RUNNING_CONTINUOUS' && executionMode !== 'RUNNING_PAUSED');
   const selectedExample = $derived(findExample(engine, selectedExampleId) ?? defaultExample(engine));
-  const sourceCode = $derived.by(() => {
-    if (loadedSnippetId !== null) return snippets[loadedSnippetId]?.code ?? null;
-    return selectedExample.code;
+  /** What Reset would restore — text *and* buffer kind. `null` when there is
+   *  no target (the loaded snippet was deleted). */
+  const source = $derived.by((): { code: string; kind: BufferKind } | null => {
+    if (loadedSnippetId !== null) {
+      const s = snippets[loadedSnippetId];
+      return s ? { code: s.code, kind: s.kind ?? 'source' } : null;
+    }
+    return { code: selectedExample.code, kind: selectedExample.kind ?? 'source' };
   });
-  const dirty = $derived(sourceCode !== null && code !== sourceCode);
+  // The kind is part of the buffer's identity: after a language switch the
+  // text is the other kind's, so "differs from source" has to cover both or
+  // the dot and the Reset button vanish while the buffer is still changed.
+  const dirty = $derived(source !== null && (code !== source.code || kind !== source.kind));
   const resetVisible = $derived(dirty);
   const staleBuild = $derived(builtSource !== null && (code !== builtSource || builtLang !== lang));
   const resetTitle = $derived(loadedSnippetId !== null && loadedSnippetId in snippets ? `Reset to "${snippets[loadedSnippetId].title}"` : 'Reset to selected example');
@@ -595,20 +603,35 @@
     downloadBlob(name, new Blob([code], { type: 'text/plain' }));
     log.report(`saved ${name}`, 'ok');
   }
-  function goToStd(name: string): void {
-    setTab('std');
+  /**
+   * Cmd/Ctrl-click target. `qualified` is false for a bare word — the name a
+   * `use std::name;` import brought into scope reads exactly like any other
+   * identifier, so an unknown one is an ordinary click and must leave the
+   * view alone: no tab switch, no log line. Only a spelled-out `std::name`
+   * that resolves to nothing is worth reporting.
+   */
+  function goToStd(name: string, qualified: boolean): void {
     const def = findStdDefinition(stdExports, name);
+    if (!def) {
+      if (qualified) log.report(`no definition found for std::${name}`, 'warn');
+      return;
+    }
+    setTab('std');
     void tick().then(() => {
       if (!stdView) return;
-      if (def) { stdView.dispatch({ selection: { anchor: stdView.state.doc.line(def.line).from } }); scrollToLine(stdView, def.line); }
-      else log.report(`no definition found for std::${name}`, 'warn');
+      stdView.dispatch({ selection: { anchor: stdView.state.doc.line(def.line).from } });
+      scrollToLine(stdView, def.line);
     });
   }
 
   /* ───── examples / snippets (parity with MachineView) ───── */
+  /** Restores kind before code, like `pickExample` / `onLoadSnippet` — the
+   *  buffer's language comes from its source, so resetting only the text
+   *  would leave a `.pmc` program sitting in an assembly buffer. */
   function resetCodeToSelected(): void {
-    if (loadedSnippetId !== null) { const s = snippets[loadedSnippetId]; if (s) code = s.code; return; }
-    code = selectedExample.code;
+    if (source === null) return;
+    kind = source.kind;
+    code = source.code;
   }
   /**
    * Applies `pendingSeedGlyphs` to the currently-loaded program's bands

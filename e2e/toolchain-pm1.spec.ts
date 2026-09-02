@@ -11,11 +11,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
  * least `svelte-codemirror-editor`'s 300ms view→prop debounce
  * (`dist/CodeMirror.svelte`'s `on_change`), and possibly also the 400ms
  * `check()` round-trip the same edit schedules on the toolchain worker's
- * shared "simple" request channel (docs/execution-model.md (toolchain
- * engines); machines-demo#136 review round 1 concern 1). Verified
- * empirically: a plain fixed wait here is necessary but not sufficient
- * everywhere — call sites that read `code` through a *retrying* assertion
- * (e.g. `toHaveAttribute` with a generous timeout) ride out the rest.
+ * shared "simple" request channel, which serialises requests: a lint still
+ * in flight delays the next one behind it (docs/execution-model.md
+ * (toolchain engines)). Verified empirically: a plain fixed wait here is
+ * necessary but not sufficient everywhere — call sites that read `code`
+ * through a *retrying* assertion (e.g. `toHaveAttribute` with a generous
+ * timeout) ride out the rest.
  */
 async function setEditorText(page: Page, text: string) {
   await page.locator('.cm-content').first().click();
@@ -47,9 +48,10 @@ async function clickGutterAtLine(page: Page, lineIndex0Based: number): Promise<v
   await page.mouse.click(gutterBox.x + gutterBox.width / 2, lineBox.y + lineBox.height / 2);
 }
 
-// Read from disk rather than retyping: the source gained a `right;` line
-// (mellonis/machines-demo#136 review round 1) so the run actually appends a
-// mark instead of re-marking an already-marked cell.
+// Read from disk rather than retyping, so the assertions below track the
+// shipped example. `std::goToEnd` leaves the head on the last mark, so the
+// `right;` between it and `mark;` is what makes the run append a fourth mark
+// instead of re-marking the one already under the head.
 const UNARY_INCREMENT = readFileSync(
   path.join(__dirname, '../src/lib/toolchain/examples/unary-increment.pmc'),
   'utf8',
@@ -208,6 +210,49 @@ test.describe('PM-1 page', () => {
     await page.getByRole('button', { name: /^run$/i }).click();
     await expect(logLine(page, /^stopped after \d+ step\(s\)/)).toBeVisible({ timeout: 15_000 });
     expect(await nonBlank(page)).toEqual(['*', '*', '*', '*']);
+  });
+
+  test('E-tc-reset-restores-kind: Reset after a language switch restores the example buffer, kind and all', async ({ page }) => {
+    await page.getByLabel('Buffer language').selectOption('asm');
+    await expect(page.getByRole('tab', { name: 'main.pma' })).toBeVisible();
+    await expect(page.locator('.cm-content')).toContainText('.func main');
+    // The buffer's language is part of what Reset restores: putting `.pmc`
+    // source back into an assembly buffer would mis-highlight it and fail
+    // the next Build in the assembler.
+    await page.getByRole('button', { name: 'Reset to selected example' }).click();
+    await expect(page.getByRole('tab', { name: 'main.pmc' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('.cm-content')).toContainText('@std::goToEnd();');
+    await expect(page.locator('.cm-content')).not.toContainText('.func main');
+  });
+
+  test('E-tc-std-goto-def: Cmd/Ctrl-click on a bare imported name opens its stdlib definition', async ({ page }) => {
+    // `Unary sum` imports with `use std::goToEnd, …;` and then calls the
+    // bare `@goToEnd();` — the spelling that carries no `std::` prefix.
+    await page.getByRole('button', { name: 'Example code sources' }).click();
+    await page.getByRole('menuitem', { name: 'Unary sum' }).click();
+    const line = page.locator('.cm-line').filter({ hasText: '@goToEnd();' }).first();
+    await expect(line).toBeVisible();
+    // Click the token itself, measured with a DOM Range: a centred click on
+    // the line would land in the padding past `;`, which is punctuation and
+    // resolves to no name at all.
+    const lineBox = await line.boundingBox();
+    const token = await line.evaluate((el, name: string) => {
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        const i = (n.textContent ?? '').indexOf(name);
+        if (i === -1) continue;
+        const r = document.createRange();
+        r.setStart(n, i + 2);
+        r.setEnd(n, i + 3);
+        const rect = r.getBoundingClientRect();
+        return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+      }
+      return null;
+    }, 'goToEnd');
+    if (!lineBox || !token) throw new Error('goToEnd token not laid out');
+    await line.click({ modifiers: ['ControlOrMeta'], position: { x: token.x - lineBox.x, y: token.y - lineBox.y } });
+    await expect(page.getByRole('tab', { name: 'std.pmc' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('.cm-line').filter({ hasText: 'export goToEnd()' }).first()).toBeInViewport();
   });
 
   test('E-tc-seed-persists: a seed edited on the panel survives a reload', async ({ page }) => {

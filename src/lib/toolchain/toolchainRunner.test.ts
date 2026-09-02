@@ -165,6 +165,66 @@ describe('ToolchainRunner', () => {
     expect(r.runPending).toBe(false);
   });
 
+  it('T-runner-run-timeout-clears-simple: a run timeout also rejects the in-flight and queued simple requests', async () => {
+    const { factory, current } = makeFakeToolchainFactory();
+    const r = new ToolchainRunner(factory);
+    const run = r.start({ seeds: [], breakpoints: [], mode: 'continuous' });
+    // The lint `check` rides along mid-run, so its own watchdog is armed
+    // later than the run's and would not fire on this tick — only the run
+    // timeout can clean it up.
+    vi.advanceTimersByTime(2_000);
+    const inFlight = r.check('pmc', 'a');
+    const queued = r.build('pmc', 'b');
+    vi.advanceTimersByTime(3_000);
+    await expect(run).rejects.toBeInstanceOf(ToolchainTimeoutError);
+    await expect(inFlight).rejects.toBeInstanceOf(ToolchainWorkerError);
+    await expect(queued).rejects.toThrow(/worker terminated/);
+    // Nothing left behind: the next request gets a fresh worker straight away
+    // instead of queueing behind an orphan that can never settle.
+    void r.build('pmc', 'c').catch(() => {});
+    expect(current().last).toEqual({ type: 'build', lang: 'pmc', code: 'c' });
+  });
+
+  it('T-runner-simple-timeout-clears-run: a simple timeout while the run is paused rejects the pending run too', async () => {
+    const { factory, current } = makeFakeToolchainFactory();
+    const r = new ToolchainRunner(factory);
+    const run = r.start({ seeds: [], breakpoints: [], mode: 'continuous' });
+    // A pause stops the run watchdog, so only the simple channel's timer is armed.
+    current().respond({ type: 'paused', cause: 'manual', ip: 0, snapshots: [], stats: { steps: 0, coreTacts: 0, stallTacts: 0, totalTacts: 0 } });
+    const chk = r.check('pmc', 'a');
+    vi.advanceTimersByTime(5_000);
+    await expect(chk).rejects.toBeInstanceOf(ToolchainTimeoutError);
+    await expect(run).rejects.toThrow(/worker terminated/);
+    expect(r.runPending).toBe(false);
+    expect(current().terminated).toBe(true);
+  });
+
+  it('T-runner-onerror-fatal: a native worker error reports onFatal, rejects everything, and the next request respawns', async () => {
+    const { factory, current, all } = makeFakeToolchainFactory();
+    const r = new ToolchainRunner(factory);
+    const fatal: string[] = [];
+    r.onFatal = (m) => fatal.push(m);
+    const run = r.start({ seeds: [], breakpoints: [], mode: 'continuous' });
+    const inFlight = r.check('pmc', 'a');
+    const queued = r.build('pmc', 'b');
+    current().onerror?.({ message: 'boom' } as ErrorEvent);
+    expect(fatal).toEqual(['worker error: boom']);
+    await expect(run).rejects.toThrow(/worker error: boom/);
+    await expect(inFlight).rejects.toThrow(/worker error: boom/);
+    await expect(queued).rejects.toThrow(/worker error: boom/);
+    expect(all()[0].terminated).toBe(true);
+    void r.build('pmc', 'c').catch(() => {});
+    expect(all()).toHaveLength(2);
+  });
+
+  it('T-runner-resume-without-run: resume / pause / stop with no run are silent no-ops', () => {
+    const { factory } = makeFakeToolchainFactory();
+    const r = new ToolchainRunner(factory);
+    expect(() => r.resume('continuous')).not.toThrow();
+    expect(() => r.pause()).not.toThrow();
+    expect(() => r.stop()).not.toThrow();
+  });
+
   it('T-runner-reject-overlap: a second start while one is pending throws', () => {
     const { factory } = makeFakeToolchainFactory();
     const r = new ToolchainRunner(factory);

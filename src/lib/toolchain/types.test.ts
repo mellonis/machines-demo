@@ -4,8 +4,8 @@ import { readEngineFromLandingQuery, readRouteFromUrl } from '../routing.ts';
 import { kindOfLang, langFor, TOOLCHAIN_ARCH } from './types.ts';
 
 describe('toolchain engine ids', () => {
-  it('T-engines-four: ENGINES lists the two JS engines then the two toolchain engines', () => {
-    expect(ENGINES).toEqual(['turing', 'post', 'pm1', 'tm1']);
+  it('T-engines-four: ENGINES lists the two JS engines then the two toolchain engines, each pair Turing-machine-first', () => {
+    expect(ENGINES).toEqual(['turing', 'post', 'tm1', 'pm1']);
     expect(isToolchainEngine('pm1')).toBe(true);
     expect(isToolchainEngine('turing')).toBe(false);
     expect(isJsEngine('post')).toBe(true);

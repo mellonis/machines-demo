@@ -17,6 +17,18 @@ const ready: Promise<ToolchainCore> = init().then(
     }),
 );
 
+// A module that never loaded (a 404 on the hashed wasm asset, a MIME or CSP
+// refusal — `docs/wasm.md (failure modes)`) must answer every request with a
+// readable fatal error; without this the requests hang and the main thread's
+// only signal is a watchdog timeout blaming the user's program.
+let initError: string | null = null;
+ready.catch((err: unknown) => {
+  initError = `toolchain module failed to load: ${err instanceof Error ? err.message : String(err)}`;
+});
+
 self.onmessage = (e: MessageEvent<ToolchainRequest>) => {
-  void ready.then((core) => core.handle(e.data));
+  void ready.then(
+    (core) => core.handle(e.data),
+    () => self.postMessage({ type: 'error', fatal: true, message: initError ?? 'toolchain module failed to load' }),
+  );
 };
