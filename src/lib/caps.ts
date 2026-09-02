@@ -62,3 +62,12 @@ export const LOG_RENDER_CAP = 5000;
  *  enough to coalesce a bulk dump, short enough that step-by-step still
  *  feels live. */
 export const LOG_FLUSH_INTERVAL_MS = 16;
+
+/** Instructions retired per `pump` slice in a continuous toolchain run.
+ *  Between slices the worker yields to its event loop so `pause` / `stop` /
+ *  lint requests are served and a `progress` heartbeat can go out. Sized for
+ *  roughly 20–50 ms of work on a mid-range laptop (measured at 80,000 against
+ *  the unary power-of-two example at implementation time: ~28–39 ms/slice —
+ *  20,000 measured only ~7–12 ms, too far under the target);
+ *  `docs/execution-model.md (toolchain engines)`. */
+export const TOOLCHAIN_SLICE_BUDGET = 80_000;
