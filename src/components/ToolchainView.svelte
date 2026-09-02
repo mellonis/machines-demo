@@ -63,24 +63,38 @@
   });
   const initialSnippets = untrack(() => loadSnippets(engine));
   let snippets = $state<Snippets>(initialSnippets);
+  const loadedCode = untrack(() => loadCode(engine));
   const initial = untrack(() =>
-    computeInitialBoot({ engine, url: new URL(window.location.href), snippets: initialSnippets, loadedCode: loadCode(engine), initialExample }),
+    computeInitialBoot({ engine, url: new URL(window.location.href), snippets: initialSnippets, loadedCode, initialExample }),
   );
   let selectedExampleId = $state<string>(initial.selectedExampleId);
   let loadedSnippetId = $state<string | null>(initial.loadedSnippetId);
   let code = $state<string>(initial.code);
-  // Kind and seeds follow the same boot tier as the code: example → snippet → localStorage → the example's own.
-  const bootExample = untrack(() => findExample(engine, initial.selectedExampleId) ?? initialExample);
+  // Kind and seeds follow the same boot tier as the code (lib/initialBoot.ts's
+  // computeInitialBoot priority: ?example=<id> matched → ?snippet=<uuid>
+  // matched → localStorage → the first bundled example) — computed directly
+  // from the same inputs computeInitialBoot uses, not inferred by comparing
+  // `initial.code` against an example's text. That comparison is wrong: an
+  // untouched buffer with a panel-edited seed is byte-identical to the
+  // example's code, so it read as "the example tier applied" and silently
+  // discarded the persisted seed (and kind) on every reload.
+  const urlExampleId = untrack(() => {
+    const raw = new URL(window.location.href).searchParams.get('example');
+    return raw !== null && raw !== '' ? raw : null;
+  });
+  const bootTierExample = untrack(() => (urlExampleId !== null ? findExample(engine, urlExampleId) : undefined));
   let kind = $state<BufferKind>(untrack(() => {
+    if (bootTierExample !== undefined) return bootTierExample.kind ?? 'source';
     if (initial.loadedSnippetId !== null) return initialSnippets[initial.loadedSnippetId]?.kind ?? 'source';
-    if (initial.code === bootExample.code) return bootExample.kind ?? 'source';
-    return loadKind(engine) ?? 'source';
+    if (loadedCode !== null) return loadKind(engine) ?? 'source';
+    return initialExample.kind ?? 'source';
   }));
   // Glyph seeds waiting for the first successful Build (the band layouts).
   let pendingSeedGlyphs: ExampleSeed[] | null = untrack(() => {
+    if (bootTierExample !== undefined) return bootTierExample.seeds ?? [];
     if (initial.loadedSnippetId !== null) return initialSnippets[initial.loadedSnippetId]?.seeds ?? [];
-    if (initial.code === bootExample.code) return bootExample.seeds ?? [];
-    return loadSeeds(engine) ?? initialExample.seeds ?? [];
+    if (loadedCode !== null) return loadSeeds(engine) ?? [];
+    return initialExample.seeds ?? [];
   });
   // The other kind's buffer, kept for the page's lifetime so switching back restores it.
   const otherBuffer: Record<BufferKind, string | null> = { source: null, asm: null };

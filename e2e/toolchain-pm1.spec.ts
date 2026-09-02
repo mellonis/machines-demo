@@ -155,28 +155,12 @@ test.describe('PM-1 page', () => {
     expect(await nonBlank(page)).toEqual(['*', '*', '*', '*']);
   });
 
-  test('E-tc-seed-persists: a seed edited on the panel survives a reload once the buffer also diverges from the example', async ({ page }) => {
-    // KNOWN GAP (see task-13-report.md "concerns"): a seed-only edit — the
-    // buffer left byte-identical to the bundled example — does NOT survive
-    // a reload, even though `saveSeeds` faithfully writes it to
-    // `machines-demo:pm1:seeds`. `pendingSeedGlyphs`'s boot-tier init
-    // (ToolchainView.svelte: example → snippet → localStorage → the
-    // example's own) checks `initial.code === bootExample.code` *before*
-    // falling back to `loadSeeds`, so an unchanged buffer always wins that
-    // check and the persisted seed is silently discarded and overwritten
-    // back to the example default. Confirmed directly: the plain sequence
-    // below (seed edit only, no code edit) round-trips to 3 marks, not 4.
-    // This test instead also edits the buffer, which is what actually
-    // engages the localStorage tier — it verifies the persistence
-    // *mechanism* works, not the plain "seed alone persists" contract the
-    // brief describes, which does not currently hold.
-    await setEditorText(page, `${UNARY_INCREMENT}// noop\n`);
-    await page.getByRole('button', { name: /^build$/i }).click();
-    await expect(logLine(page, /^built — 1 band\(s\)/).nth(1)).toBeVisible({ timeout: 10_000 });
-
+  test('E-tc-seed-persists: a seed edited on the panel survives a reload', async ({ page }) => {
     // Select write '*' + move right once, then Apply four times: the first
     // three re-write already-marked cells (no-ops) while walking the head
     // to the first blank past the run; the fourth actually extends it.
+    // The buffer itself is left untouched — this exercises the localStorage
+    // boot tier for seeds independently of the code tier.
     await page.getByRole('button', { name: 'Move right' }).click();
     await page.getByRole('button', { name: 'Write *' }).click();
     for (let i = 0; i < 4; i++) {
