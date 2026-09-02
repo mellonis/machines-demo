@@ -51,6 +51,9 @@ describe('tma', () => {
     expect(styles(tmaParser, '        .row [*, {v}, *] -> Linc{v}')).toEqual(['directive:.row', 'wild:*', 'op:{v}', 'wild:*', 'op:->', 'sym:Linc', 'op:{v}']);
     expect(styles(tmaParser, '        call.m  std::goToNumber #2')).toEqual(['kw:call.m', 'fn:std::goToNumber', 'op:#', 'num:2']);
   });
+  it('T-lang-tma-func-local: local keeps its keyword color after a .func name', () => {
+    expect(styles(tmaParser, '.func main local')).toEqual(['directive:.func', 'fn:main', 'kw:local']);
+  });
 });
 
 describe('LanguageSupport', () => {

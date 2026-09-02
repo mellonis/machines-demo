@@ -1,16 +1,11 @@
 // PM-1 `.pmc` source. Ported from the toolchains' editors/grammars/pmc.tmLanguage.json
 // (keywords, commands, `@calls`, definitions, numeric labels, `::`, `!`).
-import type { StreamParser, StringStream } from '@codemirror/language';
-import { IDENT, tokenTable } from './tokens.ts';
+import type { StreamParser } from '@codemirror/language';
+import { blockComment, IDENT, tokenTable } from './tokens.ts';
 
 export type CState = { inBlock: boolean; lineStart: boolean };
 
 const KEYWORDS = /^(?:use|namespace|volatile|export|as|goto|check|halt|left|right|mark|unmark|debugger)\b/;
-
-function blockComment(stream: StringStream, state: CState): string {
-  if (stream.skipTo('*/')) { stream.match('*/'); state.inBlock = false; } else stream.skipToEnd();
-  return 'cmt';
-}
 
 export const pmcParser: StreamParser<CState> = {
   name: 'pmc',

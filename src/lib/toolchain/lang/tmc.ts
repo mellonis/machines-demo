@@ -1,17 +1,12 @@
 // TM-1 `.tmc` source. Ported from the toolchains' editors/grammars/tmc.tmLanguage.json.
-import type { StreamParser, StringStream } from '@codemirror/language';
-import { IDENT, tokenTable } from './tokens.ts';
+import type { StreamParser } from '@codemirror/language';
+import { blockComment, IDENT, tokenTable } from './tokens.ts';
 import type { CState } from './pmc.ts';
 
 const KEYWORDS = /^(?:alphabet|machine|tape|state|routine|graph|namespace|export|entry|volatile|use|as|goto|call|then|return|stop|halt|graft|bind|write|move|map|with|debugger|writes|preserves)\b/;
 const DECLARING = /^(?:alphabet|routine|graph|namespace|state)\b/;
 
 type TState = CState & { expectName: boolean };
-
-function blockComment(stream: StringStream, state: TState): string {
-  if (stream.skipTo('*/')) { stream.match('*/'); state.inBlock = false; } else stream.skipToEnd();
-  return 'cmt';
-}
 
 export const tmcParser: StreamParser<TState> = {
   name: 'tmc',
