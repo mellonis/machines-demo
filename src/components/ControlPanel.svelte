@@ -22,6 +22,11 @@
     onApply,
   }: Props = $props();
 
+  // The palette repeats past its length, matching TapesStack's belts — a
+  // TM-1 world may declare more bands than the palette has colors.
+  const dotColor = (i: number): string | undefined =>
+    caretColors && caretColors.length > 0 ? caretColors[i % caretColors.length] : undefined;
+
   // Per-tape selection. Lengths follow `alphabets.length`. The $effect below
   // resyncs whenever the tape count changes (new Build with different N).
   let movements = $state<Movement[]>([]);
@@ -106,7 +111,7 @@
         {#if showTapeLabels}
           <span
             class="tape-dot"
-            style={caretColors?.[i] ? `--dot: ${caretColors[i]};` : undefined}
+            style={dotColor(i) ? `--dot: ${dotColor(i)};` : undefined}
             aria-hidden="true"
           ></span>
           <span class="tape-label">Tape {i + 1}</span>

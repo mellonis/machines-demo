@@ -22,11 +22,17 @@
 
   let tapeRefs = $state<Array<ReturnType<typeof Tape> | undefined>>([]);
 
+  // The palette repeats: TM-1 drives up to 16 bands (docs/tmt/isa.md — tape
+  // devices) while the palette holds five, so belt N takes colour N mod
+  // palette-length. Neighbours never collide, and no belt falls back to the
+  // undifferentiated global --head.
+  const colorFor = (i: number): string => caretColors[i % caretColors.length];
+
   // Hard-stop gradient: each tape row is solid color[i]; transitions happen
   // only in the inter-tape gap. Stops are pixel offsets built from the
   // .tapes-stack CSS vars (--cell-h, --tape-gap) so they track breakpoints.
   const headThreadBackground = $derived.by(() => {
-    const colors = caretColors.slice(0, tapeCount);
+    const colors = Array.from({ length: tapeCount }, (_, i) => colorFor(i));
     if (colors.length === 1) return colors[0];
     const stops: string[] = [];
     for (let i = 0; i < colors.length; i++) {
@@ -82,7 +88,7 @@
     <Tape
       bind:this={tapeRefs[i]}
       showCaret={i === tapeCount - 1}
-      caretColor={caretColors[i]}
+      caretColor={colorFor(i)}
     />
   {/each}
   {#if actions}
