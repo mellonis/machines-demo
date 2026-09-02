@@ -16,6 +16,7 @@ declare module 'virtual:lib-versions' {
   export const postVersion: string;
   export const visualsVersion: string;
   export const appVersion: string;
+  export const toolchainsVersion: string;
 }
 
 declare module 'virtual:snippets' {

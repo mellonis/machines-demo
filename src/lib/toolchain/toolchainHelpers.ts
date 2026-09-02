@@ -199,3 +199,13 @@ export function indexStdExports(lang: Lang, text: string): StdExport[] {
 export function findStdDefinition(exports: StdExport[], name: string): StdExport | undefined {
   return exports.find((e) => e.name === name);
 }
+
+/** A codec `Seed` (dense cells from `origin`) as a sparse `SeedTape`. */
+export function seedFromWasm(seed: Seed): SeedTape {
+  const origin = seed.origin ?? 0;
+  const cells = new Map<number, number>();
+  Array.from(seed.cells).forEach((v, i) => {
+    if (v !== 0) cells.set(origin + i, v);
+  });
+  return { cells, head: seed.head ?? 0 };
+}

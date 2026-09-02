@@ -1,13 +1,16 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { turingVersion, postVersion, visualsVersion, appVersion } from 'virtual:lib-versions';
+  import { turingVersion, postVersion, visualsVersion, appVersion, toolchainsVersion } from 'virtual:lib-versions';
   import Landing from './components/Landing.svelte';
   import MachineView from './components/MachineView.svelte';
+  import ToolchainView from './components/ToolchainView.svelte';
   import SettingsPanel from './components/SettingsPanel.svelte';
   import { icons } from './lib/icons.ts';
   import { legacyMachineRewrite, readRouteFromUrl } from './lib/routing.ts';
   import { theme } from './lib/theme.svelte.ts';
-  import type { Route } from './lib/types.ts';
+  import { ENGINES, isToolchainEngine, type Engine, type Route } from './lib/types.ts';
+
+  const TAB_LABELS: Record<Engine, string> = { turing: 'Turing', post: 'Post', pm1: 'PM-1', tm1: 'TM-1' };
 
   // Route lives in the URL path: `/` is the Landing page, `/turing` and
   // `/post` mount the engine-specific MachineView. Anything else falls back
@@ -69,22 +72,14 @@
     ><span class="title-prefix">machines&nbsp;</span>demo</button>
   </div>
   <nav class="tabs">
-    <button
-      type="button"
-      class:active={route.kind === 'engine' && route.engine === 'turing'}
-      aria-current={route.kind === 'engine' && route.engine === 'turing' ? 'page' : undefined}
-      onclick={() => selectRoute({ kind: 'engine', engine: 'turing' })}
-    >
-      Turing
-    </button>
-    <button
-      type="button"
-      class:active={route.kind === 'engine' && route.engine === 'post'}
-      aria-current={route.kind === 'engine' && route.engine === 'post' ? 'page' : undefined}
-      onclick={() => selectRoute({ kind: 'engine', engine: 'post' })}
-    >
-      Post
-    </button>
+    {#each ENGINES as engine (engine)}
+      <button
+        type="button"
+        class:active={route.kind === 'engine' && route.engine === engine}
+        aria-current={route.kind === 'engine' && route.engine === engine ? 'page' : undefined}
+        onclick={() => selectRoute({ kind: 'engine', engine })}
+      >{TAB_LABELS[engine]}</button>
+    {/each}
   </nav>
   <button
     type="button"
@@ -103,7 +98,11 @@
     <Landing />
   {:else}
     {#key route.engine}
-      <MachineView engine={route.engine} />
+      {#if isToolchainEngine(route.engine)}
+        <ToolchainView engine={route.engine} />
+      {:else}
+        <MachineView engine={route.engine} />
+      {/if}
     {/key}
   {/if}
 </main>
@@ -132,6 +131,13 @@
       rel="noopener"
       title="@turing-machine-js/visuals on npm"
     >visuals v{visualsVersion}</a>
+    <span class="sep" aria-hidden="true">·</span>
+    <a
+      href="https://github.com/mellonis/machine-toolchains"
+      target="_blank"
+      rel="noopener"
+      title="machine-toolchains on GitHub"
+    >toolchains v{toolchainsVersion}</a>
   </span>
   <a
     class="repo-link"

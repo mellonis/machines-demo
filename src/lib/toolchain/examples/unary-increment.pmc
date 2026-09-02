@@ -2,6 +2,7 @@
 // The head starts on the first mark; the run grows by one on the right.
 main() {
     @std::goToEnd();
+    right;
     mark;
     @std::goToBegin();
 }

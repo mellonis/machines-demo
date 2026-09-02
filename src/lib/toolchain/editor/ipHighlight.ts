@@ -36,12 +36,18 @@ export function ipLineOf(state: EditorState): number | null {
   return pos < 0 ? null : state.doc.lineAt(pos).number;
 }
 
-export function showIp(view: EditorView, line: number | null): void {
-  view.dispatch({ effects: setIpLine.of(line) });
-  if (line === null || line < 1 || line > view.state.doc.lines) return;
+/** Centers `line` in the scroller. Shared with go-to-definition, which
+ *  scrolls without decorating. Out-of-range lines are a no-op. */
+export function scrollToLine(view: EditorView, line: number): void {
+  if (line < 1 || line > view.state.doc.lines) return;
   const pos = view.state.doc.line(line).from;
   const block = view.lineBlockAt(pos);
   const scroller = view.scrollDOM;
   const top = block.top - scroller.clientHeight / 2 + block.height / 2;
   scroller.scrollTop = Math.max(0, top);
+}
+
+export function showIp(view: EditorView, line: number | null): void {
+  view.dispatch({ effects: setIpLine.of(line) });
+  if (line !== null) scrollToLine(view, line);
 }

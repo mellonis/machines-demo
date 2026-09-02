@@ -2,8 +2,8 @@
   import CodeMirror from 'svelte-codemirror-editor';
   import { javascript } from '@codemirror/lang-javascript';
   import { oneDark } from '@codemirror/theme-one-dark';
-  import { EditorState, type Extension } from '@codemirror/state';
-  import { EditorView } from '@codemirror/view';
+  import type { Extension } from '@codemirror/state';
+  import type { EditorView } from '@codemirror/view';
   import { completionExtensions } from '../lib/completions/index.ts';
   import { argCountLinter } from '../lib/completions/lint/argCount.ts';
   import { crossRefLinter } from '../lib/completions/lint/crossRef.ts';
@@ -68,7 +68,6 @@
     }
     base.push(...extra);
     if (!readOnly) base.push(diagnosticsCounterPlugin(counter));
-    if (readOnly) base.push(EditorState.readOnly.of(true), EditorView.editable.of(false));
     return theme.resolved === 'dark' ? [oneDark, ...base] : base;
   });
 </script>
@@ -77,7 +76,18 @@
   {#if resetVisible && !readOnly}
     <IconButton icon="resetCode" title={resetTitle} onClick={onReset} />
   {/if}
-  <CodeMirror bind:value={code} lang={cmLang} {extensions} onready={onReady} />
+  <!-- `readonly` / `editable` go through the wrapper's own props, not our
+       `extensions` array: it prepends `EditorView.editable.of(true)` and
+       `EditorState.readOnly.of(false)` to every configuration, and both
+       facets take the FIRST value, so anything we appended would lose. -->
+  <CodeMirror
+    bind:value={code}
+    lang={cmLang}
+    {extensions}
+    readonly={readOnly}
+    editable={!readOnly}
+    onready={onReady}
+  />
   {#if !readOnly}
     <DiagnosticsCounterComponent {counter} />
   {/if}

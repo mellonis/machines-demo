@@ -25,10 +25,14 @@ const libVersions = (): Plugin => ({
     const post = pkgVersion('@post-machine-js/machine');
     const visuals = pkgVersion('@turing-machine-js/visuals');
     const app = appVersion();
+    // The vendored wasm bundle carries the toolchains release it was built
+    // from; the footer surfaces it next to the npm library versions.
+    const toolchains = JSON.parse(readFileSync('./vendor/mtc-wasm/manifest.json', 'utf-8')).toolchains_version as string;
     return `export const turingVersion = ${JSON.stringify(turing)};
 export const postVersion = ${JSON.stringify(post)};
 export const visualsVersion = ${JSON.stringify(visuals)};
 export const appVersion = ${JSON.stringify(app)};
+export const toolchainsVersion = ${JSON.stringify(toolchains)};
 `;
   },
 });

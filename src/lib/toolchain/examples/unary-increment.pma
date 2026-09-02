@@ -1,15 +1,16 @@
 .func main
         call    std::goToEnd
+        rgt
         wr      1
         call    std::goToBegin
         stp
 .func std::goToEnd
-L0009:  rgt
-        jm.s    L0009
+L000A:  rgt
+        jm.s    L000A
         lft
         ret
 .func std::goToBegin
-L000F:  lft
-        jm.s    L000F
+L0010:  lft
+        jm.s    L0010
         rgt
         ret

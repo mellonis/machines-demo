@@ -3,7 +3,7 @@ import { VIEWPORT_WIDTH } from '../caps.ts';
 import { loadMtcForTests } from './testModule.ts';
 import {
   applyCommand, buildLineMap, cellAt, findStdDefinition, headDelta, indexStdExports,
-  layoutsEqual, seedFromGlyphs, seedFromSnapshot, seedToGlyphs, seedToLibTape, seedToWasm, snapshotToLibTape,
+  layoutsEqual, seedFromGlyphs, seedFromSnapshot, seedFromWasm, seedToGlyphs, seedToLibTape, seedToWasm, snapshotToLibTape,
 } from './toolchainHelpers.ts';
 import type { SeedTape, TapeSnapshot } from './types.ts';
 
@@ -31,6 +31,13 @@ describe('seeds', () => {
     const seed: SeedTape = { cells: new Map([[5, 1], [7, 1]]), head: 6 };
     expect(seedToWasm(seed)).toEqual({ cells: [1, 0, 1], origin: 5, head: 6 });
     expect(seedToWasm({ cells: new Map(), head: 2 })).toEqual({ cells: [], origin: 2, head: 2 });
+  });
+
+  it('T-seed-from-wasm: a codec Seed becomes a sparse SeedTape with absolute positions', () => {
+    const s = seedFromWasm({ cells: new Uint8Array([2, 0, 1]), origin: 4, head: 5 });
+    expect([...s.cells.entries()]).toEqual([[4, 2], [6, 1]]);
+    expect(s.head).toBe(5);
+    expect(seedFromWasm({ cells: [1] }).head).toBe(0);
   });
 
   it('T-seed-from-snapshot: blanks are dropped, head kept', () => {
