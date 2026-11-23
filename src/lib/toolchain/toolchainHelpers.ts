@@ -228,7 +228,11 @@ export function resolveLoc(map: LineMap, addr: number): AddrLoc | null {
  * The forward resolution is what makes a call stop once: a function's
  * line-less `ent` reports its first statement's line (the same rule the ip
  * highlight displays), so stepping into a callee lands on that statement
- * rather than pausing on the entry and again on the statement.
+ * rather than pausing on the entry and again on the statement. The session's
+ * own entry is the one exception, and the caller enforces it: nothing has
+ * retired yet, so the first Step starts from no position at all and stops on
+ * the first statement — with the key alone the entry would share that
+ * statement's position and run it (`workerCore.ts`, `sourceStep`).
  */
 export function positionKey(map: LineMap, addr: number): string | null {
   const loc = resolveLoc(map, addr);

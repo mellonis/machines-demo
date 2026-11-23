@@ -150,11 +150,10 @@ test.describe('PM-1 page', () => {
 
   test('E-tc-step: Step pauses, highlights the ip line, and Continue runs to the end', async ({ page }) => {
     await page.getByRole('button', { name: /^step$/i }).click();
-    // main's entry instruction (the first thing to retire) carries no source
-    // line of its own — it resolves forward to the function's first
-    // statement, so step 1 already names a real line, not `:?`. That shared
-    // position is also why the count is not pinned: a source-level Step
-    // retires the entry together with the statement it resolves to.
+    // The session's first Step starts from no position at all: the line-less
+    // entry `ent` retires alone and the Step stops on the first statement, so
+    // step 1 already names a real line, not `:?`, and the call on it has not
+    // run yet.
     await expect(logLine(page, /^step \d+: main\.pmc:\d+ main/)).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('.cm-ip-line')).toHaveCount(1);
     await expect(page.getByRole('button', { name: /^continue$/i })).toBeVisible();
@@ -165,14 +164,14 @@ test.describe('PM-1 page', () => {
   test('E-tc-step-into-std: stepping into std::goToEnd switches to the stdlib tab with the ip line highlighted', async ({ page }) => {
     // Step is one source-level step — instructions retire until the resolved
     // position changes (docs/execution-model.md (toolchain engines)); no
-    // `paused` line is logged in step mode. The call into std::goToEnd ends
-    // the Step that began on the call line, and the callee's line-less entry
-    // resolves forward to its first statement, so the step lands inside std
-    // rather than on the frame boundary. The tab switch is driven by the ip
-    // *after* the step while the numbered std.pmc log line names where the
-    // ip was *before* it, so the tab leads the log line by one Step
-    // (structural): poll a bounded number of Step clicks for the numbered
-    // line and only then assert the tab.
+    // `paused` line is logged in step mode. The first Step stops on the call
+    // line; the Step after it runs the call and ends inside std::goToEnd,
+    // whose line-less entry resolves forward to its first statement, so it
+    // lands on that statement rather than on the frame boundary. The tab
+    // switch is driven by the ip *after* the step while the numbered std.pmc
+    // log line names where the ip was *before* it, so the tab leads the log
+    // line by one Step (structural): poll a bounded number of Step clicks for
+    // the numbered line and only then assert the tab.
     const wanted = /^step \d+: std\.pmc:\d+ std::goToEnd/;
     for (let i = 0; i < 8; i++) {
       await page.getByRole('button', { name: /^step$/i }).click();

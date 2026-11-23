@@ -22,20 +22,28 @@ test.describe('TM-1 page', () => {
 
   test('E-tc-tm-step-is-one-transition: a Step advances one `.tmc` transition, logging one line per click', async ({ page }) => {
     // Source-level stepping (docs/execution-model.md (toolchain engines)):
-    // the read / match / dispatch instructions behind `entry state inc {`
-    // retire inside the Step that leaves that line, so no intermediate
+    // the first Step retires only the line-less entry `ent` and stops on the
+    // first source line; the read / match / dispatch instructions behind
+    // `entry state inc {` retire inside the next Step, so no intermediate
     // instruction gets a `step N:` line of its own.
     const stepLines = logLine(page, /^step \d+:/);
     await page.getByRole('button', { name: /^step$/i }).click();
     await expect(stepLines).toHaveCount(1);
-    // Step 1 leaves the state line and lands on the rule that matched.
+    // Step 1 lands on the state line — nothing has run yet.
     await expect(page.locator('.cm-ip-line')).toHaveCount(1);
-    await expect(page.locator('.cm-ip-line')).toContainText('->');
-    expect(await nonBlank(page)).toEqual(['0', '1', '1']); // the rule has not run yet
+    await expect(page.locator('.cm-ip-line')).toContainText('entry state inc');
+    expect(await nonBlank(page)).toEqual(['0', '1', '1']);
 
     await page.getByRole('button', { name: /^step$/i }).click();
     await expect(stepLines).toHaveCount(2);
-    // Step 2 ran the whole transition — the head's cell was rewritten and
+    // Step 2 leaves the state line and lands on the rule that matched; the
+    // transition has not run yet.
+    await expect(page.locator('.cm-ip-line')).toContainText('->');
+    expect(await nonBlank(page)).toEqual(['0', '1', '1']);
+
+    await page.getByRole('button', { name: /^step$/i }).click();
+    await expect(stepLines).toHaveCount(3);
+    // Step 3 ran the whole transition — the head's cell was rewritten and
     // the head moved — and the ip is back on the state line.
     expect(await nonBlank(page)).toEqual(['0', '1', '0']);
     await expect(page.locator('.cm-ip-line')).toContainText('entry state inc');

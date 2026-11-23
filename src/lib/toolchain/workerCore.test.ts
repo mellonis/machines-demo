@@ -190,11 +190,11 @@ describe('pump loops', () => {
     await h.send({ type: 'start', seeds: [{ cells: [1, 1, 1], head: 0 }], limits: {}, breakpoints: [], mode: 'step' });
     const s1 = ofType(h, 'stepped')[0];
     expect(s1.retired).toBe(true);
-    // Two instructions: main's line-less `ent` resolves forward to the first
-    // statement, so it shares that statement's position and retires with it.
-    expect(s1.stats.steps).toBe(2);
+    // Nothing has run yet, so the first Step retires only main's line-less
+    // `ent` and stops on the first statement — it does not execute it.
+    expect(s1.stats.steps).toBe(1);
     await h.send({ type: 'resume', mode: 'step' });
-    expect(ofType(h, 'stepped')[1].stats.steps).toBe(3);
+    expect(ofType(h, 'stepped')[1].stats.steps).toBe(2);
   });
 
   // Source-level stepping (`docs/execution-model.md (toolchain engines)`):
@@ -213,7 +213,7 @@ describe('pump loops', () => {
 
     const steps = ofType(h, 'stepped');
     expect(steps.length).toBeGreaterThan(1);
-    let position = positionKey(map, 0); // where the run begins: main's entry
+    let position: string | null = null; // nothing has retired yet: no position
     let retiredSoFar = 0;
     let spans = 0;
     for (const s of steps) {
@@ -232,12 +232,35 @@ describe('pump loops', () => {
     expect(Array.from(f.snapshots[0].cells)).toEqual([2, 1, 1]); // 0 1 1 → 1 0 0
   });
 
-  it('T-pump-step-source-level-pmc-unchanged: a `.pmc` statement is one instruction, so each Step still retires one — bar the entry Step, which folds the line-less `ent` into the first statement', async () => {
+  it('T-pump-step-source-level-pmc-unchanged: a `.pmc` statement is one instruction, so every Step after the entry retires exactly one', async () => {
     const h = await harness();
     await h.send({ type: 'build', lang: 'pmc', code: PMC_INC });
     await h.send({ type: 'start', seeds: [{ cells: [1, 1, 1], head: 0 }], limits: {}, breakpoints: [], mode: 'step' });
     for (let i = 0; i < 4; i++) await h.send({ type: 'resume', mode: 'step' });
-    expect(ofType(h, 'stepped').map((s) => s.stats.steps)).toEqual([2, 3, 4, 5, 6]);
+    expect(ofType(h, 'stepped').map((s) => s.stats.steps)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it('T-pump-step-entry-floor: the first Step of a session stops on the first source line, even when that line is a call', async () => {
+    const h = await harness();
+    await h.send({ type: 'build', lang: 'pmc', code: PMC_STD });
+    const b = ofType(h, 'built')[0];
+    if (!b.ok) throw new Error('build failed');
+    await h.send({ type: 'start', seeds: [{ cells: [1, 1, 1], head: 0 }], limits: {}, breakpoints: [], mode: 'step' });
+
+    // The line-less `ent` retires alone: nothing has run yet, so the Step
+    // must stop on the first statement (the call) instead of resolving the
+    // entry forward to it and executing it on the way into the callee.
+    const first = ofType(h, 'stepped')[0];
+    expect(first.stats.steps).toBe(1);
+    expect(first.ip).toBe(b.lineMap.userLineToAddr[2]); // `@std::goToEnd();`
+    expect(positionKey(b.lineMap, first.ip)).toBe('user:main:2');
+
+    // The next Step runs the call and lands on the callee's first statement
+    // — one stop, not one at the frame boundary and another at the line.
+    await h.send({ type: 'resume', mode: 'step' });
+    const second = ofType(h, 'stepped')[1];
+    const calleeFirst = b.lineMap.addrToLoc.find((l) => l.file === 'std' && l.line !== null)!;
+    expect(positionKey(b.lineMap, second.ip)).toBe(`std:${calleeFirst.fn}:${calleeFirst.line}`);
   });
 
   it('T-pump-step-interrupted-by-breakpoint: a breakpoint inside a transition\'s instruction run ends the Step as a pause, not a stepped', async () => {
@@ -245,14 +268,17 @@ describe('pump loops', () => {
     await h.send({ type: 'build', lang: 'tmc', code: BINARY_INCREMENT });
     const b = ofType(h, 'built')[0];
     if (!b.ok) throw new Error('build failed');
-    // The last instruction of line 6's run — the Step is already under way
-    // (the entry and the earlier instructions of the same line retired)
-    // when the breakpoint fires.
+    // The last instruction of line 6's run — the entry Step lands on line 6
+    // without running it, so the Step that meets the breakpoint is the next
+    // one, already under way (the earlier instructions of the same line
+    // retired) when the breakpoint fires.
     const run = b.lineMap.addrToLoc.filter((l) => l.file === 'user' && l.line === 6);
     const addr = run[run.length - 1].addr;
     await h.send({ type: 'setDebug', on: true });
     await h.send({ type: 'start', seeds: [{ cells: [1, 2, 2], head: 2 }], limits: {}, breakpoints: [addr], mode: 'step' });
-    expect(ofType(h, 'stepped')).toHaveLength(0);
+    expect(ofType(h, 'stepped')).toHaveLength(1); // the entry Step, on line 6
+    await h.send({ type: 'resume', mode: 'step' });
+    expect(ofType(h, 'stepped')).toHaveLength(1); // the resume paused instead
     const p = ofType(h, 'paused')[0];
     expect(p.cause).toEqual({ breakpoint: addr });
     expect(p.ip).toBe(addr);
@@ -260,7 +286,9 @@ describe('pump loops', () => {
 
   it('T-pump-step-cap: a step whose position never changes gives up after TOOLCHAIN_SLICE_BUDGET retirements', async () => {
     let pumps = 0;
-    const session = fakeSession({ pump: () => { pumps++; return { kind: 'budgetSpent' }; } });
+    // A mid-run session (something already retired) whose ip never moves: the
+    // runaway guard is the only thing that can end the Step.
+    const session = fakeSession({ pump: () => { pumps++; return { kind: 'budgetSpent' }; }, stats: () => ({ ...fakeStats(), steps: 1 }) });
     // One instruction, one line, an ip that never moves — a line that jumps
     // to itself. Only the cap can end the step.
     const program = fakeProgram(session, {

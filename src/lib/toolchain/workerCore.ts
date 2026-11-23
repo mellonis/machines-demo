@@ -214,7 +214,13 @@ export class ToolchainCore {
    * is nothing left to post.
    */
   private sourceStep(s: Session, gen: number): boolean | null {
-    const start = this.positionAt(s.ip);
+    // A session's first Step starts from no position at all: nothing has
+    // retired yet, so the line-less entry `ent` must not be forward-resolved
+    // into the first statement — doing that would begin the Step already on
+    // that line and run it, so a first statement that is a call would land in
+    // the callee without ever stopping on the call itself. Every later Step
+    // compares resolved positions, which is what keeps a call one stop.
+    const start = s.stats().steps === 0 ? null : this.positionAt(s.ip);
     let retired = 0;
     for (;;) {
       if (this.generation !== gen) return null; // superseded by a build/start — s may be freed
