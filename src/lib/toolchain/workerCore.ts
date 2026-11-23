@@ -4,7 +4,7 @@
 // contract in the toolchains' `docs/wasm.md (sessions)`.
 import type { Program, Session } from '$mtc';
 import { PROGRESS_INTERVAL_MS, TOOLCHAIN_SLICE_BUDGET } from '../caps.ts';
-import { buildLineMap, positionKey } from './toolchainHelpers.ts';
+import { buildLineMap, positionKey, stripStdRoutines } from './toolchainHelpers.ts';
 import type { DriveMode, Lang, LineMap, PauseCause, ToolchainRequest, ToolchainResponse } from './types.ts';
 
 export type MtcModule = Pick<typeof import('$mtc'), 'Toolchain'>;
@@ -53,7 +53,7 @@ export class ToolchainCore {
         }
         case 'disassemble':
           if (!this.program) return this.deps.post({ type: 'error', message: 'disassemble: nothing built yet' });
-          return this.deps.post({ type: 'disassembled', text: this.program.disassembly() });
+          return this.deps.post({ type: 'disassembled', text: stripStdRoutines(this.program.disassembly()) });
         case 'decodeTapeBlock': {
           if (!this.program) return this.deps.post({ type: 'error', message: 'load tape block: nothing built yet' });
           const block = this.mod.Toolchain.decodeTapeBlock(req.bytes);

@@ -1,9 +1,9 @@
 {
-  "tag": "v0.5.0",
+  "tag": "v0.6.0-dev",
   "files": {
-    "mtc_wasm_bg.wasm": "37e4747f6e7033f65c06d6e5f70149eee5280afe78f04b09426e10af47c619a3",
-    "mtc_wasm.js": "c26e045c796496d708dfd09f1247d3e848227c7c02799ee5dee61efd8ed978f2",
-    "mtc_wasm.d.ts": "4c4840214894fb69c5097aed2dc2d2f0c679aa798735382f04c3917aa2d2b0b4",
-    "manifest.json": "9eb114a06cbe6e788212916d1126437e2d715876b496f51e7ef3f5b73a1851b6"
+    "mtc_wasm_bg.wasm": "3cbadb0ef2d87591bb35b63d9a5480e4684af03c8282f7ce801eb434ba5fd4ea",
+    "mtc_wasm.js": "0fb94fab2df1ab288555d68e26a553dbda2c05518edd34799f34a1fa9942efb4",
+    "mtc_wasm.d.ts": "9ae00e6df34ae70a79fdb83a26bd70ad759501a925b959d04cc07908b3cfabf6",
+    "manifest.json": "091b678fd0f104b40475643406a9b90bc141c5cee6565a410086260ec60e4da4"
   }
 }

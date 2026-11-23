@@ -8,6 +8,7 @@ import type { Program, RunStats, Session } from '$mtc';
 import type { ToolchainRequest, ToolchainResponse } from './types.ts';
 
 const PMC_INC = 'main() {\n    1: right(2);\n    2: check(1, 3);\n    3: mark(4);\n    4: left(5);\n    5: check(4, 6);\n    6: right(!);\n}\n';
+const PMC_STD = 'main() {\n    @std::goToEnd();\n    right;\n}\n';
 const PMC_BRK = 'main() {\n    right;\n    debugger;\n    mark;\n}\n';
 const TMC_REPLACE_B = "alphabet ab { '_', 'a', 'b' }\n\nmachine {\n  tape main: ab;\n\n  entry state scan {\n    ['b'] -> write ['a'] move [>] goto scan;\n    ['a'] ->             move [>] goto scan;\n    ['_'] -> stop;\n  }\n}\n";
 
@@ -148,6 +149,31 @@ describe('build / simple requests', () => {
     const again = mod.Toolchain.build('tma', (d as { text: string }).text, undefined);
     expect(again.ok).toBe(true);
     if (again.ok) again.program.free();
+  });
+
+  it('T-core-disassemble-roundtrip-std: a std-using image reassembles to the same bytes', async () => {
+    const h = await harness();
+    await h.send({ type: 'build', lang: 'pmc', code: PMC_STD });
+    await h.send({ type: 'disassemble' });
+    const d = last(h);
+    expect(d.type).toBe('disassembled');
+    const text = (d as { text: string }).text;
+    // A linked image carries the std routines' bodies; 0.6.0 refuses a user
+    // definition of a reached std symbol, so the buffer shows the user's part
+    // only and the std library supplies the rest at link time.
+    expect(text).not.toContain('.func std::');
+    const mod = await loadMtcForTests();
+    const again = mod.Toolchain.build('pma', text, undefined);
+    expect(again.ok).toBe(true);
+    if (again.ok) {
+      const src = mod.Toolchain.build('pmc', PMC_STD, undefined);
+      expect(src.ok).toBe(true);
+      if (src.ok) {
+        expect(Array.from(again.program.bytes())).toEqual(Array.from(src.program.bytes()));
+        src.program.free();
+      }
+      again.program.free();
+    }
   });
 
   it('T-core-disassemble-without-build: error, not fatal', async () => {

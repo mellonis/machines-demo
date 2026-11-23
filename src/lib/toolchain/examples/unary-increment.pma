@@ -4,13 +4,3 @@
         wr      1
         call    std::goToBegin
         stp
-.func std::goToEnd
-L000A:  rgt
-        jm.s    L000A
-        lft
-        ret
-.func std::goToBegin
-L0010:  lft
-        jm.s    L0010
-        rgt
-        ret

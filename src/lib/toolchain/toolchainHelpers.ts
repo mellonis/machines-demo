@@ -6,6 +6,24 @@ import type { Program } from '$mtc';
 import type { Command } from '../types.ts';
 import type { AddrLoc, ExampleSeed, Lang, LineMap, Seed, SeedTape, TapeLayout, TapeSnapshot } from './types.ts';
 
+/**
+ * Drops the standard library's routine bodies from a disassembled image.
+ * The link embeds them, but 0.6.0 refuses a user definition of a reached
+ * `std` symbol (`duplicate symbol ...: defined by user and by std`), so an
+ * asm buffer that kept them could not be rebuilt. The std tab still shows
+ * the library, and the linker supplies it again on Build — byte-identical,
+ * since the stripped text is the same image minus the embedded copy.
+ */
+export function stripStdRoutines(text: string): string {
+  const lines: string[] = [];
+  let dropping = false;
+  for (const line of text.split('\n')) {
+    if (line.startsWith('.func ')) dropping = line.startsWith('.func std::');
+    if (!dropping) lines.push(line);
+  }
+  return lines.join('\n');
+}
+
 export function glyphIndex(glyphs: readonly string[], glyph: string): number {
   const i = glyphs.indexOf(glyph);
   if (i === -1) {
